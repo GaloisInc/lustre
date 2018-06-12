@@ -1,0 +1,28 @@
+name:                language-lustre
+version:             0.1.0.0
+synopsis:            Tools for working with the Lustre language>
+description:         Tools for working with the Lustre language.
+license:             ISC
+license-file:        LICENSE
+author:              Iavor Diatchki
+maintainer:          iavor.diatchki@gmail.com
+category:            Development
+build-type:          Simple
+extra-source-files:  ChangeLog.md
+cabal-version:       >=1.10
+
+library
+  exposed-modules:     Language.Lustre.AST,
+                       Language.Lustre.Lexer
+  build-depends:       base <4.12,
+                       alex-tools >=0.4,
+                       text, array
+  build-tools:         alex, happy
+  default-language:    Haskell2010
+  ghc-options:         -Wall
+
+test-suite lexer
+  type: exitcode-stdio-1.0
+  main-is: tests/Lexer.hs
+  build-depends: base, text, language-lustre
+
