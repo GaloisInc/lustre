@@ -78,7 +78,7 @@ data Token =
 
   | TokEOF
   | TokError
-    deriving Show
+    deriving (Eq,Show)
 
 lexeme' :: Token -> Action () [Lexeme Token]
 lexeme' t = lexeme $! t
@@ -87,7 +87,7 @@ integerAtBase :: Integer -> Text -> Integer
 integerAtBase base txt = if sgn == "-" then negate aval else aval
   where
   aval = Text.foldl' addDig 0 digs
-  (sgn,txt0) = Text.span (\x -> x == '+' || x == '-') (Text.map toLower txt)
+  (sgn,txt0) = splitSign (Text.map toLower txt)
   digs = Text.dropWhile (\x -> x == '0' || x == 'x' || x == 'o') txt0
 
   addDig s x = s * base + (if y < a then y - z else 10 + (y - a))
@@ -96,6 +96,9 @@ integerAtBase base txt = if sgn == "-" then negate aval else aval
     a = val 'a'
     z = val '0'
     val = fromIntegral . fromEnum
+
+splitSign :: Text -> (Text,Text)
+splitSign = Text.span (\x -> x == '+' || x == '-')
 
 floating :: Integer -> Text -> Rational
 floating fb txt =
@@ -113,11 +116,14 @@ floating fb txt =
   (exSym,exVal,dbase) = if fb == 10 then ("e",10,10) else ("p",2,16)
 
   parseBase base =
-    case Text.splitOn "." base of
-      [x]    -> fromInteger (integerAtBase dbase x)
-      [x,y]  -> fromInteger (integerAtBase dbase x) +
-               (integerAtBase dbase y) % (fromInteger dbase ^ Text.length y)
-      _ -> error "[bug] unexpected floating number base"
+    let (sign,rest) = splitSign base
+        addSign = if sign == "-" then negate else id
+    in addSign
+     $ case Text.splitOn "." rest of
+         [x]    -> fromInteger (integerAtBase dbase x)
+         [x,y]  -> fromInteger (integerAtBase dbase x) + 
+                   integerAtBase dbase y % dbase ^ Text.length y
+         _ -> error "[bug] unexpected floating number base"
 
 
 alexGetByte :: AlexInput -> Maybe (Word8,AlexInput)
