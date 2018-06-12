@@ -6,6 +6,9 @@ import Data.Maybe(mapMaybe)
 import System.Exit(exitFailure, exitSuccess)
 import Language.Lustre.Lexer
 
+type Test = (Text, Text, [Token])
+
+tests :: [Test]
 tests =
   [ test "Identifiers"
           "Hello A::B"
@@ -37,8 +40,7 @@ main = do mapM_ reportProblem problems
        putStrLn ("*** Lexed:    " ++ show ls)
 
 
-findProblem :: (Text, Text, [Token]) ->
-                Maybe (Text, [Token], [Token])
+findProblem :: Test -> Maybe (Text, [Token], [Token])
 findProblem (nm,txt,expected)
   | lexed == expected = Nothing
   | otherwise         = Just (nm, lexed, expected)
