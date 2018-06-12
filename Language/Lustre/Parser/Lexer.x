@@ -2,7 +2,7 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
-module Language.Lustre.Lexer
+module Language.Lustre.Parser.Lexer
   ( lexer
   , Lexeme(..)
   , Token(..)
@@ -23,7 +23,6 @@ import AlexTools
 $letter         = [a-zA-Z_]
 $octdigit       = 0-7
 $digit          = 0-9
-$digitNZ        = 1-9
 $hexdigit       = [0-9a-fA-F]
 
 @ident          = $letter ($letter | $digit)*
@@ -49,14 +48,62 @@ $hexdigit       = [0-9a-fA-F]
                 | (@sign? "0x" @digs16? "." @digs16) @exp16?
 
 @line_comment   = "--".*
-@block_comment  = "/*" (. | \n)* "*/"
+@block_comment  = "(*" (. | \n)* "*)"
 :-
 
 $white+         { return [] }
 @line_comment   { return [] }
 @block_comment  { return [] }
 
-"::"            { lexeme TokColon }
+
+"and"           { lexeme TokKwAnd }
+"nor"           { lexeme TokKwNor }
+"current"       { lexeme TokKwCurrent }
+"div"           { lexeme TokKwDiv }
+"else"          { lexeme TokKwElse }
+"mod"           { lexeme TokKwMod }
+"not"           { lexeme TokKwNot }
+"or"            { lexeme TokKwOr }
+"pre"           { lexeme TokKwPre }
+"when"          { lexeme TokKwWhen }
+"xor"           { lexeme TokKwXor }
+"int"           { lexeme TokKwInt }
+"real"          { lexeme TokKwReal }
+"if"            { lexeme TokKwIf }
+"then"          { lexeme TokKwThen }
+"with"          { lexeme TokKwWith }
+"step"          { lexeme TokKwStep }
+
+"::"            { lexeme TokColonColon }
+","             { lexeme TokComma }
+";"             { lexeme TokSemi }
+"."             { lexeme TokDot }
+".."            { lexeme TokDotDot }
+"("             { lexeme TokOpenParen }
+")"             { lexeme TokCloseParen }
+"<<"            { lexeme TokOpenTT }
+">>"            { lexeme TokCloseTT }
+"["             { lexeme TokOpenBracket }
+"]"             { lexeme TokCloseBracket }
+"{"             { lexeme TokOpenBrace }
+"}"             { lexeme TokCloseBrace }
+
+"->"            { lexeme TokRightArrow }
+"=>"            { lexeme TokFatRightArrow }
+"<"             { lexeme TokLt }
+"<="            { lexeme TokLeq }
+"="             { lexeme TokEq }
+">="            { lexeme TokGeq }
+">"             { lexeme TokGt }
+"<>"            { lexeme TokNotEq }
+"+"             { lexeme TokPlus }
+"-"             { lexeme TokMinus }
+"*"             { lexeme TokTimes }
+"/"             { lexeme TokDiv }
+"%"             { lexeme TokMod }
+"#"             { lexeme TokHash }
+"|"             { lexeme TokBar }
+"^"             { lexeme TokHat }
 
 @ident          { lexeme TokIdent }
 @num8           { lexeme' . TokInt  . integerAtBase 8  =<< matchText }
@@ -64,17 +111,60 @@ $white+         { return [] }
 @num16          { lexeme' . TokInt  . integerAtBase 16 =<< matchText }
 @float10        { lexeme' . TokReal . floating 10 =<< matchText }
 @float16        { lexeme' . TokReal . floating 16 =<< matchText }
+
 .               { lexeme TokError }
+
 
 {
 
 data Token =
     TokIdent
-
   | TokInt !Integer
   | TokReal !Rational
 
-  | TokColon
+  | TokKwIf | TokKwThen | TokKwElse
+  | TokKwWith
+
+  | TokKwCurrent
+  | TokKwPre
+  | TokKwWhen
+
+  | TokKwAnd
+  | TokKwNot
+  | TokKwOr
+  | TokKwXor
+  | TokKwNor
+
+  | TokKwDiv
+  | TokKwMod
+
+  | TokKwInt
+  | TokKwReal
+
+  | TokKwStep
+
+  | TokColonColon
+  | TokComma
+  | TokSemi
+  | TokDot
+  | TokDotDot
+
+  | TokOpenParen
+  | TokCloseParen
+  | TokOpenTT
+  | TokCloseTT
+  | TokOpenBracket
+  | TokCloseBracket
+  | TokOpenBrace
+  | TokCloseBrace
+
+  | TokRightArrow
+  | TokFatRightArrow
+  | TokLt | TokLeq | TokEq | TokGeq | TokGt | TokNotEq
+  | TokPlus | TokMinus | TokTimes | TokDiv | TokMod
+  | TokHash
+  | TokHat
+  | TokBar
 
   | TokEOF
   | TokError

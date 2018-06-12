@@ -4,7 +4,7 @@ module Main(main) where
 import Data.Text(Text)
 import Data.Maybe(mapMaybe)
 import System.Exit(exitFailure, exitSuccess)
-import Language.Lustre.Lexer
+import Language.Lustre.Parser.Lexer
 
 type Test = (Text, Text, [Token])
 
