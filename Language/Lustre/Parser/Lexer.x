@@ -69,6 +69,7 @@ $white+         { return [] }
 "xor"           { lexeme TokKwXor }
 "int"           { lexeme TokKwInt }
 "real"          { lexeme TokKwReal }
+"bool"          { lexeme TokKwBool }
 "if"            { lexeme TokKwIf }
 "then"          { lexeme TokKwThen }
 "with"          { lexeme TokKwWith }
@@ -76,7 +77,15 @@ $white+         { return [] }
 "fby"           { lexeme TokKwFby }
 "true"          { lexeme (TokBool True) }
 "false"         { lexeme (TokBool False) }
+"unsafe"        { lexeme TokKwUnsafe }
+"extern"        { lexeme TokKwExtern }
+"node"          { lexeme TokKwNode }
+"function"      { lexeme TokKwFunction }
+"returns"       { lexeme TokKwReturns }
+"type"          { lexeme TokKwType }
+"const"         { lexeme TokKwConst }
 
+":"             { lexeme TokColon }
 "::"            { lexeme TokColonColon }
 ","             { lexeme TokComma }
 ";"             { lexeme TokSemi }
@@ -92,7 +101,7 @@ $white+         { return [] }
 "}"             { lexeme TokCloseBrace }
 
 "->"            { lexeme TokRightArrow }
-"=>"            { lexeme TokFatRightArrow }
+"=>"            { lexeme TokImplies }
 "<"             { lexeme TokLt }
 "<="            { lexeme TokLeq }
 "="             { lexeme TokEq }
@@ -128,6 +137,15 @@ data Token =
   | TokKwIf | TokKwThen | TokKwElse
   | TokKwWith
 
+  | TokKwExtern
+  | TokKwUnsafe
+  | TokKwNode
+  | TokKwFunction
+  | TokKwReturns
+
+  | TokKwType
+  | TokKwConst
+
   | TokKwCurrent
   | TokKwPre
   | TokKwWhen
@@ -144,10 +162,12 @@ data Token =
 
   | TokKwInt
   | TokKwReal
+  | TokKwBool
 
   | TokKwStep
   | TokKwFby
 
+  | TokColon
   | TokColonColon
   | TokComma
   | TokSemi
@@ -164,7 +184,7 @@ data Token =
   | TokCloseBrace
 
   | TokRightArrow
-  | TokFatRightArrow
+  | TokImplies
   | TokLt | TokLeq | TokEq | TokGeq | TokGt | TokNotEq
   | TokPlus | TokMinus | TokTimes | TokDiv | TokMod
   | TokHash

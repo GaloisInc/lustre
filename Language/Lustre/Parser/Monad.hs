@@ -4,6 +4,7 @@ module Language.Lustre.Parser.Monad
   , parse
   , happyGetToken
   , happyError
+  , parseError
   , ParseError(..)
   ) where
 
@@ -13,6 +14,7 @@ import AlexTools(prevPos, startPos)
 
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Panic
+import Language.Lustre.AST
 
 newtype Parser a = Parser ([Lexeme Token] ->
                             Either ParseError (a, [Lexeme Token]))
@@ -74,12 +76,18 @@ happyGetToken k = Parser $ \ls ->
     t : ts -> let Parser m = k t
               in m ts
 
-newtype ParseError = ParseError SourcePos deriving Show
+data ParseError =
+    ParseError SourcePos
+  | MultipleNamesInConstantDefintion [Ident]
+    deriving Show
 
 happyError :: Parser a
 happyError = Parser $ \ls ->
   case ls of
     []    -> panic "happyError" ["Parser error after the end of file."]
     t : _ -> Left $ ParseError $ sourceFrom $ lexemeRange t
+
+parseError :: ParseError -> Parser a
+parseError e = Parser $ \_ -> Left e
 
 

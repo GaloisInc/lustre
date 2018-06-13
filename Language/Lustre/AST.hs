@@ -50,26 +50,27 @@ data TopDecl =
     deriving Show
   -- XXX: Model instances
 
-
-
 type Pragmas    = [Pragma]
 
+data Name =
+    Unqual Ident
+  | Qual Ident Ident
+    deriving Show
 
+data Type =
+    NamedType Name
+  | RecrodType [ FieldType ]
+  | ArrayType Type Expression
+  | EnumType [ Ident ]
+  | IntType | RealType | BoolType
+  | TypeRange SourceRange Type
+    deriving Show
 
-data Name       = Unqual Ident
-                | Qual Ident Ident
-                  deriving Show
-
-data Type       = NamedType Name
-                | RecrodType [ FieldType ]
-                | ArrayType Type Expression
-                | EnumType [ Ident ]
-                  deriving Show
-
-data FieldType  = FieldType { fieldName :: Ident, fieldType :: Type }
-                    deriving Show
-
-
+data FieldType  = FieldType
+  { fieldName     :: Ident
+  , fieldType     :: Type
+  , fieldDefulat  :: Maybe Expression
+  } deriving Show
 
 data ConstDef = ConstDef
   { constName     :: Ident
@@ -115,9 +116,16 @@ data LHS        = LVar Name
                 | LSelect LHS Selector
                   deriving Show
 
-data Selector   = FieldSelector Ident
-                | ArraySelector Expression (Maybe Expression)
+data Selector   = SelectField Ident
+                | SelectElement Expression
+                | SelectSlice ArraySlice
                   deriving Show
+
+data ArraySlice = ArraySlice
+  { arrayStart :: Expression
+  , arrayEnd   :: Expression
+  , arrayStep  :: Maybe Expression
+  } deriving Show
 
 data Expression = ERange !SourceRange !Expression
                 | Var !Name
@@ -130,11 +138,20 @@ data Expression = ERange !SourceRange !Expression
                 | Tuple ![Expression]
                 | Record ![Field]
                 | Array ![Expression]
+                | Select Expression Selector
 
                 | IfThenElse Expression Expression Expression
                 | WithThenElse Expression Expression Expression
+
+                | CallPos NodeName [Expression]
+                -- CallNamedArgs
                   deriving Show
-                -- XXX
+
+
+type StaticExpression = Expression -- XXX
+
+data NodeName = NodeName Name [StaticExpression]
+                deriving Show
 
 data Literal    = Int Integer | Real Rational | Bool Bool
                   deriving Show
@@ -148,12 +165,12 @@ data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
 
 data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
          | Mul | IntDiv | Mod | Div | Add | Sub
-         | When -- hm
+         | When
+         | Replicate | Concat
                   deriving Show
 
 data OpN = AtMostOne | Nor
                   deriving Show
-
 
 instance HasRange Ident where
   range = identRange
@@ -171,6 +188,20 @@ instance HasRange Field where
   range (Field x y) = x <-> y
 
 -- Kind of...
+instance HasRange Type where
+  range ty =
+    case ty of
+      TypeRange r _ -> r
+      NamedType n   -> range n
+      RecrodType {} -> nope "RecrodType"
+      ArrayType {}  -> nope "ArrayType"
+      EnumType {}   -> nope "EnumType"
+      IntType {}    -> nope "IntType"
+      RealType {}   -> nope "RealType"
+      BoolType {}   -> nope "BoolType"
+    where nope x = panic "range@Type" [x]
+
+-- Kind of...
 instance HasRange Expression where
   range expr =
     case expr of
@@ -184,10 +215,16 @@ instance HasRange Expression where
       Tuple {}        -> nope "Tuple"
       Record {}       -> nope "Record"
       Array {}        -> nope "Array"
+      Select {}       -> nope "Select"
       IfThenElse {}   -> nope "IfThenElse"
       WithThenElse {} -> nope "WithThenElse"
+      CallPos {}      -> nope "CallPos"
     where
     nope x = panic "range@Expresssion" [x]
 
-
+{-
+validClockExpr :: Expresssion -> Bool
+validClockExpr expr =
+  case expr of
+-}
 
