@@ -73,6 +73,9 @@ $white+         { return [] }
 "then"          { lexeme TokKwThen }
 "with"          { lexeme TokKwWith }
 "step"          { lexeme TokKwStep }
+"fby"           { lexeme TokKwFby }
+"true"          { lexeme (TokBool True) }
+"false"         { lexeme (TokBool False) }
 
 "::"            { lexeme TokColonColon }
 ","             { lexeme TokComma }
@@ -134,6 +137,7 @@ data Token =
   | TokKwOr
   | TokKwXor
   | TokKwNor
+  | TokBool Bool
 
   | TokKwDiv
   | TokKwMod
@@ -142,6 +146,7 @@ data Token =
   | TokKwReal
 
   | TokKwStep
+  | TokKwFby
 
   | TokColonColon
   | TokComma

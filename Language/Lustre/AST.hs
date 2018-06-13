@@ -8,7 +8,10 @@ module Language.Lustre.AST
 
 import Data.Text(Text)
 
-import AlexTools(SourceRange(..), SourcePos(..))
+import AlexTools(SourceRange(..), SourcePos(..), HasRange(..), (<->))
+
+import Language.Lustre.Panic
+
 
 data Ident = Ident
   { identText       :: !Text
@@ -116,19 +119,75 @@ data Selector   = FieldSelector Ident
                 | ArraySelector Expression (Maybe Expression)
                   deriving Show
 
-data Expression = ERange SourceRange Expression
-                | Var Name
-                | Int Integer
-                | Real Rational
-                | Tuple [Expression]
-                | Record Name [Field]
-                | Array [Expression]
+data Expression = ERange !SourceRange !Expression
+                | Var !Name
+                | Lit !Literal
+
+                | EOp1 Op1 Expression
+                | EOp2 Expression Op2 Expression
+                | EOpN OpN [Expression]
+
+                | Tuple ![Expression]
+                | Record ![Field]
+                | Array ![Expression]
+
+                | IfThenElse Expression Expression Expression
+                | WithThenElse Expression Expression Expression
                   deriving Show
                 -- XXX
+
+data Literal    = Int Integer | Real Rational | Bool Bool
+                  deriving Show
 
 data Field      = Field Ident Expression
                   deriving Show
 
+
+data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
+                  deriving Show
+
+data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
+         | Mul | IntDiv | Mod | Div | Add | Sub
+         | When -- hm
+                  deriving Show
+
+data OpN = AtMostOne | Nor
+                  deriving Show
+
+
+instance HasRange Ident where
+  range = identRange
+
+instance HasRange Pragma where
+  range = pragmaRange
+
+instance HasRange Name where
+  range nm =
+    case nm of
+      Unqual i -> range i
+      Qual q i -> q <-> i
+
+instance HasRange Field where
+  range (Field x y) = x <-> y
+
+-- Kind of...
+instance HasRange Expression where
+  range expr =
+    case expr of
+      ERange r _      -> r
+      Var x           -> range x
+      EOp2 e1 _ e2    -> e1 <-> e2
+
+      Lit {}          -> nope "Lit"
+      EOp1 {}         -> nope "EOp1"
+      EOpN {}         -> nope "EOpN"
+      Tuple {}        -> nope "Tuple"
+      Record {}       -> nope "Record"
+      Array {}        -> nope "Array"
+      IfThenElse {}   -> nope "IfThenElse"
+      WithThenElse {} -> nope "WithThenElse"
+    where
+    nope x = panic "range@Expresssion" [x]
 
 
 

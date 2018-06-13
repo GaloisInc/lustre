@@ -4,6 +4,8 @@ module Language.Lustre.Parser
   , program, expression
   ) where
 
+import AlexTools(HasRange, (<->))
+
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Parser.Monad
 import Language.Lustre.AST
@@ -21,20 +23,23 @@ import Language.Lustre.Panic
   'with'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWith } }
 
   'and'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwAnd } }
+  'not'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwNot } }
+  'or'        { Lexeme { lexemeRange = $$, lexemeToken = TokKwOr } }
+  'xor'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwXor } }
+
   'nor'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwNor } }
 
 
   'current'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrent } }
   'div'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwDiv } }
   'mod'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwMod } }
-  'not'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwNot } }
-  'or'        { Lexeme { lexemeRange = $$, lexemeToken = TokKwOr } }
   'pre'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwPre } }
   'when'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWhen } }
-  'xor'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwXor } }
   'int'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwInt } }
   'real'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwReal } }
   'step'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwStep } }
+  'fby'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwFby } }
+
 
   '::'        { Lexeme { lexemeRange = $$, lexemeToken = TokColonColon } }
   ','         { Lexeme { lexemeRange = $$, lexemeToken = TokComma } }
@@ -72,6 +77,7 @@ import Language.Lustre.Panic
   IDENT       { $$@Lexeme { lexemeToken = TokIdent {} } }
   INT         { $$@Lexeme { lexemeToken = TokInt   {} } }
   REAL        { $$@Lexeme { lexemeToken = TokReal  {} } }
+  BOOL        { $$@Lexeme { lexemeToken = TokBool  {} } }
 
 %name program program
 %name expression expression
@@ -80,7 +86,7 @@ import Language.Lustre.Panic
 %monad { Parser }
 
 %nonassoc 'else'
-%nonassoc '->'
+%nonassoc '->' 'fby'
 %right    '=>'
 %nonassoc 'or' 'xor'
 %nonassoc 'and'
@@ -100,39 +106,51 @@ program :: { () }
 expression :: { Expression }
   : INT                           { toLit $1 }
   | REAL                          { toLit $1 }
-  | name                          { Var $1   }
-  | 'not' expression              { undefined }
-  | '-' expression %prec UMINUS   { undefined }
-  | 'pre' expression              { undefined }
-  | 'current' expression          { undefined }
-  | 'int' expression              { undefined }
-  | 'real' expression             { undefined }
-  | expression 'when' clock_expr  { undefined }
-  {- expression 'fby' expression { undefined } -- what precedence?? -}
-  | expression '->' expression  { undefined }
-  | expression 'and' expression  { undefined }
-  | expression 'or' expression  { undefined }
-  | expression 'xor' expression  { undefined }
-  | expression '=>' expression  { undefined }
-  | expression '=' expression  { undefined }
-  | expression '<>' expression  { undefined }
-  | expression '<' expression  { undefined }
-  | expression '<=' expression  { undefined }
-  | expression '>' expression  { undefined }
-  | expression '>=' expression  { undefined }
-  | expression 'div' expression  { undefined }
-  | expression '%' expression  { undefined }  -- This one is missing from gram?
-  | expression 'mod' expression  { undefined }
-  | expression '-' expression  { undefined }
-  | expression '+' expression  { undefined }
-  | expression '/' expression  { undefined }
-  | expression '*' expression  { undefined }
-  | 'if' expression 'then' expression 'else' expression { undefined }
-  | 'with' expression 'then' expression 'else' expression { undefined }
-  | '#' '(' expr_list ')'       { undefined }
-  | 'nor' '(' expr_list ')'     { undefined }
+  | BOOL                          { toLit $1 }
+
+  | name                              { Var $1   }
+
+  | 'not'     expression              { toE1 Not      $1 $2 }
+  | '-'       expression %prec UMINUS { toE1 Neg      $1 $2 }
+  | 'pre'     expression              { toE1 Pre      $1 $2 }
+  | 'current' expression              { toE1 Current  $1 $2 }
+  | 'int'     expression              { toE1 IntCast  $1 $2 }
+  | 'real'    expression              { toE1 RealCast $1 $2 }
+
+  | expression 'when' clock_expr      { EOp2 $1 When     $3 } -- XXX: clock
+  | expression 'fby' expression       { EOp2 $1 Fby      $3 }
+  | expression '->' expression        { EOp2 $1 Fby      $3 }
+  | expression 'and' expression       { EOp2 $1 And      $3 }
+  | expression 'or' expression        { EOp2 $1 Or       $3 }
+  | expression 'xor' expression       { EOp2 $1 Xor      $3 }
+  | expression '=>' expression        { EOp2 $1 Implies  $3 }
+  | expression '=' expression         { EOp2 $1 Eq       $3 }
+  | expression '<>' expression        { EOp2 $1 Neq      $3 }
+  | expression '<' expression         { EOp2 $1 Lt       $3 }
+  | expression '<=' expression        { EOp2 $1 Leq      $3 }
+  | expression '>' expression         { EOp2 $1 Gt       $3 }
+  | expression '>=' expression        { EOp2 $1 Geq      $3 }
+  | expression 'div' expression       { EOp2 $1 IntDiv   $3 }
+  | expression 'mod' expression       { EOp2 $1 Mod      $3 }
+  | expression '-' expression         { EOp2 $1 Sub      $3 }
+  | expression '+' expression         { EOp2 $1 Add      $3 }
+  | expression '/' expression         { EOp2 $1 Div      $3 }
+  | expression '*' expression         { EOp2 $1 Mul      $3 }
+
+  | 'if' expression
+      'then' expression
+      'else' expression      { ERange ($1 <-> $6) (IfThenElse $2 $4 $6) }
+
+  | 'with' expression
+      'then' expression
+      'else' expression      { ERange ($1 <-> $6) (WithThenElse $2 $4 $6) }
+
+  | '#' '(' expr_list ')'       { at $1 $4 (EOpN AtMostOne $3) }
+  | 'nor' '(' expr_list ')'     { at $1 $4 (EOpN Nor $3) }
+
   | effective_node '(' expr_list ')'  { undefined }
   | '[' expr_list ']'                 { undefined }
+
 {-  | expression '^' expression         { undefined } Prec? -}
 {-  | expression '|' expression         { undefined } Prec? -}
 {-   | expression '[' expression ']'     { undefined } Prec? -}
@@ -143,7 +161,7 @@ expression :: { Expression }
 step :: { Expression }
   : 'step' expression             { $2 }
 
-clock_expr :: { () }
+clock_expr :: { Expression }
   : name '(' ident ')'            { undefined }
   | ident                         { undefined }
   | 'not' ident                   { undefined }
@@ -202,10 +220,22 @@ toIdent l = Ident { identText  = lexemeText l
 toLit :: Lexeme Token -> Expression
 toLit l =
   ERange (lexemeRange l) $
+  Lit $
   case lexemeToken l of
-    TokInt n  -> Int n
-    TokReal n -> Real n
-    _         -> panic "toLit" [ "Unexcpected literal", show l ]
+    TokInt n    -> Int n
+    TokReal n   -> Real n
+    TokBool n   -> Bool n
+    _           -> panic "toLit" [ "Unexcpected literal", show l ]
+
+
+at :: (HasRange a, HasRange b) => a -> b -> Expression -> Expression
+at x y = ERange (x <-> y)
+
+toE1 :: Op1 -> SourceRange -> Expression -> Expression
+toE1 op rng expr = at rng expr (EOp1 op expr)
+
+toE2 :: Op2 -> Expression -> Expression -> Expression
+toE2 op e1 e2 = EOp2 e1 op e2
 
 
 }
