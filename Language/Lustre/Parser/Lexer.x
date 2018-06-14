@@ -56,41 +56,70 @@ $white+         { return [] }
 @block_comment  { return [] }
 
 
+"when"          { lexeme TokKwWhen }
+"current"       { lexeme TokKwCurrent }
+"pre"           { lexeme TokKwPre }
+"fby"           { lexeme TokKwFby }
+"->"            { lexeme TokRightArrow }
+
+"div"           { lexeme TokKwDiv }
+"mod"           { lexeme TokKwMod }
+"+"             { lexeme TokPlus }
+"-"             { lexeme TokMinus }
+"*"             { lexeme TokTimes }
+"/"             { lexeme TokDiv }
+
+
+"with"          { lexeme TokKwWith }
+"if"            { lexeme TokKwIf }
+"else"          { lexeme TokKwElse }
+"then"          { lexeme TokKwThen }
+
+"step"          { lexeme TokKwStep }
+".."            { lexeme TokDotDot }
+"|"             { lexeme TokBar }
+"^"             { lexeme TokHat }
+
+"#"             { lexeme TokHash }
+"not"           { lexeme TokKwNot }
+"xor"           { lexeme TokKwXor }
+"or"            { lexeme TokKwOr }
 "and"           { lexeme TokKwAnd }
 "nor"           { lexeme TokKwNor }
-"current"       { lexeme TokKwCurrent }
-"div"           { lexeme TokKwDiv }
-"else"          { lexeme TokKwElse }
-"mod"           { lexeme TokKwMod }
-"not"           { lexeme TokKwNot }
-"or"            { lexeme TokKwOr }
-"pre"           { lexeme TokKwPre }
-"when"          { lexeme TokKwWhen }
-"xor"           { lexeme TokKwXor }
+"true"          { lexeme (TokBool True) }
+"false"         { lexeme (TokBool False) }
+
+"=>"            { lexeme TokImplies }
+"<"             { lexeme TokLt }
+"<="            { lexeme TokLeq }
+"="             { lexeme TokEq }
+">="            { lexeme TokGeq }
+">"             { lexeme TokGt }
+"<>"            { lexeme TokNotEq }
+
+
 "int"           { lexeme TokKwInt }
 "real"          { lexeme TokKwReal }
 "bool"          { lexeme TokKwBool }
-"if"            { lexeme TokKwIf }
-"then"          { lexeme TokKwThen }
-"with"          { lexeme TokKwWith }
-"step"          { lexeme TokKwStep }
-"fby"           { lexeme TokKwFby }
-"true"          { lexeme (TokBool True) }
-"false"         { lexeme (TokBool False) }
+
 "unsafe"        { lexeme TokKwUnsafe }
 "extern"        { lexeme TokKwExtern }
 "node"          { lexeme TokKwNode }
 "function"      { lexeme TokKwFunction }
 "returns"       { lexeme TokKwReturns }
+
 "type"          { lexeme TokKwType }
 "const"         { lexeme TokKwConst }
+"var"           { lexeme TokKwVar }
+"struct"        { lexeme TokKwStruct }
+"enum"          { lexeme TokKwEnum }
 
+"%"             { lexeme TokMod }
 ":"             { lexeme TokColon }
 "::"            { lexeme TokColonColon }
 ","             { lexeme TokComma }
 ";"             { lexeme TokSemi }
 "."             { lexeme TokDot }
-".."            { lexeme TokDotDot }
 "("             { lexeme TokOpenParen }
 ")"             { lexeme TokCloseParen }
 "<<"            { lexeme TokOpenTT }
@@ -99,23 +128,8 @@ $white+         { return [] }
 "]"             { lexeme TokCloseBracket }
 "{"             { lexeme TokOpenBrace }
 "}"             { lexeme TokCloseBrace }
-
-"->"            { lexeme TokRightArrow }
-"=>"            { lexeme TokImplies }
-"<"             { lexeme TokLt }
-"<="            { lexeme TokLeq }
-"="             { lexeme TokEq }
-">="            { lexeme TokGeq }
-">"             { lexeme TokGt }
-"<>"            { lexeme TokNotEq }
-"+"             { lexeme TokPlus }
-"-"             { lexeme TokMinus }
-"*"             { lexeme TokTimes }
-"/"             { lexeme TokDiv }
-"%"             { lexeme TokMod }
-"#"             { lexeme TokHash }
-"|"             { lexeme TokBar }
-"^"             { lexeme TokHat }
+"let"           { lexeme TokKwLet }
+"tel"           { lexeme TokKwTel }
 
 @ident          { lexeme TokIdent }
 @num8           { lexeme' . TokInt  . integerAtBase 8  =<< matchText }
@@ -145,6 +159,11 @@ data Token =
 
   | TokKwType
   | TokKwConst
+  | TokKwVar
+  | TokKwLet
+  | TokKwTel
+  | TokKwStruct
+  | TokKwEnum
 
   | TokKwCurrent
   | TokKwPre

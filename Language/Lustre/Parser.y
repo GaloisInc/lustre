@@ -4,7 +4,7 @@ module Language.Lustre.Parser
   , program, expression
   ) where
 
-import AlexTools(HasRange, (<->))
+import AlexTools(HasRange(range), (<->))
 
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Parser.Monad
@@ -27,7 +27,9 @@ import Language.Lustre.Panic
   'or'        { Lexeme { lexemeRange = $$, lexemeToken = TokKwOr } }
   'xor'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwXor } }
   'nor'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwNor } }
+  '#'         { Lexeme { lexemeRange = $$, lexemeToken = TokHash } }
   '=>'        { Lexeme { lexemeRange = $$, lexemeToken = TokImplies } }
+
   '<'         { Lexeme { lexemeRange = $$, lexemeToken = TokLt } }
   '<='        { Lexeme { lexemeRange = $$, lexemeToken = TokLeq } }
   '='         { Lexeme { lexemeRange = $$, lexemeToken = TokEq } }
@@ -43,17 +45,28 @@ import Language.Lustre.Panic
 
   'type'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwType } }
   'const'     { Lexeme { lexemeRange = $$, lexemeToken = TokKwConst } }
-
+  'var'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwVar } }
+  'struct'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwStruct } }
+  'enum'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwEnum } }
 
   'when'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWhen } }
   'current'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrent } }
   'pre'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwPre } }
   'fby'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwFby } }
+  '->'        { Lexeme { lexemeRange = $$, lexemeToken = TokRightArrow } }
 
   'div'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwDiv } }
   'mod'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwMod } }
+  '+'         { Lexeme { lexemeRange = $$, lexemeToken = TokPlus } }
+  '-'         { Lexeme { lexemeRange = $$, lexemeToken = TokMinus } }
+  '*'         { Lexeme { lexemeRange = $$, lexemeToken = TokTimes } }
+  '/'         { Lexeme { lexemeRange = $$, lexemeToken = TokDiv } }
+
+
   'step'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwStep } }
-  '->'        { Lexeme { lexemeRange = $$, lexemeToken = TokRightArrow } }
+  '|'         { Lexeme { lexemeRange = $$, lexemeToken = TokBar } }
+  '^'         { Lexeme { lexemeRange = $$, lexemeToken = TokHat } }
+  '..'        { Lexeme { lexemeRange = $$, lexemeToken = TokDotDot } }
 
   'int'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwInt } }
   'real'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwReal } }
@@ -65,9 +78,10 @@ import Language.Lustre.Panic
   ','         { Lexeme { lexemeRange = $$, lexemeToken = TokComma } }
   ';'         { Lexeme { lexemeRange = $$, lexemeToken = TokSemi } }
   '.'         { Lexeme { lexemeRange = $$, lexemeToken = TokDot } }
-  '..'        { Lexeme { lexemeRange = $$, lexemeToken = TokDotDot } }
 
 
+  'let'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwLet } }
+  'tel'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwTel } }
   '('         { Lexeme { lexemeRange = $$, lexemeToken = TokOpenParen } }
   ')'         { Lexeme { lexemeRange = $$, lexemeToken = TokCloseParen } }
   '<<'        { Lexeme { lexemeRange = $$, lexemeToken = TokOpenTT } }
@@ -77,13 +91,6 @@ import Language.Lustre.Panic
   '{'         { Lexeme { lexemeRange = $$, lexemeToken = TokOpenBrace } }
   '}'         { Lexeme { lexemeRange = $$, lexemeToken = TokCloseBrace } }
 
-  '+'         { Lexeme { lexemeRange = $$, lexemeToken = TokPlus } }
-  '-'         { Lexeme { lexemeRange = $$, lexemeToken = TokMinus } }
-  '*'         { Lexeme { lexemeRange = $$, lexemeToken = TokTimes } }
-  '/'         { Lexeme { lexemeRange = $$, lexemeToken = TokDiv } }
-  '#'         { Lexeme { lexemeRange = $$, lexemeToken = TokHash } }
-  '|'         { Lexeme { lexemeRange = $$, lexemeToken = TokBar } }
-  '^'         { Lexeme { lexemeRange = $$, lexemeToken = TokHat } }
 
   '%'         { Lexeme { lexemeRange = $$, lexemeToken = TokMod } }
 
@@ -122,40 +129,124 @@ import Language.Lustre.Panic
 %%
 
 program :: { [TopDecl] }
-  : const_block { undefined}
+  : topDecl { undefined}
 
-const_block :: { [TopDecl] }
-  : 'const' EndBy1(';',const_def_decl)    { $2 }
+topDecl :: { [TopDecl] }
+  : 'const' EndBy1(';',constDef)     { map DeclareConst (concat $2) }
+  | 'type' EndBy1(';',typeDecl)      { $2 }
+  | extDecl                          { [ DeclareNode $1 ] }
+  | nodeDecl                         { [ DeclareNode $1 ] }
 
-{-
-type_block :: [TopDecl]
-  : 'type' EndBy1(';',type_def_decl)      { $2 }
 
-type_def_decl :: { TopDecl }
-  : type_decl                         { 
--}
+-- Constant Declarations -------------------------------------------------------
 
-{- XXX: Pragmas -}
-const_def_decl :: { TopDecl }
-  : const_decl                        { DeclareConst (fst $1) (snd $1) [] }
-  | const_def_head '=' expression     { toConstDef $1 $3 }
+constDef :: { [ConstDef] }
+  : ident ':' type                        { toConstDef ($1,$3) }
+  | ident ',' SepBy1(',',ident) ':' type  { toConstDef ($1,$3,$5) }
+  | ident '=' expression                  { toConstDef ($1,$3) }
+  | ident ':' type '=' expression         { toConstDef ($1,$3,$5) }
 
-const_def_head :: { (Ident, Maybe Type) }
-  : ident                             { ($1, Nothing) }
-  | const_decl                        {% toConstDefHead $1 }
 
-const_decl :: { ([Ident], Type) }
-  : SepBy1(',',ident) ':' type        { ($1,$3) }
+-- Type Declarations -----------------------------------------------------------
+
+typeDecl :: { TopDecl }
+  : ident                                     { toTypeDecl $1 IsAbstract }
+  | ident '=' typeDef                         { toTypeDecl $1 $3 }
+
+typeDef :: { TypeDef }
+  : type                                      { IsType $1 }
+  | 'enum' '{' SepBy1(',',ident) '}'          { IsEnum $3 }
+  | Perhaps('struct') '{' SepBy1(';',fieldType) '}'   { IsStruct (concat $3) }
+
+
+fieldType :: { [FieldType] }
+  : ident ':' type '=' expression             { toFieldType ($1,$3,$5) }
+  | ident ':' type                            { toFieldType ($1,$3) }
+  | ident ',' SepBy1(',',ident) ':' type      { toFieldType ($1, $3, $5) }
+
+
+-- Types -----------------------------------------------------------------------
 
 type :: { Type }
-  : baseType                          { $1 }
-  | type '^' expression               { at $1 $3 (ArrayType $1 $3) }
+  : baseType                                  { $1 }
+  | type '^' expression                       { at $1 $3 (ArrayType $1 $3) }
 
 baseType :: { Type }
-  : 'int'                             { at $1 $1 IntType       }
-  | 'real'                            { at $1 $1 RealType      }
-  | 'bool'                            { at $1 $1 BoolType      }
-  | name                              { NamedType $1           }
+  : 'int'                                     { at $1 $1 IntType       }
+  | 'real'                                    { at $1 $1 RealType      }
+  | 'bool'                                    { at $1 $1 BoolType      }
+  | name                                      { NamedType $1           }
+
+
+-- Node Declarations -----------------------------------------------------------
+
+extDecl :: { NodeDecl }
+  : Perhaps('unsafe') 'extern' nodeType
+    ident params 'returns' params
+      { NodeDecl
+          { nodeUnsafe  = $1
+          , nodeExtern  = True
+          , nodeType    = $3
+          , nodeName    = $4
+          , nodeInputs  = $5
+          , nodeOutputs = $7
+          , nodePragmas = []
+          , nodeDef     = Nothing
+          }
+      }
+
+
+
+nodeDecl :: { NodeDecl }
+  : Perhaps('unsafe') nodeType
+    ident params 'returns' params Perhaps(';')
+    localDecls body
+      { NodeDecl
+          { nodeUnsafe  = $1
+          , nodeExtern  = False
+          , nodeType    = $2
+          , nodeName    = $3
+          , nodeInputs  = $4
+          , nodeOutputs = $6
+          , nodePragmas = []
+          , nodeDef     = Just NodeBody { nodeLocals = $8
+                                        , nodeEqns   = $9
+                                        }
+          }
+      }
+
+nodeType :: { NodeType }
+  : 'node'      { Node }
+  | 'function'  { Function }
+
+localDecls :: { [LocalDecl] }
+  : {- empty -}                            { [] }
+  | ListOf1(localDecl)                     { concat $1 }
+
+localDecl :: { [LocalDecl] }
+  : 'var' EndBy1(';',varDecl)              { map LocalVar (concat $2) }
+  | 'const' EndBy1(';',constDef)           { map LocalConst (concat $2) }
+
+body :: { [Equation] }
+  : 'let' {-XXX-} 'tel'                    { [] }
+
+-- Variable Declarations -------------------------------------------------------
+
+params :: { [Binder] }
+  : '(' ')'                                 { [] }
+  | '(' SepEndBy1(',',varDecl) ')'          { concat $2 }
+
+varDecl :: { [Binder] }
+  : typedIdents                             { toVarDeclBase $1 }
+  | typedIdents 'when' clockExpr            { toVarDecl $1 $3  }
+  | '(' typedIdents ')' 'when' clockExpr    { toVarDecl $2 $5  }
+
+typedIdents :: { ( [Ident], Type ) }
+  : SepBy1(',', ident) ':' type             { ($1, $3) }
+
+
+
+-- Expressions -----------------------------------------------------------------
 
 expression :: { Expression }
   : INT                               { toLit $1 }
@@ -171,7 +262,7 @@ expression :: { Expression }
   | 'int'     expression              { toE1 IntCast  $1 $2 }
   | 'real'    expression              { toE1 RealCast $1 $2 }
 
-  | expression 'when' expression      { EOp2 $1 When     $3 } -- XXX: clock
+  | expression 'when' clockExpr       { $1 `When` $3        }
   | expression 'fby' expression       { EOp2 $1 Fby      $3 }
   | expression '->' expression        { EOp2 $1 Fby      $3 }
   | expression 'and' expression       { EOp2 $1 And      $3 }
@@ -202,15 +293,21 @@ expression :: { Expression }
       'then' expression
       'else' expression               { at $1 $6 (WithThenElse $2 $4 $6) }
 
-  | '#' '(' expr_list ')'             { at $1 $4 (EOpN AtMostOne $3) }
-  | 'nor' '(' expr_list ')'           { at $1 $4 (EOpN Nor $3) }
+  | '#' '(' exprList ')'             { at $1 $4 (EOpN AtMostOne $3) }
+  | 'nor' '(' exprList ')'           { at $1 $4 (EOpN Nor $3) }
 
-  | '[' expr_list ']'                 { at $1 $3 (Array $2) }
+  | '[' exprList ']'                 { at $1 $3 (Array $2) }
 
   | expression '[' arraySel ']'       { at $1 $4 (Select $1 $3) }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
-  | name '(' expr_list ')'            { at $1 $4 (CallPos (NodeName $1 []) $3) }
+  | name '(' exprList ')'            { at $1 $4 (CallPos (NodeName $1 []) $3) }
+
+clockExpr :: { ClockExpr }
+  : name '(' ident ')'                { WhenClock ($1 <-> $4) (ClockIs $1) $3 }
+  | ident                             { WhenClock (range $1)  ClockIsTrue $1  }
+  | 'not' ident                       { WhenClock ($1 <-> $2) ClockIsFalse $2 }
+  | 'not' '(' ident ')'               { WhenClock ($1 <-> $4) ClockIsFalse $3 }
 
 arraySel :: { Selector }
   : expression                        { SelectElement $1 }
@@ -222,20 +319,11 @@ arraySlice :: { ArraySlice }
 step :: { Expression }
   : 'step' expression                 { $2 }
 
+exprList :: { [Expression] }
+  : SepBy1(',',expression)          { $1 }
 
 
-named_call_params :: { [()] }
-  : SepBy1(arg_sep, named_call_param) { $1 }
-
-arg_sep :: { SourceRange }
-  : ';'           { $1 }
-  | ','           { $1 }
-
-named_call_param :: { () }
-  : ident '=' expression      { undefined }
-
-expr_list :: { [Expression] }
-  : SepBy1(',',expression)          { $1 } 
+-- Names and Identifiers -------------------------------------------------------
 
 name :: { Name }
   : ident                 { Unqual $1 }
@@ -245,13 +333,24 @@ ident :: { Ident }
   : IDENT                 { toIdent $1 }
 
 
-{- EBNF combinators -}
+-- Combinators -----------------------------------------------------------------
 
-{- Both should have the same type -}
+
+Perhaps(x) :: { Bool }
+  : {- nothing -}       { False }
+  | x                   { True  }
 
 Opt(x) :: { Maybe x }
   : {- nothing -}       { Nothing }
   | x                   { Just $1 }
+
+
+ListOf1(thing) :: { [thing] }
+  : ListOf1_rev(thing) { reverse $1 }
+
+ListOf1_rev(thing) :: { [thing] }
+  : thing                           { [$1] }
+  | ListOf1_rev(thing) thing        { $2 : $1 }
 
 SepBy1(sep,thing) :: { [thing] }
   : SepBy1_rev(sep,thing) { reverse $1 }
@@ -269,10 +368,34 @@ EndBy1_rev(sep,thing) :: { [thing] }
   | EndBy1_rev(sep,thing) thing sep { $2 : $1 }
 
 
+SepEndBy1(sep,thing) :: { [thing] }
+  : thing                           { [$1] }
+  | thing ';'                       { [$1] }
+  | thing ';' SepEndBy1(sep,thing)  { $1 : $3 }
+
 
 
 
 {
+
+class At t where
+  at :: (HasRange a, HasRange b) => a -> b -> t -> t
+
+instance At Expression where
+  at x y = ERange (x <-> y)
+
+instance At Type where
+  at x y = TypeRange (x <-> y)
+
+--------------------------------------------------------------------------------
+
+toE1 :: Op1 -> SourceRange -> Expression -> Expression
+toE1 op rng expr = at rng expr (EOp1 op expr)
+
+toE2 :: Op2 -> Expression -> Expression -> Expression
+toE2 op e1 e2 = EOp2 e1 op e2
+
+--------------------------------------------------------------------------------
 
 toIdent :: Lexeme Token -> Ident
 toIdent l = Ident { identText  = lexemeText l
@@ -289,27 +412,69 @@ toLit l =
     TokBool n   -> Bool n
     _           -> panic "toLit" [ "Unexcpected literal", show l ]
 
-class At t where
-  at :: (HasRange a, HasRange b) => a -> b -> t -> t
+--------------------------------------------------------------------------------
 
-instance At Expression where
-  at x y = ERange (x <-> y)
+toTypeDecl :: Ident -> TypeDef -> TopDecl
+toTypeDecl i d = DeclareType TypeDecl { typeName = i, typeDef = d }
 
-instance At Type where
-  at x y = TypeRange (x <-> y)
+class ToFieldType t where
+  toFieldType :: t -> [FieldType]
 
-toE1 :: Op1 -> SourceRange -> Expression -> Expression
-toE1 op rng expr = at rng expr (EOp1 op expr)
+instance ToFieldType (Ident, Type, Expression) where
+  toFieldType (x,t,e) = [ FieldType { fieldName = x, fieldType = t
+                                    , fieldDefault = Just e } ]
 
-toE2 :: Op2 -> Expression -> Expression -> Expression
-toE2 op e1 e2 = EOp2 e1 op e2
+instance ToFieldType (Ident, Type) where
+  toFieldType (x,t) = [ FieldType { fieldName = x, fieldType = t
+                                  , fieldDefault = Nothing } ]
 
-toConstDefHead :: ([Ident],Type) -> Parser (Ident,Maybe Type)
-toConstDefHead (is,t) =
-  case is of
-    [i] -> return (i,Just t)
-    _   -> parseError (MultipleNamesInConstantDefintion is)
+instance ToFieldType (Ident, [Ident], Type) where
+  toFieldType (i,is,t) = [ d | x <- i : is, d <- toFieldType (x,t) ]
 
-toConstDef :: (Ident,Maybe Type) -> Expression -> TopDecl
-toConstDef (i,t) e = DefineConst (ConstDef i t e [])
+--------------------------------------------------------------------------------
+
+class ToConstDef t where
+  toConstDef :: t -> [ ConstDef ]
+
+instance ToConstDef (Ident, Type) where
+  toConstDef (i,t) = [ ConstDef { constName = i
+                                , constType = Just t
+                                , constDef = Nothing
+                                , constPragmas = []
+                                } ]
+
+instance ToConstDef (Ident, [Ident], Type) where
+  toConstDef (i, is, t) = [ d | x <- i:is, d <- toConstDef (i,t) ]
+
+instance ToConstDef (Ident,Expression) where
+  toConstDef (i,e) = [ ConstDef { constName = i
+                                , constType = Nothing
+                                , constDef  = Just e
+                                , constPragmas = []
+                                } ]
+
+instance ToConstDef (Ident,Type,Expression) where
+  toConstDef (i,t,e) = [ ConstDef { constName = i
+                                  , constType = Just t
+                                  , constDef  = Just e
+                                  , constPragmas = []
+                                  } ]
+
+--------------------------------------------------------------------------------
+
+toVarDeclBase :: ([Ident], Type) -> [ Binder ]
+toVarDeclBase (xs,t) = [ Binder { binderDefines = x
+                                , binderType    = t
+                                , binderClock   = BaseClock (range x)
+                                , binderPragmas = []
+                                } | x <- xs ]
+
+toVarDecl :: ([Ident], Type) -> ClockExpr -> [ Binder ]
+toVarDecl (xs,t) c = [ Binder { binderDefines = x
+                              , binderType    = t
+                              , binderClock   = c
+                              , binderPragmas = []
+                              } | x <- xs ]
+
+
 }

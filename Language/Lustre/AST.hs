@@ -36,19 +36,27 @@ data Package = Package
 data PackageParam =
     PackageConst !Ident !Name !Pragmas
   | PackageType ![Ident]
-  | PackageNode !(NodeDecl ())
+  | PackageNode !NodeDecl   -- ^ No body allowed
     deriving Show
 
 
 data TopDecl =
-    DeclareType [Ident] Pragmas
-  | DefineType Ident Type Pragmas
-  | DeclareConst [Ident] Type Pragmas
-  | DefineConst ConstDef
-  | DeclareNode (NodeDecl ())
-  | DefineNode  (NodeDecl NodeBody)
+    DeclareType  TypeDecl
+  | DeclareConst ConstDef
+  | DeclareNode  NodeDecl
     deriving Show
   -- XXX: Model instances
+
+data TypeDecl = TypeDecl
+  { typeName :: Ident
+  , typeDef  :: TypeDef
+  } deriving Show
+
+data TypeDef = IsType Type
+             | IsEnum [ Ident ]
+             | IsStruct [ FieldType ]
+             | IsAbstract
+              deriving Show
 
 type Pragmas    = [Pragma]
 
@@ -59,53 +67,56 @@ data Name =
 
 data Type =
     NamedType Name
-  | RecrodType [ FieldType ]
   | ArrayType Type Expression
-  | EnumType [ Ident ]
   | IntType | RealType | BoolType
   | TypeRange SourceRange Type
     deriving Show
 
+
 data FieldType  = FieldType
   { fieldName     :: Ident
   , fieldType     :: Type
-  , fieldDefulat  :: Maybe Expression
+  , fieldDefault  :: Maybe Expression
   } deriving Show
 
+
+-- | Note: only one of the type or definition may be "Nothing".
 data ConstDef = ConstDef
   { constName     :: Ident
   , constType     :: Maybe Type
-  , constDef      :: Expression
+  , constDef      :: Maybe Expression
   , constPragmas  :: Pragmas
   } deriving Show
 
-data NodeDecl def = NodeDecl
+data NodeDecl = NodeDecl
   { nodeUnsafe  :: Bool
   , nodeExtern  :: Bool
   , nodeType    :: NodeType
+  , nodeName    :: Ident
   , nodeInputs  :: [Binder]
   , nodeOutputs :: [Binder]
   , nodePragmas :: Pragmas
-  , nodeDef     :: def
+  , nodeDef     :: Maybe NodeBody   -- Nothing if "nodeExtern" is set to "True"
   } deriving Show
 
 data NodeType   = Node | Function
                     deriving Show
 
 data Binder = Binder
-  { binderDefines :: [Ident]
+  { binderDefines :: Ident
   , binderType    :: Type
-  , binderClock   :: Maybe Name
+  , binderClock   :: ClockExpr
   , binderPragmas :: Pragmas
   } deriving Show
+
 
 data NodeBody = NodeBody
   { nodeLocals  :: [LocalDecl]
   , nodeEqns    :: [Equation]
   } deriving Show
 
-data LocalDecl  = LocalVar [Binder]
-                | LocalConst [ConstDef]
+data LocalDecl  = LocalVar Binder
+                | LocalConst ConstDef
                   deriving Show
 
 data Equation   = Assert Expression Pragmas
@@ -133,6 +144,7 @@ data Expression = ERange !SourceRange !Expression
 
                 | EOp1 Op1 Expression
                 | EOp2 Expression Op2 Expression
+                | Expression `When` ClockExpr
                 | EOpN OpN [Expression]
 
                 | Tuple ![Expression]
@@ -147,6 +159,12 @@ data Expression = ERange !SourceRange !Expression
                 -- CallNamedArgs
                   deriving Show
 
+data ClockExpr  = BaseClock SourceRange
+                | WhenClock SourceRange ClockVal Ident
+                  deriving Show
+
+data ClockVal   = ClockIsTrue | ClockIsFalse | ClockIs Name
+                  deriving Show
 
 type StaticExpression = Expression -- XXX
 
@@ -165,7 +183,6 @@ data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
 
 data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
          | Mul | IntDiv | Mod | Div | Add | Sub
-         | When
          | Replicate | Concat
                   deriving Show
 
@@ -187,44 +204,55 @@ instance HasRange Name where
 instance HasRange Field where
   range (Field x y) = x <-> y
 
--- Kind of...
-instance HasRange Type where
-  range ty =
-    case ty of
-      TypeRange r _ -> r
-      NamedType n   -> range n
-      RecrodType {} -> nope "RecrodType"
-      ArrayType {}  -> nope "ArrayType"
-      EnumType {}   -> nope "EnumType"
-      IntType {}    -> nope "IntType"
-      RealType {}   -> nope "RealType"
-      BoolType {}   -> nope "BoolType"
-    where nope x = panic "range@Type" [x]
+instance HasRange ClockExpr where
+  range e =
+    case e of
+      BaseClock r -> r
+      WhenClock r _ _ -> r
 
--- Kind of...
+exprRangeMaybe :: Expression -> Maybe SourceRange
+exprRangeMaybe expr =
+  case expr of
+    ERange r _      -> Just r
+    Var x           -> Just (range x)
+    EOp2 e1 _ e2    -> Just (e1 <-> e2)
+    e `When` c      -> Just (e  <-> c)
+
+    Lit {}          -> Nothing
+    EOp1 {}         -> Nothing
+    EOpN {}         -> Nothing
+    Tuple {}        -> Nothing
+    Record {}       -> Nothing
+    Array {}        -> Nothing
+    Select {}       -> Nothing
+    IfThenElse {}   -> Nothing
+    WithThenElse {} -> Nothing
+    CallPos {}      -> Nothing
+
+typeRangeMaybe :: Type -> Maybe SourceRange
+typeRangeMaybe ty =
+  case ty of
+    TypeRange r _ -> Just r
+    NamedType n   -> Just (range n)
+    ArrayType {}  -> Nothing
+    IntType {}    -> Nothing
+    RealType {}   -> Nothing
+    BoolType {}   -> Nothing
+
+-- | Note that this is a partial function: it will panic if the
+-- expression does not have an exact location.
+instance HasRange Type where
+  range ty = case typeRangeMaybe ty of
+               Just r -> r
+               Nothing -> panic "range@Type" [ "Type has no location"
+                                             , show ty ]
+
+-- | Note that this is a partial function: it will panic if the
+-- expression does not have an exact location.
 instance HasRange Expression where
   range expr =
-    case expr of
-      ERange r _      -> r
-      Var x           -> range x
-      EOp2 e1 _ e2    -> e1 <-> e2
-
-      Lit {}          -> nope "Lit"
-      EOp1 {}         -> nope "EOp1"
-      EOpN {}         -> nope "EOpN"
-      Tuple {}        -> nope "Tuple"
-      Record {}       -> nope "Record"
-      Array {}        -> nope "Array"
-      Select {}       -> nope "Select"
-      IfThenElse {}   -> nope "IfThenElse"
-      WithThenElse {} -> nope "WithThenElse"
-      CallPos {}      -> nope "CallPos"
-    where
-    nope x = panic "range@Expresssion" [x]
-
-{-
-validClockExpr :: Expresssion -> Bool
-validClockExpr expr =
-  case expr of
--}
+    case exprRangeMaybe expr of
+      Just r -> r
+      Nothing -> panic "range@Expression" [ "Expression has no location"
+                                          , show expr ]
 
