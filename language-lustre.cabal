@@ -33,6 +33,8 @@ test-suite lexer
 test-suite parser
   type: exitcode-stdio-1.0
   main-is: tests/Parser.hs
-  build-depends: base, text, language-lustre
+  build-depends:
+    base, text, filepath, directory, bytestring, language-lustre
+  
 
 

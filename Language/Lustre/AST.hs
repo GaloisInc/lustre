@@ -12,49 +12,58 @@ import AlexTools(SourceRange(..), SourcePos(..), HasRange(..), (<->))
 
 import Language.Lustre.Panic
 
+data Program  = ProgramDecls [TopDecl]
+              | ProgramPacks [PackDecl]
+                deriving Show
+
+data PackDecl = PackDecl Package
+              | PackInst Ident Ident [ (Ident, StaticArg) ]
+                deriving Show
 
 data Ident = Ident
   { identText       :: !Text
   , identRange      :: !SourceRange
+  , identPragmas    :: [Pragma]
   } deriving Show
 
 data Pragma = Pragma
-  { pragmaText      :: !Text
+  { pragmaTextA     :: !Text
+  , pragmaTextB     :: !Text
   , pragmaRange     :: !SourceRange
   } deriving Show
 
 -- | This is used for both packages and models.
 data Package = Package
   { packageName     :: !Ident
-  , packagePragmas  :: !Pragmas
   , packageUses     :: ![Ident]
-  , packageParams   :: ![PackageParam]
-  , packageProvides :: ![PackageParam]
-  , packageBody     :: !(Maybe [TopDecl])
+  , packageParams   :: ![StaticParam]   -- ^ Empty list for pacakges
+  , packageProvides :: ![PackageProvides]
+  , packageBody     :: ![TopDecl]
+  , packageRange    :: !SourceRange
   } deriving Show
 
-data PackageParam =
-    PackageConst !Ident !Name !Pragmas
-  | PackageType ![Ident]
-  | PackageNode !NodeDecl   -- ^ No body allowed
+data PackageProvides =
+    ProvidesConst !Ident !Type !(Maybe Expression)
+  | ProvidesNode  !NodeDecl
+  | ProvidesType  !TypeDecl
     deriving Show
 
 
 data TopDecl =
-    DeclareType  TypeDecl
-  | DeclareConst ConstDef
-  | DeclareNode  NodeDecl
+    DeclareType     !TypeDecl
+  | DeclareConst    !ConstDef
+  | DeclareNode     !NodeDecl
+  | DeclareNodeInst !NodeInstDecl
     deriving Show
-  -- XXX: Model instances
 
 data TypeDecl = TypeDecl
-  { typeName :: Ident
-  , typeDef  :: TypeDef
+  { typeName :: !Ident
+  , typeDef  :: !TypeDef
   } deriving Show
 
-data TypeDef = IsType Type
-             | IsEnum [ Ident ]
-             | IsStruct [ FieldType ]
+data TypeDef = IsType !Type
+             | IsEnum ![ Ident ]
+             | IsStruct ![ FieldType ]
              | IsAbstract
               deriving Show
 
@@ -62,7 +71,7 @@ type Pragmas    = [Pragma]
 
 data Name =
     Unqual Ident
-  | Qual Ident Ident
+  | Qual SourceRange Text Text
     deriving Show
 
 data Type =
@@ -85,18 +94,34 @@ data ConstDef = ConstDef
   { constName     :: Ident
   , constType     :: Maybe Type
   , constDef      :: Maybe Expression
-  , constPragmas  :: Pragmas
   } deriving Show
 
+data Safety = Safe | Unsafe
+              deriving Show
+
 data NodeDecl = NodeDecl
-  { nodeUnsafe  :: Bool
-  , nodeExtern  :: Bool
-  , nodeType    :: NodeType
-  , nodeName    :: Ident
-  , nodeInputs  :: [Binder]
+  { nodeSafety       :: Safety
+  , nodeExtern       :: Bool
+  , nodeType         :: NodeType
+  , nodeName         :: Ident
+  , nodeStaticInputs :: [StaticParam]
+  , nodeProfile      :: NodeProfile
+  , nodeDef          :: Maybe NodeBody
+    -- Must be "Nothing" if "nodeExtern" is set to "True"
+  } deriving Show
+
+data NodeInstDecl = NodeInstDecl
+  { nodeInstSafety       :: Safety
+  , nodeInstType         :: NodeType
+  , nodeInstName         :: Ident
+  , nodeInstStaticInputs :: [StaticParam]
+  , nodeInstProfile      :: Maybe NodeProfile
+  , nodeInstDef          :: NodeInst
+  } deriving Show
+
+data NodeProfile = NodeProfile
+  { nodeInputs  :: [Binder]
   , nodeOutputs :: [Binder]
-  , nodePragmas :: Pragmas
-  , nodeDef     :: Maybe NodeBody   -- Nothing if "nodeExtern" is set to "True"
   } deriving Show
 
 data NodeType   = Node | Function
@@ -106,7 +131,6 @@ data Binder = Binder
   { binderDefines :: Ident
   , binderType    :: Type
   , binderClock   :: ClockExpr
-  , binderPragmas :: Pragmas
   } deriving Show
 
 
@@ -119,11 +143,11 @@ data LocalDecl  = LocalVar Binder
                 | LocalConst ConstDef
                   deriving Show
 
-data Equation   = Assert Expression Pragmas
-                | Define [LHS] Expression Pragmas
+data Equation   = Assert Expression
+                | Define [LHS] Expression
                   deriving Show
 
-data LHS        = LVar Name
+data LHS        = LVar Ident
                 | LSelect LHS Selector
                   deriving Show
 
@@ -154,9 +178,13 @@ data Expression = ERange !SourceRange !Expression
 
                 | IfThenElse Expression Expression Expression
                 | WithThenElse Expression Expression Expression
+                | Merge Ident [MergeCase]
 
-                | CallPos NodeName [Expression]
-                -- CallNamedArgs
+                | CallPos NodeInst [Expression]
+                | CallNamed Name (Maybe Name) [Field] -- XXX: `with`?
+                  deriving Show
+
+data MergeCase  = MergeCase ClockVal Expression
                   deriving Show
 
 data ClockExpr  = BaseClock SourceRange
@@ -166,10 +194,23 @@ data ClockExpr  = BaseClock SourceRange
 data ClockVal   = ClockIsTrue | ClockIsFalse | ClockIs Name
                   deriving Show
 
-type StaticExpression = Expression -- XXX
+data NodeInst   = NodeInst Name [StaticArg]
+                  deriving Show
 
-data NodeName = NodeName Name [StaticExpression]
-                deriving Show
+data StaticParam = TypeParam Ident
+                 | ConstParam Ident Type
+                 | NodeParam Safety NodeType Ident [Binder] [Binder]
+                   deriving Show
+
+data StaticArg  = TypeArg Type
+                | ExprArg Expression
+                | NodeArg NodeType NodeInst
+                | Op1Arg Op1
+                | Op2Arg Op2
+                | OpIf
+                | ArgRange SourceRange StaticArg
+                  deriving Show
+
 
 data Literal    = Int Integer | Real Rational | Bool Bool
                   deriving Show
@@ -182,7 +223,7 @@ data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
                   deriving Show
 
 data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
-         | Mul | IntDiv | Mod | Div | Add | Sub
+         | Mul | IntDiv | Mod | Div | Add | Sub | Power
          | Replicate | Concat
                   deriving Show
 
@@ -198,8 +239,8 @@ instance HasRange Pragma where
 instance HasRange Name where
   range nm =
     case nm of
-      Unqual i -> range i
-      Qual q i -> q <-> i
+      Unqual i   -> range i
+      Qual r _ _ -> r
 
 instance HasRange Field where
   range (Field x y) = x <-> y
@@ -227,7 +268,9 @@ exprRangeMaybe expr =
     Select {}       -> Nothing
     IfThenElse {}   -> Nothing
     WithThenElse {} -> Nothing
+    Merge {}        -> Nothing
     CallPos {}      -> Nothing
+    CallNamed {}    -> Nothing
 
 typeRangeMaybe :: Type -> Maybe SourceRange
 typeRangeMaybe ty =
@@ -238,6 +281,17 @@ typeRangeMaybe ty =
     IntType {}    -> Nothing
     RealType {}   -> Nothing
     BoolType {}   -> Nothing
+
+argRangeMaybe :: StaticArg -> Maybe SourceRange
+argRangeMaybe arg =
+  case arg of
+    ArgRange r _ -> Just r
+    TypeArg t    -> typeRangeMaybe t
+    ExprArg e    -> exprRangeMaybe e
+    NodeArg {}   -> Nothing
+    Op1Arg {}    -> Nothing
+    Op2Arg {}    -> Nothing
+    OpIf {}      -> Nothing
 
 -- | Note that this is a partial function: it will panic if the
 -- expression does not have an exact location.
@@ -255,4 +309,20 @@ instance HasRange Expression where
       Just r -> r
       Nothing -> panic "range@Expression" [ "Expression has no location"
                                           , show expr ]
+
+-- | Note that this is a partial function: it will panic if the
+-- expression does not have an exact location.
+instance HasRange StaticArg where
+  range arg =
+    case argRangeMaybe arg of
+      Just r -> r
+      Nothing -> panic "range@StaticArg" [ "Static argument has no location"
+                                         , show arg ]
+
+instance HasRange NodeInst where
+  range (NodeInst x _) = range x  -- or args?
+
+instance HasRange Package where
+  range = packageRange
+
 

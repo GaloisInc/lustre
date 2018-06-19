@@ -29,127 +29,154 @@ $hexdigit       = [0-9a-fA-F]
 @qident         = @ident "::" @ident
 
 @digs8          = [0-7]+
-@digs10         = [0-9]+
 @digs16         = [0-9A-Fa-f]+
 
 @sign           = [\+\-]
-@num8           = @sign? "0o" @digs8
-@num10          = @sign? @digs10
-@num16          = @sign? "0x" @digs16
+@num8           = "0o" @digs8
+@num10          = [0-9]+
+@num16          = "0x" @digs16
 
 
-@exp10          = [Ee] @num10
-@exp16          = [Pp] @num10
+@exp10          = [Ee] @sign? @num10
+@exp16          = [Pp] @sign? @num10
 @float10        = @num10 @exp10
-                | (@num10 "." @digs10?) @exp10?
-                | (@sign? @digs10? "." @digs10) @exp10?
+                | (@num10  "." @num10?) @exp10?
+                | (@num10? "." @num10)  @exp10?
 @float16        = @num16 @exp16
-                | (@num16 "." @digs16?) @exp16?
-                | (@sign? "0x" @digs16? "." @digs16) @exp16?
+                | (@num16        "." @digs16?) @exp16?
+                | ("0x" @digs16? "." @digs16) @exp16?
 
 @line_comment   = "--".*
-@block_comment  = "(*" (. | \n)* "*)"
+@not_star       = \n | ~\*
+
+@not_cparen     = [^\*\)] | \n
+@block1_cont    = @not_star | ("*"+ @not_cparen)
+@block_comment1 = "(*" @block1_cont* "*"+ ")"
+
+@not_fslash     = [^\*\/] | \n
+@block2_cont    = @not_star | "*"+ @not_fslash
+@block_comment2 = "/*" @block2_cont* "*"+ "/"
 :-
 
 $white+         { return [] }
 @line_comment   { return [] }
-@block_comment  { return [] }
+@block_comment1 { return [] }
+@block_comment2 { return [] }
+
+"package"           { lexeme TokKwPackage }
+"model"             { lexeme TokKwModel }
+"uses"              { lexeme TokKwUses }
+"needs"             { lexeme TokKwNeeds }
+"provides"          { lexeme TokKwProvides }
+"is"                { lexeme TokKwIs }
+"body"              { lexeme TokKwBody }
+"end"               { lexeme TokKwEnd }
+
+"when"              { lexeme TokKwWhen }
+"current"           { lexeme TokKwCurrent }
+"pre"               { lexeme TokKwPre }
+"fby"               { lexeme TokKwFby }
+"->"                { lexeme TokRightArrow }
+
+"div"               { lexeme TokKwDiv }
+"mod"               { lexeme TokKwMod }
+"+"                 { lexeme TokPlus }
+"-"                 { lexeme TokMinus }
+"*"                 { lexeme TokStar }
+"**"                { lexeme TokStarStar }
+"/"                 { lexeme TokDiv }
 
 
-"when"          { lexeme TokKwWhen }
-"current"       { lexeme TokKwCurrent }
-"pre"           { lexeme TokKwPre }
-"fby"           { lexeme TokKwFby }
-"->"            { lexeme TokRightArrow }
+"with"              { lexeme TokKwWith }
+"if"                { lexeme TokKwIf }
+"else"              { lexeme TokKwElse }
+"then"              { lexeme TokKwThen }
+"merge"             { lexeme TokKwMerge }
 
-"div"           { lexeme TokKwDiv }
-"mod"           { lexeme TokKwMod }
-"+"             { lexeme TokPlus }
-"-"             { lexeme TokMinus }
-"*"             { lexeme TokTimes }
-"/"             { lexeme TokDiv }
+"step"              { lexeme TokKwStep }
+".."                { lexeme TokDotDot }
+"|"                 { lexeme TokBar }
+"^"                 { lexeme TokHat }
 
+"#"                 { lexeme TokHash }
+"not"               { lexeme TokKwNot }
+"xor"               { lexeme TokKwXor }
+"or"                { lexeme TokKwOr }
+"and"               { lexeme TokKwAnd }
+"nor"               { lexeme TokKwNor }
+"true"              { lexeme (TokBool True) }
+"false"             { lexeme (TokBool False) }
 
-"with"          { lexeme TokKwWith }
-"if"            { lexeme TokKwIf }
-"else"          { lexeme TokKwElse }
-"then"          { lexeme TokKwThen }
-
-"step"          { lexeme TokKwStep }
-".."            { lexeme TokDotDot }
-"|"             { lexeme TokBar }
-"^"             { lexeme TokHat }
-
-"#"             { lexeme TokHash }
-"not"           { lexeme TokKwNot }
-"xor"           { lexeme TokKwXor }
-"or"            { lexeme TokKwOr }
-"and"           { lexeme TokKwAnd }
-"nor"           { lexeme TokKwNor }
-"true"          { lexeme (TokBool True) }
-"false"         { lexeme (TokBool False) }
-
-"=>"            { lexeme TokImplies }
-"<"             { lexeme TokLt }
-"<="            { lexeme TokLeq }
-"="             { lexeme TokEq }
-">="            { lexeme TokGeq }
-">"             { lexeme TokGt }
-"<>"            { lexeme TokNotEq }
+"=>"                { lexeme TokImplies }
+"<"                 { lexeme TokLt }
+"<="                { lexeme TokLeq }
+"="                 { lexeme TokEq }
+">="                { lexeme TokGeq }
+">"                 { lexeme TokGt }
+"<>"                { lexeme TokNotEq }
 
 
-"int"           { lexeme TokKwInt }
-"real"          { lexeme TokKwReal }
-"bool"          { lexeme TokKwBool }
+"int"               { lexeme TokKwInt }
+"real"              { lexeme TokKwReal }
+"bool"              { lexeme TokKwBool }
 
-"unsafe"        { lexeme TokKwUnsafe }
-"extern"        { lexeme TokKwExtern }
-"node"          { lexeme TokKwNode }
-"function"      { lexeme TokKwFunction }
-"returns"       { lexeme TokKwReturns }
+"unsafe"            { lexeme TokKwUnsafe }
+"extern"            { lexeme TokKwExtern }
+"node"              { lexeme TokKwNode }
+"function"          { lexeme TokKwFunction }
+"returns"           { lexeme TokKwReturns }
 
-"type"          { lexeme TokKwType }
-"const"         { lexeme TokKwConst }
-"var"           { lexeme TokKwVar }
-"struct"        { lexeme TokKwStruct }
-"enum"          { lexeme TokKwEnum }
+"type"              { lexeme TokKwType }
+"const"             { lexeme TokKwConst }
+"var"               { lexeme TokKwVar }
+"struct"            { lexeme TokKwStruct }
+"enum"              { lexeme TokKwEnum }
+"assert"            { lexeme TokKwAssert }
 
-"%"             { lexeme TokMod }
-":"             { lexeme TokColon }
-"::"            { lexeme TokColonColon }
-","             { lexeme TokComma }
-";"             { lexeme TokSemi }
-"."             { lexeme TokDot }
-"("             { lexeme TokOpenParen }
-")"             { lexeme TokCloseParen }
-"<<"            { lexeme TokOpenTT }
-">>"            { lexeme TokCloseTT }
-"["             { lexeme TokOpenBracket }
-"]"             { lexeme TokCloseBracket }
-"{"             { lexeme TokOpenBrace }
-"}"             { lexeme TokCloseBrace }
-"let"           { lexeme TokKwLet }
-"tel"           { lexeme TokKwTel }
+"%"                 { lexeme TokMod }
+":"                 { lexeme TokColon }
+","                 { lexeme TokComma }
+";"                 { lexeme TokSemi }
+"."                 { lexeme TokDot }
+"("                 { lexeme TokOpenParen }
+")"                 { lexeme TokCloseParen }
+"<<"                { lexeme TokOpenTT }
+">>"                { lexeme TokCloseTT }
+"["                 { lexeme TokOpenBracket }
+"]"                 { lexeme TokCloseBracket }
+"{"                 { lexeme TokOpenBrace }
+"}"                 { lexeme TokCloseBrace }
+"let"               { lexeme TokKwLet }
+"tel"               { lexeme TokKwTel }
 
-@ident          { lexeme TokIdent }
-@num8           { lexeme' . TokInt  . integerAtBase 8  =<< matchText }
-@num10          { lexeme' . TokInt  . integerAtBase 10 =<< matchText }
-@num16          { lexeme' . TokInt  . integerAtBase 16 =<< matchText }
-@float10        { lexeme' . TokReal . floating 10 =<< matchText }
-@float16        { lexeme' . TokReal . floating 16 =<< matchText }
+@ident              { lexeme TokIdent }
+@ident "::" @ident  { qualIdent }
+@num8               { lexeme' . TokInt  . integerAtBase 8  =<< matchText }
+@num10              { lexeme' . TokInt  . integerAtBase 10 =<< matchText }
+@num10 ".."         { numDotDot } -- to avoid conflict with slices
+@num16              { lexeme' . TokInt  . integerAtBase 16 =<< matchText }
+@float10            { lexeme' . TokReal . floating 10 =<< matchText }
+@float16            { lexeme' . TokReal . floating 16 =<< matchText }
 
-.               { lexeme TokError }
+.                   { lexeme TokError }
 
 
 {
 
 data Token =
     TokIdent
+  | TokQualIdent Text Text
   | TokInt !Integer
   | TokReal !Rational
 
+  | TokKwPackage | TokKwModel
+  | TokKwIs
+  | TokKwUses | TokKwNeeds | TokKwProvides
+  | TokKwBody | TokKwEnd
+
   | TokKwIf | TokKwThen | TokKwElse
-  | TokKwWith
+  | TokKwWith | TokKwMerge
+
 
   | TokKwExtern
   | TokKwUnsafe
@@ -164,6 +191,7 @@ data Token =
   | TokKwTel
   | TokKwStruct
   | TokKwEnum
+  | TokKwAssert
 
   | TokKwCurrent
   | TokKwPre
@@ -187,7 +215,6 @@ data Token =
   | TokKwFby
 
   | TokColon
-  | TokColonColon
   | TokComma
   | TokSemi
   | TokDot
@@ -205,7 +232,7 @@ data Token =
   | TokRightArrow
   | TokImplies
   | TokLt | TokLeq | TokEq | TokGeq | TokGt | TokNotEq
-  | TokPlus | TokMinus | TokTimes | TokDiv | TokMod
+  | TokPlus | TokMinus | TokStar | TokStarStar | TokDiv | TokMod
   | TokHash
   | TokHat
   | TokBar
@@ -216,6 +243,26 @@ data Token =
 
 lexeme' :: Token -> Action () [Lexeme Token]
 lexeme' t = lexeme $! t
+
+numDotDot :: Action s [ Lexeme Token ]
+numDotDot =
+  do (num,dots) <- Text.break (== '.') <$> matchText
+     SourceRange { sourceFrom = from, sourceTo = to } <- matchRange
+     let mid = prevPos to
+     return [ Lexeme { lexemeText  = num
+                     , lexemeToken = TokInt (integerAtBase 10 num)
+                     , lexemeRange = SourceRange { sourceFrom = from
+                                                 , sourceTo = prevPos mid } }
+            , Lexeme { lexemeText  = dots
+                     , lexemeToken = TokDotDot
+                     , lexemeRange = SourceRange { sourceFrom = mid
+                                                 , sourceTo = to } }
+            ]
+
+qualIdent :: Action s [ Lexeme Token ]
+qualIdent =
+  do [a,b] <- Text.splitOn "::" <$> matchText
+     lexeme (TokQualIdent a b)
 
 integerAtBase :: Integer -> Text -> Integer
 integerAtBase base txt = if sgn == "-" then negate aval else aval
