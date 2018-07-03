@@ -178,10 +178,14 @@ data Expression = ERange !SourceRange !Expression
 
                 | IfThenElse Expression Expression Expression
                 | WithThenElse Expression Expression Expression
+                  -- ^ Recursive definition
+
                 | Merge Ident [MergeCase]
 
                 | CallPos NodeInst [Expression]
-                | CallNamed Name (Maybe Name) [Field] -- XXX: `with`?
+                | CallNamed Name (Maybe Name) [Field]
+                  -- ^ The 'Maybe' parameter corresponds to @with@
+                  -- and is used for updating structs.
                   deriving Show
 
 data MergeCase  = MergeCase ClockVal Expression
@@ -191,7 +195,11 @@ data ClockExpr  = BaseClock SourceRange
                 | WhenClock SourceRange ClockVal Ident
                   deriving Show
 
-data ClockVal   = ClockIsTrue | ClockIsFalse | ClockIs Name
+data ClockVal   = ClockIsTrue   -- ^ Like @ClockIs true@
+                | ClockIsFalse  -- ^ Like @ClockIs false@
+                | ClockIs Name  -- ^ Activates when the clock variable gets
+                                -- this value.  In this way non-boolean types
+                                -- can be used for clocks.
                   deriving Show
 
 data NodeInst   = NodeInst Name [StaticArg]
@@ -225,7 +233,7 @@ data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
 data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
          | Mul | IntDiv | Mod | Div | Add | Sub | Power
          | Replicate | Concat
-                  deriving Show
+           deriving Show
 
 data OpN = AtMostOne | Nor
                   deriving Show
