@@ -96,8 +96,6 @@ data ConstDef = ConstDef
   , constDef      :: Maybe Expression
   } deriving Show
 
-data Safety = Safe | Unsafe
-              deriving Show
 
 data NodeDecl = NodeDecl
   { nodeSafety       :: Safety
@@ -124,7 +122,13 @@ data NodeProfile = NodeProfile
   , nodeOutputs :: [Binder]
   } deriving Show
 
-data NodeType   = Node | Function
+
+data Safety     = Safe        -- ^ No side effects
+                | Unsafe      -- ^ May have side effects
+                  deriving Show
+
+data NodeType   = Node        -- ^ Nodes may have memory (e.g., use @pre@)
+                | Function    -- ^ Functions do not have memory
                     deriving Show
 
 data Binder = Binder

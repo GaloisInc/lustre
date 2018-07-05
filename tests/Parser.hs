@@ -21,7 +21,7 @@ main =
      let dir = "tests/parser-tests"
      fs0 <- getDirectoryContents dir
      let candidates = [ dir </> f | f <- fs0 ]
-     let candidates = [ dir </> "dadic.lv6" ]
+     -- let candidates = [ dir </> "yav.lv6" ]
      fs  <- filterM doesFileExist candidates
      oks <- mapM parseFromFile fs
      unless (and oks) exitFailure
