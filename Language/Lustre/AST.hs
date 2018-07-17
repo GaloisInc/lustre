@@ -26,6 +26,9 @@ data Ident = Ident
   , identPragmas    :: [Pragma]
   } deriving Show
 
+instance Eq Ident where
+  x == y = identText x == identText y
+
 data Pragma = Pragma
   { pragmaTextA     :: !Text
   , pragmaTextB     :: !Text
@@ -72,7 +75,7 @@ type Pragmas    = [Pragma]
 data Name =
     Unqual Ident
   | Qual SourceRange Text Text
-    deriving Show
+    deriving (Eq,Show)
 
 data Type =
     NamedType Name
@@ -152,19 +155,41 @@ data Equation   = Assert Expression
                   deriving Show
 
 data LHS        = LVar Ident
-                | LSelect LHS Selector
+                | LSelect LHS (Selector Expression)
                   deriving Show
 
-data Selector   = SelectField Ident
-                | SelectElement Expression
-                | SelectSlice ArraySlice
+data Selector e = SelectField Ident
+                | SelectElement e
+                | SelectSlice (ArraySlice e)
                   deriving Show
 
-data ArraySlice = ArraySlice
-  { arrayStart :: Expression
-  , arrayEnd   :: Expression
-  , arrayStep  :: Maybe Expression
+data ArraySlice e = ArraySlice
+  { arrayStart :: e
+  , arrayEnd   :: e
+  , arrayStep  :: Maybe e
   } deriving Show
+
+{-
+
+pre(e) = undefined : e
+
+e1 -> e2 = head e1 : tail e2
+
+nats = 0 -> pre(nats) + 1
+
+
+e `when` c
+
+[1,2,3,4,5,...] `when` [A,B,C,D,E]
+
+[1,    4,   ]
+
+current(e)
+
+[1,1,1,4,4]
+
+
+-}
 
 data Expression = ERange !SourceRange !Expression
                 | Var !Name
@@ -176,13 +201,16 @@ data Expression = ERange !SourceRange !Expression
                 | EOpN OpN [Expression]
 
                 | Tuple ![Expression]
-                | Record ![Field]
                 | Array ![Expression]
-                | Select Expression Selector
+                | Select Expression (Selector Expression)
 
                 | IfThenElse Expression Expression Expression
                 | WithThenElse Expression Expression Expression
-                  -- ^ Recursive definition
+                  {- ^ Used for recursive definitions.
+                    The decision is evaluated in an earlier phase (i.e.,
+                    it is static), and then we get wither the one stream or
+                    the other (i.e., it is not done point-wise as
+                    for if-then-else) -}
 
                 | Merge Ident [MergeCase]
 
@@ -275,7 +303,6 @@ exprRangeMaybe expr =
     EOp1 {}         -> Nothing
     EOpN {}         -> Nothing
     Tuple {}        -> Nothing
-    Record {}       -> Nothing
     Array {}        -> Nothing
     Select {}       -> Nothing
     IfThenElse {}   -> Nothing
