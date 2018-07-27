@@ -498,11 +498,11 @@ clockExpr :: { ClockExpr }
   | 'not' ident                       { WhenClock ($1 <-> $2) ClockIsFalse $2 }
   | 'not' '(' ident ')'               { WhenClock ($1 <-> $4) ClockIsFalse $3 }
 
-arraySel :: { Selector }
+arraySel :: { Selector Expression }
   : expression                        { SelectElement $1 }
   | arraySlice                        { SelectSlice $1 }
 
-arraySlice :: { ArraySlice }
+arraySlice :: { ArraySlice Expression }
   : expression '..' expression Opt(step) { ArraySlice $1 $3 $4 }
 
 step :: { Expression }
