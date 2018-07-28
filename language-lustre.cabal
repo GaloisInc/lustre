@@ -19,6 +19,8 @@ library
                        Language.Lustre.Parser.Monad,
                        Language.Lustre.Semantics,
                        Language.Lustre.Semantics.Stream
+                       Language.Lustre.Semantics.Value
+                       Language.Lustre.Semantics.BuiltIn
 
   build-depends:       base <4.12,
                        alex-tools >=0.4,

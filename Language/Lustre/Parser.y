@@ -407,7 +407,7 @@ expression :: { Expression }
   | expression '<=' expression        { EOp2 $1 Leq      $3 }
   | expression '>' expression         { EOp2 $1 Gt       $3 }
   | expression '>=' expression        { EOp2 $1 Geq      $3 }
-  | expression 'div' expression       { EOp2 $1 IntDiv   $3 }
+  | expression 'div' expression       { EOp2 $1 Div      $3 }
   | expression 'mod' expression       { EOp2 $1 Mod      $3 }
   | expression '-' expression         { EOp2 $1 Sub      $3 }
   | expression '+' expression         { EOp2 $1 Add      $3 }
@@ -472,7 +472,7 @@ simpExpr :: { Expression }
   | simpExpr '<=' simpExpr                    { EOp2 $1 Leq      $3 }
   | simpExpr '>' simpExpr                     { EOp2 $1 Gt       $3 }
   | simpExpr '>=' simpExpr                    { EOp2 $1 Geq      $3 }
-  | simpExpr 'div' simpExpr                   { EOp2 $1 IntDiv   $3 }
+  | simpExpr 'div' simpExpr                   { EOp2 $1 Div      $3 }
   | simpExpr 'mod' simpExpr                   { EOp2 $1 Mod      $3 }
   | simpExpr '-' simpExpr                     { EOp2 $1 Sub      $3 }
   | simpExpr '+' simpExpr                     { EOp2 $1 Add      $3 }
@@ -556,7 +556,7 @@ staticArgGen(nm) :: { (nm,StaticArg) }
   | nm '<='                              { ($1, Op2Arg Leq)     }
   | nm '>'                               { ($1, Op2Arg Gt)      }
   | nm '>='                              { ($1, Op2Arg Geq)     }
-  | nm 'div'                             { ($1, Op2Arg IntDiv)  }
+  | nm 'div'                             { ($1, Op2Arg Div)     }
   | nm 'mod'                             { ($1, Op2Arg Mod)     }
   | nm '-'                               { ($1, Op2Arg Sub)     }
   | nm '+'                               { ($1, Op2Arg Add)     }
@@ -564,9 +564,9 @@ staticArgGen(nm) :: { (nm,StaticArg) }
   | nm '*'                               { ($1, Op2Arg Mul)     }
   | nm 'if'                              { ($1, OpIf)           }
   | nm name '<<' SepBy1(staticArgSep,staticArg) '>>'
-                                        { ($1, NodeArg Node (NodeInst $2 $4) ) }
-  | nm simpleType                       { ($1, TypeArg $2) }
-  | nm simpExpr                         { ($1, ExprArg $2) }
+                                         { ($1, NodeArg Node (NodeInst $2 $4) )}
+  | nm simpleType                        { ($1, TypeArg $2) }
+  | nm simpExpr                          { ($1, ExprArg $2) }
 
 
 -- Names and Identifiers -------------------------------------------------------

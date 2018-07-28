@@ -263,7 +263,7 @@ data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
                   deriving Show
 
 data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
-         | Mul | IntDiv | Mod | Div | Add | Sub | Power
+         | Mul | Mod | Div | Add | Sub | Power
          | Replicate | Concat
            deriving Show
 
