@@ -2,7 +2,7 @@ module Language.Lustre.Semantics.BuiltIn
   ( -- * Static
 
     -- * Constants
-    sInt, sReal, sBool, sArray, sNil
+    sInt, sReal, sBool, sNil
 
     -- ** Coercions
   , sReal2Int, sInt2Real
@@ -16,8 +16,9 @@ module Language.Lustre.Semantics.BuiltIn
     -- ** Arithmetic
   , sNeg, sAdd, sSub, sMul, sDiv, sMod, sPow
 
-    -- * Arrays
-  , sReplicate, sConcat
+    -- * Data structures
+  , sArray, sReplicate, sConcat, sSelectIndex, sSelectSlice
+  , sTuple, sSelectField
 
 
     -- * Reactive
@@ -34,7 +35,7 @@ module Language.Lustre.Semantics.BuiltIn
 
   ) where
 
-import Data.List(genericReplicate,genericDrop)
+import Data.List(genericReplicate,genericDrop,genericIndex,genericLength)
 
 import Language.Lustre.AST
 import Language.Lustre.Semantics.Stream
@@ -56,6 +57,9 @@ sBool x = pure (VBool x)
 
 sArray :: [Value] -> EvalM Value
 sArray x = pure (VArray x)
+
+sTuple :: [Value] -> EvalM Value
+sTuple x = pure (VTuple x)
 
 sNil :: EvalM Value
 sNil = pure VNil
@@ -196,17 +200,63 @@ sITE u v w =
     _       -> typeError "ite" "a `bool`"
 
 
-sReplicate, sConcat :: Value -> Value -> EvalM Value
-
+sReplicate :: Value {-^ Replicate this -} -> Value {-^ Number of times -} ->
+              EvalM Value
 sReplicate = sOp2 $ \u v ->
   case v of
     VInt x -> sArray (genericReplicate x u)
     _      -> typeError "replicate" "an `int`"
 
+sConcat :: Value -> Value -> EvalM Value
 sConcat = sOp2 $ \u v ->
   case (u,v) of
     (VArray xs, VArray ys) -> sArray (xs ++ ys)
     _ -> typeError "concat" "(array,array)"
+
+
+sSelectField :: Ident -> Value -> EvalM Value
+sSelectField f v =
+  case v of
+    VNil -> sNil
+    VStruct _ fs ->
+      case lookup f fs of
+        Just fv -> pure fv
+        Nothing -> crash "select-field" "Missing struct field"
+    _ -> typeError "select-field" "a struct type."
+
+sSelectIndex :: Value {-^ index -} -> Value {- ^ array -} -> EvalM Value
+sSelectIndex = sOp2 $ \i v ->
+  case (v,i) of
+    (VArray vs, VInt iv)
+       | iv < 0      -> pure VNil
+       | otherwise   -> case genericDrop iv vs of
+                          []    -> pure VNil
+                          x : _ -> pure x
+
+    _ -> typeError "select-element" "`(array,int)`"
+
+sSelectSlice :: ArraySlice Value -> Value -> EvalM Value
+sSelectSlice sl v =
+  case (v, start, end, step) of
+    (VNil,_,_,_) -> sNil
+    (_,VNil,_,_) -> sNil
+    (_,_,VNil,_) -> sNil
+    (_,_,_,VNil) -> sNil
+
+    (VArray vs, VInt f, VInt t, VInt s)
+      | f >= 0 && t >= f && t < genericLength vs && s > 0 ->
+            sArray [ genericIndex vs i | i <- [ f, f + s .. t ] ]
+      | otherwise -> crash "get-slice" "Bad arguments"
+
+    _ -> typeError "get-slice" "(array,int,int,int)"
+  where
+  start = arrayStart sl
+  end   = arrayEnd   sl
+  step  = case arrayStep sl of
+            Just s  -> s
+            Nothing -> VInt 1
+
+
 
 
 
@@ -272,18 +322,8 @@ op2 op xs ys =
     Sub     -> defineOp2 "sub" xs ys sSub
     Power   -> defineOp2 "pow" xs ys sPow
 
-    Replicate -> defineOp2 "replicate" xs ys $ \v1 v2 ->
-      case v2 of
-        VInt a -> vArray (genericReplicate a v1)
-        _      -> typeError "replicate" "an `int`"
-
-    Concat -> defineOp2 "concat" xs ys $ \v1 v2 ->
-       case (v1,v2) of
-         (VArray as, VArray bs) -> vArray (as ++ bs)
-         _ -> crash "concat" "Inputs are not arrays."
-
-  where
-  vArray x = pure (VArray x)
+    Replicate -> defineOp2 "replicate" xs ys sReplicate
+    Concat    -> defineOp2 "concat" xs ys sConcat
 
 
 opN :: OpN -> [ReactValue] -> ReactValue
@@ -294,47 +334,8 @@ opN op rv =
 
 
 
-selectOp :: Selector ReactValue -> ReactValue -> ReactValue
-selectOp sel rv =
-  case sel of
-
-    SelectField f -> defineOp1 "get-field" rv $ \v ->
-      case v of
-        VStruct _ fs ->
-           case lookup f fs of
-             Just fv -> pure fv
-             Nothing -> crash "select-field" "Missing struct field"
-        _ -> crash "select-field" "Select from non-struct"
-
-    SelectElement ei -> defineOp2 "get-element" rv ei $ \v i ->
-      case (v,i) of
-        (VArray vs, VInt iv)
-           | iv < 0      -> pure VNil
-           | otherwise   -> case genericDrop iv vs of
-                              []    -> pure VNil
-                              x : _ -> pure x
-        _ -> crash "select-element" "Expected array and integer"
-
-    SelectSlice sl ->
-      let start = arrayStart sl
-          end   = arrayEnd   sl
-          step  = case arrayStep sl of
-                    Just s -> s
-                    Nothing -> sMap one start
-          one x = case x of
-                    Skip n -> Skip n
-                    Emit _ -> Emit (VInt 1)
-      in defineOpN "get-slice" [rv,start,end,step] $ \ ~[arr,from,to,stp] ->
-           case (arr,from,to,stp) of
-             (VArray vs, VInt f, VInt t, VInt s)
-               | f > 0 && t >= 0 && s > 0 ->
-                 let el i = case genericDrop i vs of
-                              []    -> VNil
-                              v : _ -> v
-                 in pure (VArray [ el i | i <- [ f, f + s .. t ] ])
-
-             _ -> crash "get-slice" "Bad arguments"
-
+selectOp :: (Value -> EvalM Value) -> ReactValue -> ReactValue
+selectOp sel rv = defineOp1 "select" rv sel
 
 
 
