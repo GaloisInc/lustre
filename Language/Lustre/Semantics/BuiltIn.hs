@@ -21,6 +21,7 @@ module Language.Lustre.Semantics.BuiltIn
 
 
     -- * Reactive
+  , dNil, dBool, dInt, dReal
   , op1
   , op2
   , opN
@@ -211,6 +212,18 @@ sConcat = sOp2 $ \u v ->
 
 --------------------------------------------------------------------------------
 -- Reactive
+
+dNil :: ReactValue
+dNil = defineConst VNil
+
+dInt :: Integer -> ReactValue
+dInt = defineConst . VInt
+
+dReal :: Rational -> ReactValue
+dReal = defineConst . VReal
+
+dBool :: Bool -> ReactValue
+dBool = defineConst . VBool
 
 
 dTuple :: [ReactValue] -> ReactValue
@@ -412,6 +425,9 @@ defineOpN name xs f = sMapM mkVal (sFold cons Start xs)
                           EmitNil    -> EmitNil
                           Start      -> Ok [v]
                           Ok vs      -> Ok (v:vs)
+
+defineConst :: Value -> ReactValue
+defineConst v = sConst (Emit v)
 
 
 defineOp1 :: String -> ReactValue -> (Value -> EvalM Value) -> ReactValue

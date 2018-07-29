@@ -338,7 +338,7 @@ staticParam :: { StaticParam }
   | 'const' ident ':' type          { ConstParam $2 $4 }
   | Perhaps('unsafe')
     nodeType
-    ident  params 'returns' params  { NodeParam (isUnsafe $1) $2 $3 $4 $6 }
+    ident nodeProfile               { NodeParam (isUnsafe $1) $2 $3 $4 }
 
 localDecls :: { [LocalDecl] }
   : {- empty -}                            { [] }
@@ -437,10 +437,10 @@ expression :: { Expression }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
   | effNode '(' exprList ')'          { at $1 $4 (CallPos $1 $3) }
-  | name '{' '}'                      { at $1 $3 (CallNamed $1 Nothing []) }
-  | name '{' SepEndBy1(';',field) '}' { at $1 $4 (CallNamed $1 Nothing $3) }
+  | name '{' '}'                      { at $1 $3 (Struct $1 Nothing []) }
+  | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 Nothing $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
-                                      { at $1 $6 (CallNamed $1 (Just $3) $5) }
+                                      { at $1 $6 (Struct $1 (Just $3) $5) }
 
   | '(' ')'                           { at $1 $2 (Tuple []) }
   | '(' expression ')'                { at $1 $3 $2 }

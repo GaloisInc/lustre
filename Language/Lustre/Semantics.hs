@@ -35,11 +35,14 @@ data Env = Env
 
 
 evalLiteral :: Literal -> ReactValue
-evalLiteral l = sConst $ Emit $ case l of
-                                  Int n  -> VInt n
-                                  Real r -> VReal r
-                                  Bool b -> VBool b
+evalLiteral l = case l of
+                  Int n  -> dInt n
+                  Real r -> dReal r
+                  Bool b -> dBool b
 
+
+evalConst :: Env -> Expression -> EvalM Value
+evalConst = undefined
 
 evalExpr :: Env -> Expression -> ReactValue
 evalExpr env expr =
@@ -51,15 +54,21 @@ evalExpr env expr =
 
     IfThenElse b t e -> ite (evalExpr env b) (evalExpr env t) (evalExpr env e)
 
-    WithThenElse {} -> error "[evalExpr] XXX: WithThenElse"
+    WithThenElse be t e ->
+      Eff $ do v <- evalConst env be
+               case v of
+                 VNil    -> pure dNil
+                 VBool b -> pure (if b then evalExpr env t else evalExpr env e)
+                 _       -> typeError "wte" "a `bool`"
+
     When {}         -> error "[evalExpr] XXX: When"
     Merge {}        -> error "[evalExpr] XXX: Merge"
     Var {}          -> error "[evalExpr] XXX: Var"
     CallPos {}      -> error "[evalExpr] XXX: CallPos"
-    CallNamed {}    -> error "[evalExpr] XXX: CallNamed"
 
-    Tuple es -> dTuple (map (evalExpr env) es)
-    Array es -> dArray (map (evalExpr env) es)
+    Tuple es        -> dTuple (map (evalExpr env) es)
+    Array es        -> dArray (map (evalExpr env) es)
+    Struct {}       -> error "[evalExpr] XXX: Struct"
 
     Select e sel -> selectOp evalSel (evalExpr env e)
       where evalSel = case sel of

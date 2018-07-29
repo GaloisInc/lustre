@@ -169,27 +169,6 @@ data ArraySlice e = ArraySlice
   , arrayStep  :: Maybe e
   } deriving Show
 
-{-
-
-pre(e) = undefined : e
-
-e1 -> e2 = head e1 : tail e2
-
-nats = 0 -> pre(nats) + 1
-
-
-e `when` c
-
-[1,2,3,4,5,...] `when` [A,B,C,D,E]
-
-[1,    4,   ]
-
-current(e)
-
-[1,1,1,4,4]
-
-
--}
 
 data Expression = ERange !SourceRange !Expression
                 | Var !Name
@@ -203,6 +182,9 @@ data Expression = ERange !SourceRange !Expression
                 | Tuple ![Expression]
                 | Array ![Expression]
                 | Select Expression (Selector Expression)
+                | Struct Name (Maybe Name) [Field]
+                  -- ^ The 'Maybe' parameter corresponds to @with@
+                  -- and is used for updating structs.
 
                 | IfThenElse Expression Expression Expression
                 | WithThenElse Expression Expression Expression
@@ -215,9 +197,6 @@ data Expression = ERange !SourceRange !Expression
                 | Merge Ident [MergeCase]
 
                 | CallPos NodeInst [Expression]
-                | CallNamed Name (Maybe Name) [Field]
-                  -- ^ The 'Maybe' parameter corresponds to @with@
-                  -- and is used for updating structs.
                   deriving Show
 
 data MergeCase  = MergeCase ClockVal Expression
@@ -239,7 +218,7 @@ data NodeInst   = NodeInst Name [StaticArg]
 
 data StaticParam = TypeParam Ident
                  | ConstParam Ident Type
-                 | NodeParam Safety NodeType Ident [Binder] [Binder]
+                 | NodeParam Safety NodeType Ident NodeProfile
                    deriving Show
 
 data StaticArg  = TypeArg Type
@@ -309,7 +288,7 @@ exprRangeMaybe expr =
     WithThenElse {} -> Nothing
     Merge {}        -> Nothing
     CallPos {}      -> Nothing
-    CallNamed {}    -> Nothing
+    Struct {}       -> Nothing
 
 typeRangeMaybe :: Type -> Maybe SourceRange
 typeRangeMaybe ty =
