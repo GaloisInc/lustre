@@ -29,6 +29,9 @@ data Ident = Ident
 instance Eq Ident where
   x == y = identText x == identText y
 
+instance Ord Ident where
+  compare x y = compare (identText x) (identText y)
+
 data Pragma = Pragma
   { pragmaTextA     :: !Text
   , pragmaTextB     :: !Text
@@ -75,7 +78,20 @@ type Pragmas    = [Pragma]
 data Name =
     Unqual Ident
   | Qual SourceRange Text Text
-    deriving (Eq,Show)
+    deriving Show
+
+instance Eq Name where
+  m == n = case (m,n) of
+             (Unqual a, Unqual b)     -> a == b
+             (Qual _ x y, Qual _ p q) -> (x,y) == (p,q)
+             _                        -> False
+
+instance Ord Name where
+  compare m n = case (m,n) of
+                  (Unqual x, Unqual y)     -> compare x y
+                  (Unqual {}, _)           -> LT
+                  (Qual _ x y, Qual _ p q) -> compare (x,y) (p,q)
+                  (Qual {}, _)             -> GT
 
 data Type =
     NamedType Name
