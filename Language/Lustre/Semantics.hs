@@ -15,6 +15,7 @@ module Language.Lustre.Semantics
   where
 
 import Data.Map(Map)
+import qualified Data.Map as Map
 import Control.Monad(join)
 
 import Language.Lustre.AST
@@ -26,6 +27,7 @@ import Language.Lustre.Semantics.BuiltIn
 -- | Interpretations of free names.
 data Env = Env
   { envConsts   :: Map Name Value
+  , envConstFun :: Map Name ([Value] -> EvalM Value)
   , envVars     :: Map Name ReactValue
   , envNodes    :: Map Name ([ReactValue] -> EvalM [ReactValue])
   }
@@ -59,10 +61,17 @@ evalConst env expr =
            _       -> typeError "with-then-else" "A `bool`"
 
     When {}     -> crash "evalConst" "`when` is not a constant expression."
-    Merge {}    -> crash "evalConst" "`merger` is not a constant expression."
+    Merge {}    -> crash "evalConst" "`merge` is not a constant expression."
 
     Var {}      -> error "[evalConst] XXX Var"
-    CallPos {}  -> error "[evalConst] XXX Call"
+    CallPos fe es ->
+      case fe of
+        NodeInst fn [] ->
+          case Map.lookup fn (envConstFun env) of
+            Just f  -> f =<< mapM (evalConst env) es
+            Nothing -> crash "evalConst" "Undefined constant function"
+        _ -> crash "evalConst" "Constant function with static parameters?"
+
 
     Tuple es    -> sTuple =<< mapM (evalConst env) es
     Array es    -> sArray =<< mapM (evalConst env) es
