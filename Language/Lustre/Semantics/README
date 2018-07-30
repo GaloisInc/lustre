@@ -1,0 +1,8 @@
+The semantics are based on information from the following resources,
+as well as exprimentaion with the Lustre implementation.
+
+Additional reading:
+  * Lustre implementation: http://www-verimag.imag.fr/lustre-v6.html
+  * http://www-verimag.imag.fr/DIST-TOOLS/SYNCHRONE/lustre-v6/doc/lv6-ref-man.pdf
+  * https://inst.eecs.berkeley.edu/~ee249/fa07/lecture-lustre-trans.pdf
+  * http://www.cse.unsw.edu.au/~plaice/archive/JAP/P-NYAS92-lustreSemantics.pdf
