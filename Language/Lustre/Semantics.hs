@@ -19,7 +19,6 @@ import qualified Data.Map as Map
 import Control.Monad(join)
 
 import Language.Lustre.AST
-import Language.Lustre.Semantics.Stream
 import Language.Lustre.Semantics.Value
 import Language.Lustre.Semantics.BuiltIn
 
@@ -29,7 +28,7 @@ data Env = Env
   { envConsts   :: Map Name Value
   , envConstFun :: Map Name ([Value] -> EvalM Value)
   , envVars     :: Map Name ReactValue
-  , envNodes    :: Map Name ([ReactValue] -> EvalM [ReactValue])
+  , envNodes    :: Map Name ([Value] -> [ReactValue] -> EvalM [ReactValue])
   }
 
 
@@ -63,7 +62,11 @@ evalConst env expr =
     When {}     -> crash "evalConst" "`when` is not a constant expression."
     Merge {}    -> crash "evalConst" "`merge` is not a constant expression."
 
-    Var {}      -> error "[evalConst] XXX Var"
+    Var x ->
+      case Map.lookup x (envConsts env) of
+        Just v  -> pure v
+        Nothing -> crash "evalConst" ("Undefined variable `" ++ show x ++ "`.")
+
     CallPos fe es ->
       case fe of
         NodeInst fn [] ->
@@ -152,43 +155,57 @@ evalSel env sel =
 
 
 
-evalExpr :: Env -> Expression -> ReactValue
+evalExpr :: Env -> Expression -> EvalM ReactValue
 evalExpr env expr =
 
   case expr of
     ERange _ e -> evalExpr env e
 
     Lit l ->
+      pure $
       case l of
         Int n  -> dInt n
         Real r -> dReal r
         Bool b -> dBool b
 
-    IfThenElse b t e -> ite (evalExpr env b) (evalExpr env t) (evalExpr env e)
+    IfThenElse be te ee ->
+      do b <- evalExpr env be
+         t <- evalExpr env te
+         e <- evalExpr env ee
+         ite b t e
 
     WithThenElse be t e ->
-      Eff $ do v <- evalConst env be
-               case v of
-                 VNil    -> pure dNil
-                 VBool b -> pure (if b then evalExpr env t else evalExpr env e)
-                 _       -> typeError "wte" "a `bool`"
+      do v <- evalConst env be
+         case v of
+           VNil    -> pure dNil
+           VBool b -> if b then evalExpr env t else evalExpr env e
+           _       -> typeError "wte" "a `bool`"
 
     When {}         -> error "[evalExpr] XXX: When"
     Merge {}        -> error "[evalExpr] XXX: Merge"
-    Var {}          -> error "[evalExpr] XXX: Var"
+
+    Var x ->
+      case Map.lookup x (envVars env) of
+        Just r  -> pure r
+        Nothing ->
+          crash "evalExpr" ("Undefined variable: `" ++ show x ++ "`.")
+
     CallPos {}      -> error "[evalExpr] XXX: CallPos"
 
-    Tuple es        -> dTuple (map (evalExpr env) es)
-    Array es        -> dArray (map (evalExpr env) es)
+    Tuple es        -> dTuple =<< mapM (evalExpr env) es
+    Array es        -> dArray =<< mapM (evalExpr env) es
     Struct {}       -> error "[evalExpr] XXX: Struct"
 
     Select e sel ->
-      Eff $ do selF <- evalSel env sel
-               pure (selectOp selF (evalExpr env e))
+      do selF <- evalSel env sel
+         v    <- evalExpr env e
+         selectOp selF v
 
-    EOp1 op e     -> op1 op (evalExpr env e)
-    EOp2 e1 op e2 -> op2 op (evalExpr env e1) (evalExpr env e2)
-    EOpN op es    -> opN op (map (evalExpr env) es)
+    EOp1 op e     -> op1 op =<< evalExpr env e
+    EOp2 e1 op e2 -> do x <- evalExpr env e1
+                        y <- evalExpr env e2
+                        op2 op x y
+    EOpN op es    -> opN op =<< mapM (evalExpr env) es
 
 
 

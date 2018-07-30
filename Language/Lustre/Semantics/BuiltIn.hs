@@ -275,14 +275,13 @@ dReal = defineConst . VReal
 dBool :: Bool -> ReactValue
 dBool = defineConst . VBool
 
-
-dTuple :: [ReactValue] -> ReactValue
+dTuple :: [ReactValue] -> EvalM ReactValue
 dTuple vs = defineOpN "tuple" vs (pure . VTuple)
 
-dArray :: [ReactValue] -> ReactValue
+dArray :: [ReactValue] -> EvalM ReactValue
 dArray vs = defineOpN "array" vs (pure . VArray)
 
-op1 :: Op1 -> ReactValue -> ReactValue
+op1 :: Op1 -> ReactValue -> EvalM ReactValue
 op1 op rv =
   case op of
 
@@ -292,15 +291,15 @@ op1 op rv =
     IntCast   -> defineOp1 "real2int" rv sReal2Int
     RealCast  -> defineOp1 "int2real" rv sInt2Real
 
-    Pre       -> Stream (Emit VNil) rv
-    Current   -> current rv
+    Pre       -> pure (Stream (Emit VNil) (pure rv))
+    Current   -> pure (current rv)
 
 
-op2 :: Op2 -> ReactValue -> ReactValue -> ReactValue
+op2 :: Op2 -> ReactValue -> ReactValue -> EvalM ReactValue
 op2 op xs ys =
   case op of
 
-    Fby     -> fby xs ys
+    Fby     -> pure (fby xs ys)
 
     And     -> defineOp2 "and" xs ys sAnd
     Or      -> defineOp2 "or"  xs ys sOr
@@ -326,7 +325,7 @@ op2 op xs ys =
     Concat    -> defineOp2 "concat" xs ys sConcat
 
 
-opN :: OpN -> [ReactValue] -> ReactValue
+opN :: OpN -> [ReactValue] -> EvalM ReactValue
 opN op rv =
   case op of
     AtMostOne -> defineOpN "at-most-one" rv (sBoolRed "at-most-one" 0 1)
@@ -334,14 +333,13 @@ opN op rv =
 
 
 
-selectOp :: (Value -> EvalM Value) -> ReactValue -> ReactValue
+selectOp :: (Value -> EvalM Value) -> ReactValue -> EvalM ReactValue
 selectOp sel rv = defineOp1 "select" rv sel
 
 
-
 -- | If-then-else
-ite :: ReactValue -> ReactValue -> ReactValue -> ReactValue
-ite xs ys zs = sJn (sZipWith step xs (sZip ys zs))
+ite :: ReactValue -> ReactValue -> ReactValue -> EvalM ReactValue
+ite xs ys zs = sSequence (sZipWith step xs (sZip ys zs))
   where
   step x (y,z) =
     case (x,y,z) of
@@ -357,13 +355,12 @@ ite xs ys zs = sJn (sZipWith step xs (sZip ys zs))
 -- | Get the first values from the first stream, and all other values
 -- from the second one.   Used to "initialize" the second stream.
 fby :: ReactValue -> ReactValue -> ReactValue
-fby xs ys = sMapAccum step False (sZip xs ys)
-  where step (a,b) initialized = (if initialized then b else a, True)
+fby (Stream x _) (Stream _ ys) = Stream x ys
 
 
 -- | The `when` operator. The second argument should be booleans.
-when :: ReactValue -> ReactValue -> ReactValue
-when xs ys = sJn (sZipWith step xs ys)
+when :: ReactValue -> ReactValue -> EvalM ReactValue
+when xs ys = sSequence (sZipWith step xs ys)
   where
   step (Emit a) (Emit mb) =
     case mb of
@@ -399,7 +396,8 @@ data OpNState a = Start | Ok [a] | EmitNil | Skipping !Int | Error String
 -- | The semantics for an N-ary operators.
 --    * The values must all run on the same clock
 --    * If any of the values is Nil, the result is Nil
-defineOpN :: String -> [ReactValue] -> ([Value] -> EvalM Value) -> ReactValue
+defineOpN :: String ->
+             [ReactValue] -> ([Value] -> EvalM Value) -> EvalM ReactValue
 defineOpN name xs f = sMapM mkVal (sFold cons Start xs)
   where
   mkVal s             = case s of
@@ -431,13 +429,13 @@ defineConst :: Value -> ReactValue
 defineConst v = sConst (Emit v)
 
 
-defineOp1 :: String -> ReactValue -> (Value -> EvalM Value) -> ReactValue
+defineOp1 :: String -> ReactValue -> (Value -> EvalM Value) -> EvalM ReactValue
 defineOp1 name xs f = defineOpN name [xs] $ \ ~[as] -> f as
 
 defineOp2 :: String ->
        ReactValue -> ReactValue ->
        (Value -> Value -> EvalM Value) ->
-       ReactValue
+       EvalM ReactValue
 defineOp2 name xs ys f = defineOpN name [xs,ys] $ \ ~[as,bs] -> f as bs
 
 
