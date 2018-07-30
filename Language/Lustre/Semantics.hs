@@ -9,8 +9,8 @@ module Language.Lustre.Semantics
   , ReactValue
   , Step(..)
   , Env(..)
-  , evalExpr
-  , evalConst
+  , evalMultiExpr, evalExpr
+  , evalMultiConst, evalConst
   )
   where
 
@@ -26,7 +26,7 @@ import Language.Lustre.Semantics.BuiltIn
 -- | Interpretations of free names.
 data Env = Env
   { envConsts   :: Map Name Value
-  , envConstFun :: Map Name ([Value] -> EvalM Value)
+  , envConstFun :: Map Name ([Value] -> EvalM [Value])
   , envVars     :: Map Name ReactValue
   , envNodes    :: Map Name ([Value] -> [ReactValue] -> EvalM [ReactValue])
   }
@@ -37,54 +37,78 @@ data Env = Env
 --------------------------------------------------------------------------------
 
 
-
+-- | Evaluate a static expression, corresponding to a single value.
+-- If the expression results in no, or multiple values, then we raise
+-- a type error.
 evalConst :: Env -> Expression -> EvalM Value
 evalConst env expr =
+  do vs <- evalMultiConst env expr
+     case vs of
+       [v] -> pure v
+       _   -> typeError "evalConst" "a single value."
+
+-- | Evaluate multiple static expressions and combine multi-values together.
+evalConsts :: Env -> [Expression] -> EvalM [Value]
+evalConsts env es = concat <$> mapM (evalMultiConst env) es
+
+-- | Evaluate a single static expression, potentially resulting in
+-- multiple values.
+evalMultiConst :: Env -> Expression -> EvalM [Value]
+evalMultiConst env expr =
   case expr of
-    ERange _ e -> evalConst env e
 
+    ERange _ e -> evalMultiConst env e
 
-    Lit l     -> case l of
-                   Int n  -> sInt n
-                   Real n -> sReal n
-                   Bool n -> sBool n
+    Lit l ->
+      one $
+      case l of
+        Int n  -> sInt n
+        Real n -> sReal n
+        Bool n -> sBool n
 
     IfThenElse b t e ->
-      join (sITE <$> evalConst env b <*> evalConst env t <*> evalConst env e)
+      one $
+      join $ sITE <$> evalConst env b <*> evalConst env t <*> evalConst env e
 
     WithThenElse be t e ->
       do bv <- evalConst env be
          case bv of
-           VNil    -> return VNil
-           VBool b -> if b then evalConst env t else evalConst env e
+           VBool b -> if b then evalMultiConst env t else evalMultiConst env e
            _       -> typeError "with-then-else" "A `bool`"
 
-    When {}     -> crash "evalConst" "`when` is not a constant expression."
-    Merge {}    -> crash "evalConst" "`merge` is not a constant expression."
-
+    When {}     -> crash "evalMultiConst" "`when` is not a constant expression."
+    Merge {}    -> crash "evalMultiConst" "`merge` is not a constant expression."
     Var x ->
+      one $
       case Map.lookup x (envConsts env) of
         Just v  -> pure v
-        Nothing -> crash "evalConst" ("Undefined variable `" ++ show x ++ "`.")
+        Nothing -> crash "evalMultiConst"
+                              ("Undefined variable `" ++ show x ++ "`.")
 
     CallPos fe es ->
       case fe of
         NodeInst fn [] ->
           case Map.lookup fn (envConstFun env) of
-            Just f  -> f =<< mapM (evalConst env) es
-            Nothing -> crash "evalConst" "Undefined constant function"
-        _ -> crash "evalConst" "Constant function with static parameters?"
+            Just f  -> f =<< evalConsts env es
+            Nothing -> crash "evalMultiConst" "Undefined constant function"
+        _ -> crash "evalMultiConst" "Constant function with static parameters?"
 
 
-    Tuple es    -> sTuple =<< mapM (evalConst env) es
-    Array es    -> sArray =<< mapM (evalConst env) es
-    Struct {}   -> error "[evalConst] XXX: Struct"
+    Tuple es -> evalConsts env es
+
+    Array es ->
+      one $
+      sArray =<< mapM (evalConst env) es
+
+    Struct {} -> error "[evalMultiConst] XXX: Struct"
 
     Select e sel ->
+      one $
       do selF <- evalSel env sel
          selF =<< evalConst env e
 
     EOp1 op e ->
+      one $
       do v <- evalConst env e
          case op of
            Not       -> sNot v
@@ -92,10 +116,11 @@ evalConst env expr =
            IntCast   -> sReal2Int v
            RealCast  -> sInt2Real v
 
-           Pre       -> crash "evalConst" "`pre` is not a constant"
-           Current   -> crash "evalConst" "`current` is not a constant"
+           Pre       -> crash "evalMultiConst" "`pre` is not a constant"
+           Current   -> crash "evalMultiConst" "`current` is not a constant"
 
     EOp2 e1 op e2 ->
+      one $
       do x <- evalConst env e1
          y <- evalConst env e2
          case op of
@@ -125,16 +150,18 @@ evalConst env expr =
            Concat    -> sConcat x y
 
     EOpN op es ->
-      do vs <- mapM (evalConst env) es
+      one $
+      do vs <- evalConsts env es
          case op of
            AtMostOne -> sBoolRed "at-most-one" 0 1 vs
            Nor       -> sBoolRed "nor" 0 0 vs
 
 
-
+-- | Evaluate a selector.
 evalSel :: Env -> Selector Expression -> EvalM (Value -> EvalM Value)
 evalSel env sel =
   case sel of
+
     SelectField f ->
       pure (sSelectField f)
 
@@ -153,15 +180,29 @@ evalSel env sel =
 
 
 
-
-
+-- | Evaluate an expression to a single reactive value.
+-- It is a type error if the expression evalutes to no, or multiple, values.
 evalExpr :: Env -> Expression -> EvalM ReactValue
 evalExpr env expr =
+  do vs <- evalMultiExpr env expr
+     case vs of
+       [v] -> pure v
+       _   -> typeError "evalExpr" "exactly one result"
+
+-- | Evaluate multiple expressions, and join together multi-values.
+evalExprs :: Env -> [Expression] -> EvalM [ReactValue]
+evalExprs env es = concat <$> mapM (evalMultiExpr env) es
+
+
+-- | Evaluate an expression, which may result in multiple values.
+evalMultiExpr :: Env -> Expression -> EvalM [ ReactValue ]
+evalMultiExpr env expr =
 
   case expr of
-    ERange _ e -> evalExpr env e
+    ERange _ e -> evalMultiExpr env e
 
     Lit l ->
+      one $
       pure $
       case l of
         Int n  -> dInt n
@@ -169,6 +210,7 @@ evalExpr env expr =
         Bool b -> dBool b
 
     IfThenElse be te ee ->
+      one $
       do b <- evalExpr env be
          t <- evalExpr env te
          e <- evalExpr env ee
@@ -177,35 +219,55 @@ evalExpr env expr =
     WithThenElse be t e ->
       do v <- evalConst env be
          case v of
-           VNil    -> pure dNil
-           VBool b -> if b then evalExpr env t else evalExpr env e
-           _       -> typeError "wte" "a `bool`"
+           VBool b -> if b then evalMultiExpr env t else evalMultiExpr env e
+           _       -> typeError "with-then-else" "a `bool`"
 
-    When {}         -> error "[evalExpr] XXX: When"
-    Merge {}        -> error "[evalExpr] XXX: Merge"
+    When {}         -> error "[evalMultiExpr] XXX: When"
+    Merge {}        -> error "[evalMultiExpr] XXX: Merge"
 
     Var x ->
+      one $
       case Map.lookup x (envVars env) of
         Just r  -> pure r
         Nothing ->
-          crash "evalExpr" ("Undefined variable: `" ++ show x ++ "`.")
+          crash "evalMultiExpr" ("Undefined variable: `" ++ show x ++ "`.")
 
-    CallPos {}      -> error "[evalExpr] XXX: CallPos"
+    CallPos ni es ->
+      do f  <- resolveInstance env ni
+         f =<< evalExprs env es
 
-    Tuple es        -> dTuple =<< mapM (evalExpr env) es
-    Array es        -> dArray =<< mapM (evalExpr env) es
-    Struct {}       -> error "[evalExpr] XXX: Struct"
+    Tuple es -> evalExprs env es
+
+    Array es ->
+      one $
+      dArray =<< mapM (evalExpr env) es
+
+    Struct {} -> error "[evalMultiExpr] XXX: Struct"
 
     Select e sel ->
+      one $
       do selF <- evalSel env sel
          v    <- evalExpr env e
          selectOp selF v
 
-    EOp1 op e     -> op1 op =<< evalExpr env e
-    EOp2 e1 op e2 -> do x <- evalExpr env e1
-                        y <- evalExpr env e2
-                        op2 op x y
-    EOpN op es    -> opN op =<< mapM (evalExpr env) es
+    EOp1 op e ->
+      one $
+      op1 op =<< evalExpr env e
 
 
+    EOp2 e1 op e2 ->
+      one $
+      do x <- evalExpr env e1
+         y <- evalExpr env e2
+         op2 op x y
 
+    EOpN op es ->
+      one $
+      opN op =<< evalExprs env es
+
+
+one :: EvalM a -> EvalM [a]
+one x = return <$> x
+
+resolveInstance :: Env -> NodeInst -> EvalM ([ReactValue] -> EvalM [ReactValue])
+resolveInstance = undefined

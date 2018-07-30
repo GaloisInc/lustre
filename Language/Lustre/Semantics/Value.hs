@@ -1,4 +1,7 @@
-module Language.Lustre.Semantics.Value where
+module Language.Lustre.Semantics.Value
+  ( module Language.Lustre.Semantics.Value
+  , Stream(..)
+  ) where
 
 import Language.Lustre.AST
 import Language.Lustre.Semantics.Stream
@@ -11,7 +14,6 @@ data Value    = VInt    !Integer
               | VNil
               | VEnum   !Name !Ident              -- ^ Type, value
               | VStruct !Name ![(Ident,Value)]    -- ^ Type, fields
-              | VTuple  ![Value]
               | VArray  ![Value]
                 deriving Show
 
@@ -23,7 +25,6 @@ instance Eq Value where
       (VBool a, VBool b)       -> a == b
       (VReal a, VReal b)       -> a == b
       (VEnum t1 a, VEnum t2 b) -> t1 == t2 && a == b
-      (VTuple as, VTuple bs)   -> cmpArr as bs    -- Reuse, since we are untyped
       (VArray as, VArray bs)   -> cmpArr as bs
       (VStruct t1 as, VStruct t2 bs) | t1 == t2 -> cmpStr as bs
       _ -> False -- Type error
@@ -56,6 +57,7 @@ instance Eq Value where
 -- | A reactive value represents the evolution of a basic value over time,
 -- as driven by a clock.
 type ReactValue = Stream EvalM Step
+
 
 -- | The evaluation monad.
 type EvalM      = Either Error

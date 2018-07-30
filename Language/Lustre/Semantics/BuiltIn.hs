@@ -18,7 +18,7 @@ module Language.Lustre.Semantics.BuiltIn
 
     -- * Data structures
   , sArray, sReplicate, sConcat, sSelectIndex, sSelectSlice
-  , sTuple, sSelectField
+  , sSelectField
 
 
     -- * Reactive
@@ -27,7 +27,6 @@ module Language.Lustre.Semantics.BuiltIn
   , op2
   , opN
   , dArray
-  , dTuple
 
   , ite
   , when
@@ -57,9 +56,6 @@ sBool x = pure (VBool x)
 
 sArray :: [Value] -> EvalM Value
 sArray x = pure (VArray x)
-
-sTuple :: [Value] -> EvalM Value
-sTuple x = pure (VTuple x)
 
 sNil :: EvalM Value
 sNil = pure VNil
@@ -275,9 +271,6 @@ dReal = defineConst . VReal
 dBool :: Bool -> ReactValue
 dBool = defineConst . VBool
 
-dTuple :: [ReactValue] -> EvalM ReactValue
-dTuple vs = defineOpN "tuple" vs (pure . VTuple)
-
 dArray :: [ReactValue] -> EvalM ReactValue
 dArray vs = defineOpN "array" vs (pure . VArray)
 
@@ -382,8 +375,6 @@ current = sMapAccum step VNil
       Emit a -> (Emit a,     a)
       Skip 0 -> (Emit def,   def)
       Skip n -> (Skip (n-1), def)
-
-
 
 
 

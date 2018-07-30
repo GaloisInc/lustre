@@ -196,6 +196,9 @@ data Expression = ERange !SourceRange !Expression
                 | EOpN OpN [Expression]
 
                 | Tuple ![Expression]
+                  -- ^ These are more like unboxed tuples in Haskell
+
+
                 | Array ![Expression]
                 | Select Expression (Selector Expression)
                 | Struct Name (Maybe Name) [Field]
