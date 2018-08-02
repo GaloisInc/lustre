@@ -17,33 +17,41 @@ library
                        Language.Lustre.Parser.Lexer,
                        Language.Lustre.Parser,
                        Language.Lustre.Parser.Monad,
-
                        Language.Lustre.Core,
-
                        Language.Lustre.Semantics,
-                       Language.Lustre.Semantics.Stream
-                       Language.Lustre.Semantics.Value
-                       Language.Lustre.Semantics.Env
-                       Language.Lustre.Semantics.BuiltIn
-                       Language.Lustre.Semantics.Expression
+                       Language.Lustre.Semantics.Stream,
+                       Language.Lustre.Semantics.Value,
+                       Language.Lustre.Semantics.Env,
+                       Language.Lustre.Semantics.BuiltIn,
+                       Language.Lustre.Semantics.Expression,
                        Language.Lustre.Semantics.Equation
 
   build-depends:       base <4.12,
                        alex-tools >=0.4,
-                       text, array, panic, containers
+                       text, array, panic, containers, GraphSCC, pretty
   build-tools:         alex, happy
   default-language:    Haskell2010
   ghc-options:         -Wall
 
 test-suite lexer
   type: exitcode-stdio-1.0
-  main-is: tests/Lexer.hs
+  hs-source-dirs: tests
+  main-is: Lexer.hs
   build-depends: base, text, language-lustre
 
 test-suite parser
   type: exitcode-stdio-1.0
-  main-is: tests/Parser.hs
+  hs-source-dirs: tests
+  main-is: Parser.hs
   build-depends:
     base, text, filepath, directory, bytestring, language-lustre
+
+test-suite core
+  type: exitcode-stdio-1.0
+  main-is: Core.hs
+  hs-source-dirs: tests
+  build-depends: base, text, language-lustre
+
+
 
 
