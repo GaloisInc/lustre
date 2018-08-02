@@ -356,7 +356,7 @@ equation :: { Equation }
   | SepBy1(',',LHS) '=' expression         { Define $1 $3 }
   | '(' SepBy1(',',LHS) ')' '=' expression { Define $2 $5 }
 
-LHS :: { LHS }
+LHS :: { LHS Expression }
   : ident                                   { LVar $1 }
   | LHS '.' ident                           { LSelect $1 (SelectField $3) }
   | LHS '[' arraySel ']'                    { LSelect $1 $3 }

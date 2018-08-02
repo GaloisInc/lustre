@@ -1,6 +1,7 @@
 module Language.Lustre.Semantics.Expression
   ( evalMultiExpr, evalExpr, evalExprs
   , evalMultiConst, evalConst, evalConsts
+  , evalSel, evalSelFun
   )
   where
 
@@ -80,8 +81,8 @@ evalMultiConst env expr =
 
     Select e sel ->
       one $
-      do selF <- evalSel env sel
-         selF =<< evalConst env e
+      do s <- evalSel env sel
+         evalSelFun s =<< evalConst env e
 
     EOp1 op e ->
       one $
@@ -134,26 +135,34 @@ evalMultiConst env expr =
 
 
 -- | Evaluate a selector.
-evalSel :: Env -> Selector Expression -> EvalM (Value -> EvalM Value)
+evalSel :: Env -> Selector Expression -> EvalM (Selector Value)
 evalSel env sel =
   case sel of
 
     SelectField f ->
-      pure (sSelectField f)
+      pure (SelectField f)
 
     SelectElement ei ->
       do i <- evalConst env ei
-         pure (sSelectIndex i)
+         pure (SelectElement i)
 
     SelectSlice s   ->
       do start <- evalConst env (arrayStart s)
          end   <- evalConst env (arrayEnd s)
          step  <- mapM (evalConst env) (arrayStep s)
-         pure (sSelectSlice ArraySlice { arrayStart = start
-                                       , arrayEnd   = end
-                                       , arrayStep  = step
-                                       })
+         pure (SelectSlice ArraySlice { arrayStart = start
+                                      , arrayEnd   = end
+                                      , arrayStep  = step
+                                      })
 
+
+-- | Evaluate a selector to a selecting function.
+evalSelFun :: Selector Value -> Value -> EvalM Value
+evalSelFun sel v =
+  case sel of
+    SelectField f   -> sSelectField f v
+    SelectElement i -> sSelectIndex i v
+    SelectSlice s   -> sSelectSlice s v
 
 
 -- | Evaluate an expression to a single reactive value.
@@ -202,11 +211,9 @@ evalMultiExpr env expr =
     Merge {}        -> error "[evalMultiExpr] XXX: Merge"
 
     Var x ->
-      one $
-      case Map.lookup x (envVars env) of
-        Just r  -> pure r
-        Nothing ->
-          crash "evalMultiExpr" ("Undefined variable: `" ++ show x ++ "`.")
+      case x of
+        Unqual i | Just v <- lookupLocal env i -> one (pure v)
+        _ -> map defineConst <$> evalMultiConst env expr
 
     CallPos ni es ->
       do f  <- resolveInstance env ni
@@ -220,11 +227,12 @@ evalMultiExpr env expr =
 
     Struct {} -> error "[evalMultiExpr] XXX: Struct"
 
-    Select e sel ->
+    Select e sel -> undefined {-
       one $
-      do selF <- evalSel env sel
-         v    <- evalExpr env e
-         selectOp selF v
+      do s <- evalSel env sel
+         case lookupLocal env e s of
+           Just v  -> pure v
+           Nothing -> -}
 
     EOp1 op e ->
       one $

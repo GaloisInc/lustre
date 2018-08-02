@@ -31,6 +31,7 @@ module Language.Lustre.Semantics.BuiltIn
   , ite
   , when
   , selectOp
+  , defineConst
 
   ) where
 

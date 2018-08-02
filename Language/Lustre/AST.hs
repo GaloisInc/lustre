@@ -167,23 +167,23 @@ data LocalDecl  = LocalVar Binder
                   deriving Show
 
 data Equation   = Assert Expression
-                | Define [LHS] Expression
+                | Define [LHS Expression] Expression
                   deriving Show
 
-data LHS        = LVar Ident
-                | LSelect LHS (Selector Expression)
-                  deriving Show
+data LHS e      = LVar Ident
+                | LSelect (LHS e) (Selector e)
+                  deriving (Show,Eq,Ord)
 
 data Selector e = SelectField Ident
                 | SelectElement e
                 | SelectSlice (ArraySlice e)
-                  deriving Show
+                  deriving (Show, Eq, Ord)
 
 data ArraySlice e = ArraySlice
   { arrayStart :: e
   , arrayEnd   :: e
   , arrayStep  :: Maybe e
-  } deriving Show
+  } deriving (Show, Eq, Ord)
 
 
 data Expression = ERange !SourceRange !Expression
