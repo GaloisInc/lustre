@@ -1,29 +1,65 @@
+{-# Language OverloadedStrings #-}
 module Main(main) where
 
 import System.Exit
 import qualified Data.Text as Text
 
-import Language.Lustre.Core
+import Data.String
 
+import Language.Lustre.Core
 
 main :: IO ()
 main =
-  case orderedEqns ex1 of
+  case ex1 of
     Left err -> do putStrLn "Cycles:"
-                   mapM_ (print . map ppIdent) err
+                   mapM_ (print . map ppBinder) err
                    exitFailure
-    Right ok -> mapM_ (print . ppEqn) ok
+    Right ok -> print (ppNode ok)
 
 
+instance IsString Ident where
+  fromString = Ident . Text.pack
 
-ex1 = [ Eqn (v "nats") (EFby (i 0) (ev "a"))
-      , Eqn (v "a")    (add (ev "b") (i 1))
-      , Eqn (v "b")    (EPre (ev "nats"))
-      ]
+instance IsString Name where
+  fromString = Name . Text.pack
+
+instance IsString Atom where
+  fromString = Var . fromString
+
+instance IsString Expr where
+  fromString = Atom . fromString
+
+instance Num Literal where
+  fromInteger = Int
+
+instance Fractional Literal where
+  fromRational = Real
+
+instance Num Atom where
+  fromInteger = Lit . fromInteger
+
+instance Fractional Atom where
+  fromRational = Lit . fromRational
+
+instance Num Expr where
+  fromInteger = Atom . fromInteger
+
+instance Fractional Expr where
+  fromRational = Atom . fromRational
+
+
+ex1 = toNode <$> orderedEqns
+        [ "nats" ::: TInt := "start" :-> "next"
+        , "next" ::: TInt := Call "add" [ 1, "prev" ]
+        , "prev" ::: TInt := Pre "nats"
+        ]
   where
-  ev      = AVar . v 
-  v x     = Ident (Text.pack x)
-  i x     = ALit (Int x)
-  add a b = ECall (Name "add") [ a,b ]
+  toNode eqns =
+    Node { nName    = "natsFrom"
+         , nInputs  = [ "start" ::: TInt ]
+         , nOutputs = [ "nats" ]
+         , nAsserts = []
+         , nEqns    = eqns
+         }
 
 

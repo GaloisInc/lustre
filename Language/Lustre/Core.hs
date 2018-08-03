@@ -6,9 +6,9 @@ import qualified Data.Text as Text
 import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Graph(SCC(..))
-import Data.Graph.SCC
-import Text.PrettyPrint(Doc, integer, text, (<+>), ($$), nest, vcat, hsep
-                       , parens, punctuate, comma )
+import Data.Graph.SCC(stronglyConnComp)
+import Text.PrettyPrint( Doc, integer, text, (<+>)
+                       , hsep, vcat, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
 
 import Language.Lustre.AST (Literal(..))
@@ -16,54 +16,71 @@ import Language.Lustre.AST (Literal(..))
 data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
 
-data Name     = Name String
+data Name     = Name Text
                 deriving Show
 
-data Atom     = ALit Literal
-              | AVar Ident
+data Type     = TInt | TReal | TBool
                 deriving Show
 
-data Expr     = EAtom Atom
-              | EFby Atom Atom
-              | EPre Atom
-              | EWhen Atom Atom
-              | ECurrent Atom
-              | ECall Name [Atom]
+data Binder   = Ident ::: Type
                 deriving Show
 
-data Eqn      = Eqn Ident Expr
+data Atom     = Lit Literal
+              | Var Ident
                 deriving Show
+
+data Expr     = Atom Atom
+              | Atom :-> Atom
+              | Pre Atom
+              | Atom `When` Atom
+              | Current Atom
+              | Call Name [Atom]
+                deriving Show
+
+data Eqn      = Binder := Expr
+                deriving Show
+
+infix 1 :=
+
+data Node     = Node { nName    :: Name
+                     , nInputs  :: [Binder]
+                     , nOutputs :: [Ident]
+                     , nAsserts :: [Ident]
+                     , nEqns    :: [Eqn]    -- ^ In dependency order
+                     } deriving Show
+
+
 
 
 --------------------------------------------------------------------------------
 usesAtom :: Atom -> Set Ident
 usesAtom atom =
   case atom of
-    ALit _ -> Set.empty
-    AVar x -> Set.singleton x
+    Lit _ -> Set.empty
+    Var x -> Set.singleton x
 
 usesExpr :: Expr -> Set Ident
 usesExpr expr =
   case expr of
-    EAtom a     -> usesAtom a
-    EFby a1 a2  -> Set.union (usesAtom a1) (usesAtom a2)
-    EPre _      -> Set.empty -- refer to values at previous instance
-    EWhen a1 a2 -> Set.union (usesAtom a1) (usesAtom a2)
-    ECurrent a  -> usesAtom a
-    ECall _ as  -> Set.unions (map usesAtom as)
+    Atom a        -> usesAtom a
+    a1 :-> a2     -> Set.union (usesAtom a1) (usesAtom a2)
+    Pre _         -> Set.empty -- refer to values at previous instance
+    a1 `When` a2  -> Set.union (usesAtom a1) (usesAtom a2)
+    Current a     -> usesAtom a
+    Call _ as     -> Set.unions (map usesAtom as)
 
--- | Order the equations.  Returns a cycles on the left, if there are some.
-orderedEqns :: [Eqn] -> Either [ [Ident] ] [ Eqn ]
+-- | Order the equations.  Returns cycles on the left, if there are some.
+orderedEqns :: [Eqn] -> Either [ [Binder] ] [ Eqn ]
 orderedEqns eqns
   | null bad  = Right good
   | otherwise = Left bad
   where
-  graph = map toNode eqns
-  toNode eqn@(Eqn x e) = (eqn, x, Set.toList (usesExpr e))
+  graph = [ (eqn, x, Set.toList (usesExpr e))
+              | eqn <- eqns, let (x ::: _) := e = eqn ]
 
   comps = stronglyConnComp graph
 
-  bad   = [ [ x | Eqn x _ <- xs ] | CyclicSCC xs <- comps ]
+  bad   = [ [ x | x := _ <- xs ] | CyclicSCC xs <- comps ]
   good  = [ x | AcyclicSCC x <- comps ]
 
 
@@ -72,7 +89,17 @@ ppIdent :: Ident -> Doc
 ppIdent (Ident x) = text (Text.unpack x)
 
 ppName :: Name -> Doc
-ppName (Name x) = text x
+ppName (Name x) = text (Text.unpack x)
+
+ppType :: Type -> Doc
+ppType ty =
+  case ty of
+    TInt  -> text "int"
+    TReal -> text "real"
+    TBool -> text "bool"
+
+ppBinder :: Binder -> Doc
+ppBinder (x ::: t) = ppIdent x <+> text ":" <+> ppType t
 
 ppLiteral :: Literal -> Doc
 ppLiteral lit =
@@ -84,26 +111,36 @@ ppLiteral lit =
 ppAtom :: Atom -> Doc
 ppAtom atom =
   case atom of
-    ALit l -> ppLiteral l
-    AVar x -> ppIdent x
+    Lit l -> ppLiteral l
+    Var x -> ppIdent x
 
 ppExpr :: Expr -> Doc
 ppExpr expr =
   case expr of
-    EAtom a     -> ppAtom a
-    EFby a1 a2  -> ppAtom a1 <+> text "->" <+> ppAtom a2
-    EPre a1     -> text "pre" <+> ppAtom a1
-    EWhen a1 a2 -> ppAtom a1 <+> text "when" <+> ppAtom a2
-    ECurrent a  -> text "current" <+> ppAtom a
-    ECall f xs  ->
-      ppName f PP.<> parens (hsep (punctuate comma (map ppAtom xs)))
+    Atom a      -> ppAtom a
+    a :-> b     -> ppAtom a <+> text "->" <+> ppAtom b
+    Pre a       -> text "pre" <+> ppAtom a
+    a `When` b  -> ppAtom a <+> text "when" <+> ppAtom b
+    Current a   -> text "current" <+> ppAtom a
+    Call f as   -> ppName f PP.<> ppTuple (map ppAtom as)
+
+ppTuple :: [Doc] -> Doc
+ppTuple ds = parens (hsep (punctuate comma ds))
 
 ppEqn :: Eqn -> Doc
-ppEqn (Eqn x e) = ppIdent x <+> text "=" <+> ppExpr e
+ppEqn (x := e) = ppBinder x <+> text "=" <+> ppExpr e
 
-ppEqnSCC :: SCC Eqn -> Doc
-ppEqnSCC eqSCC =
-  case eqSCC of
-    AcyclicSCC eqn -> ppEqn eqn
-    CyclicSCC eqns -> text "rec" $$ nest 2 (vcat (map ppEqn eqns))
+ppNode :: Node -> Doc
+ppNode node =
+  text "node" <+> ppName (nName node) <+> ppTuple (map ppBinder (nInputs node))
+  $$ nest 2 (  text "returns" <+> ppTuple (map ppIdent (nOutputs node))
+            $$ text "asserts" <+> ppTuple (map ppIdent (nAsserts node))
+            )
+  $$ text "let"
+  $$ nest 2 (vcat (map ppEqn (nEqns node)))
+  $$ text "tel"
+
+
+
+--------------------------------------------------------------------------------
 
