@@ -17,7 +17,7 @@ data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
 
 data Name     = Name Text
-                deriving Show
+                deriving (Show,Eq,Ord)
 
 data Type     = TInt | TReal | TBool
                 deriving Show
