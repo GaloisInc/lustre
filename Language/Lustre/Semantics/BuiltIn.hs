@@ -380,7 +380,7 @@ current = sMapAccum step VNil
 
 
 --------------------------------------------------------------------------------
-data OpNState a = Start | Ok [a] | EmitNil | Skipping !Int | Error String
+data OpNState a = Start | Ok [a] | EmitNil | Skipping !Integer | Error String
 
 
 

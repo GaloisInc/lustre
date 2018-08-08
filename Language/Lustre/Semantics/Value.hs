@@ -66,7 +66,7 @@ type Error      = String
 -- | A "step" is either an exisitng element,
 -- or an element that has been skipped by a clock.
 data Step     = Emit !Value   -- ^ An existing element.
-              | Skip !Int     -- ^ Skipped by clock at the given depth
+              | Skip !Integer -- ^ Skipped by clock at the given depth
                               -- (0 is the current clock)
 
 -- | Crash evaluation. We'd like to avoid calls to this.
