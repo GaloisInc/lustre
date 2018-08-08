@@ -68,6 +68,7 @@ type Error      = String
 data Step     = Emit !Value   -- ^ An existing element.
               | Skip !Integer -- ^ Skipped by clock at the given depth
                               -- (0 is the current clock)
+                deriving Show
 
 -- | Crash evaluation. We'd like to avoid calls to this.
 crash :: String -> String -> EvalM a
