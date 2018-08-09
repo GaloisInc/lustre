@@ -16,9 +16,6 @@ import Language.Lustre.AST (Literal(..))
 data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
 
-data Name     = Name Text
-                deriving (Show,Eq,Ord)
-
 data Type     = TInt | TReal | TBool
                 deriving Show
 
@@ -34,7 +31,15 @@ data Expr     = Atom Atom
               | Pre Atom
               | Atom `When` Atom
               | Current Atom
-              | Call Name [Atom]
+              | Prim Op [Atom]
+                deriving Show
+
+data Op       = Not | Neg | IntCast | RealCast
+              | And | Or | Xor | Implies
+              | Eq | Neq | Lt | Leq | Gt | Geq
+              | Mul | Mod | Div | Add | Sub | Power
+              | ITE
+              | AtMostOne | Nor
                 deriving Show
 
 data Eqn      = Binder := Expr
@@ -42,8 +47,7 @@ data Eqn      = Binder := Expr
 
 infix 1 :=
 
-data Node     = Node { nName    :: Name
-                     , nInputs  :: [Binder]
+data Node     = Node { nInputs  :: [Binder]
                      , nOutputs :: [Ident]
                      , nAsserts :: [Ident]
                      , nEqns    :: [Eqn]    -- ^ In dependency order
@@ -67,7 +71,7 @@ usesExpr expr =
     Pre _         -> Set.empty -- refer to values at previous instance
     a1 `When` a2  -> Set.union (usesAtom a1) (usesAtom a2)
     Current a     -> usesAtom a
-    Call _ as     -> Set.unions (map usesAtom as)
+    Prim _ as     -> Set.unions (map usesAtom as)
 
 -- | Order the equations.  Returns cycles on the left, if there are some.
 orderedEqns :: [Eqn] -> Either [ [Binder] ] [ Eqn ]
@@ -88,8 +92,8 @@ orderedEqns eqns
 ppIdent :: Ident -> Doc
 ppIdent (Ident x) = text (Text.unpack x)
 
-ppName :: Name -> Doc
-ppName (Name x) = text (Text.unpack x)
+ppPrim :: Op -> Doc
+ppPrim = text . show
 
 ppType :: Type -> Doc
 ppType ty =
@@ -122,7 +126,7 @@ ppExpr expr =
     Pre a       -> text "pre" <+> ppAtom a
     a `When` b  -> ppAtom a <+> text "when" <+> ppAtom b
     Current a   -> text "current" <+> ppAtom a
-    Call f as   -> ppName f PP.<> ppTuple (map ppAtom as)
+    Prim f as   -> ppPrim f PP.<> ppTuple (map ppAtom as)
 
 ppTuple :: [Doc] -> Doc
 ppTuple ds = parens (hsep (punctuate comma ds))
@@ -132,7 +136,7 @@ ppEqn (x := e) = ppBinder x <+> text "=" <+> ppExpr e
 
 ppNode :: Node -> Doc
 ppNode node =
-  text "node" <+> ppName (nName node) <+> ppTuple (map ppBinder (nInputs node))
+  text "node" <+> ppTuple (map ppBinder (nInputs node))
   $$ nest 2 (  text "returns" <+> ppTuple (map ppIdent (nOutputs node))
             $$ text "asserts" <+> ppTuple (map ppIdent (nAsserts node))
             )
