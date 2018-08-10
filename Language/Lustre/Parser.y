@@ -734,13 +734,13 @@ instance ToConstDef (Ident,Type,Expression) where
 toVarDeclBase :: ([Ident], Type) -> [ Binder ]
 toVarDeclBase (xs,t) = [ Binder { binderDefines = x
                                 , binderType    = t
-                                , binderClock   = BaseClock (range x)
+                                , binderClock   = Nothing
                                 } | x <- xs ]
 
 toVarDecl :: ([Ident], Type) -> ClockExpr -> [ Binder ]
 toVarDecl (xs,t) c = [ Binder { binderDefines = x
                               , binderType    = t
-                              , binderClock   = c
+                              , binderClock   = Just c
                               } | x <- xs ]
 
 isUnsafe :: Bool -> Safety

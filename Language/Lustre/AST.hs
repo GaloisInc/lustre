@@ -153,7 +153,7 @@ data NodeType   = Node        -- ^ Nodes may have memory (e.g., use @pre@)
 data Binder = Binder
   { binderDefines :: Ident
   , binderType    :: Type
-  , binderClock   :: ClockExpr
+  , binderClock   :: Maybe ClockExpr  -- ^ 'Nothing' means use base clock
   } deriving Show
 
 
@@ -221,8 +221,7 @@ data Expression = ERange !SourceRange !Expression
 data MergeCase  = MergeCase ClockVal Expression
                   deriving Show
 
-data ClockExpr  = BaseClock SourceRange
-                | WhenClock SourceRange ClockVal Ident
+data ClockExpr  = WhenClock SourceRange ClockVal Ident
                   deriving Show
 
 data ClockVal   = ClockIsTrue   -- ^ Like @ClockIs true@
@@ -284,10 +283,7 @@ instance HasRange Field where
   range (Field x y) = x <-> y
 
 instance HasRange ClockExpr where
-  range e =
-    case e of
-      BaseClock r -> r
-      WhenClock r _ _ -> r
+  range (WhenClock r _ _) = r
 
 exprRangeMaybe :: Expression -> Maybe SourceRange
 exprRangeMaybe expr =
