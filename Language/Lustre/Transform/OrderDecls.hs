@@ -1,4 +1,4 @@
-module Language.Lustre.Transform.OrderDecls where
+module Language.Lustre.Transform.OrderDecls (orderTopDecls) where
 
 import qualified Data.Map as Map
 import Data.Set(Set)

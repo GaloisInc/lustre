@@ -52,6 +52,15 @@ test-suite parser
   build-depends:
     base, text, filepath, directory, bytestring, language-lustre
 
+test-suite order
+  type: exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is: Order.hs
+  build-depends:
+    base, text, filepath, directory, bytestring, language-lustre, pretty-show
+
+
+
 test-suite core
   type: exitcode-stdio-1.0
   main-is: Core.hs
