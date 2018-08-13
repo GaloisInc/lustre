@@ -1,5 +1,5 @@
 module Language.Lustre.Semantics.Const
-  ( evalConst, evalSel, evalSelFun, Env(..))
+  ( evalConst, evalSel, evalSelFun, Env(..), evalIntConst)
   where
 
 import Data.Map ( Map )
@@ -15,6 +15,15 @@ data Env = Env
   , envConstFun :: Map Name ([Value] -> EvalM Value)
   , envStructs  :: Map Name [ (Ident, Maybe Value) ]
   }
+
+
+-- | Evaluate a constant expression of type @int@.
+evalIntConst :: Env -> Expression -> EvalM Integer
+evalIntConst env e =
+  do v <- evalConst env e
+     case v of
+       VInt i -> pure i
+       _      -> typeError "evalIntConst" "an `int`"
 
 
 -- | Evaluate a constant expression.
