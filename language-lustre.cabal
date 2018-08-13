@@ -20,6 +20,7 @@ library
                        Language.Lustre.Core,
 
                        Language.Lustre.Transform.ToCore,
+                       Language.Lustre.Transform.OrderDecls,
 
                        Language.Lustre.Semantics,
                        Language.Lustre.Semantics.Const,
