@@ -4,7 +4,7 @@ module Language.Lustre.Semantics.Const
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
-import Control.Monad(join)
+import Control.Monad(join, msum)
 
 import Language.Lustre.AST
 import Language.Lustre.Semantics.Value
@@ -13,6 +13,7 @@ import Language.Lustre.Semantics.BuiltIn
 data Env = Env
   { envConsts   :: Map Name Value
   , envConstFun :: Map Name ([Value] -> EvalM Value)
+  , envStructs  :: Map Name [ (Ident, Maybe Value) ]
   }
 
 
@@ -38,28 +39,68 @@ evalConst env expr =
            VBool b -> if b then evalConst env t else evalConst env e
            _       -> typeError "with-then-else" "A `bool`"
 
-    When {}   -> crash "evalConst" "`when` is not a constant expression."
-    Merge {}  -> crash "evalConst" "`merge` is not a constant expression."
+    When {}   -> bad "`when` is not a constant expression."
+    Merge {}  -> bad "`merge` is not a constant expression."
 
     Var x ->
       case Map.lookup x (envConsts env) of
         Just v  -> pure v
-        Nothing -> crash "evalConst" ("Undefined variable `" ++ show x ++ "`.")
+        Nothing -> bad ("Undefined variable `" ++ show x ++ "`.")
 
     CallPos fe es ->
       case fe of
         NodeInst fn [] ->
           case Map.lookup fn (envConstFun env) of
             Just f  -> f =<< mapM (evalConst env) es
-            Nothing -> crash "evalConst" "Undefined constant function"
-        _ -> crash "evalConst" "Constant function with static parameters?"
+            Nothing -> bad "Undefined constant function"
+        _ -> bad "Constant function with static parameters?"
 
 
-    Tuple {} -> crash "evalConst" "Unexpected constant tuple."
+    Tuple {} -> bad "Unexpected constant tuple."
 
     Array es -> sArray =<< mapM (evalConst env) es
 
-    Struct {} -> error "[evalMultiConst] XXX: Struct"
+    -- NOTE: we don't report an error if there is a field that
+    -- is not part of a struct.  We assume that another pass checked this.
+    Struct s x fes ->
+      case Map.lookup s (envStructs env) of
+        Just d ->
+          do fs <- Map.fromList <$> mapM evalField fes
+
+             case x of
+               -- New struct value
+               Nothing ->
+                 do fs1 <- mapM newField d
+                    pure (VStruct s fs1)
+                 where
+                 newField (f,mb) =
+                   case msum [ Map.lookup f fs, mb ] of
+                     Just v  -> pure (f,v)
+                     Nothing -> bad ("Missing field `" ++ show f ++ "`.")
+
+               -- Update a struct value
+               Just y ->
+                 case Map.lookup y (envConsts env) of
+                   Just uv ->
+                     case uv of
+                       VStruct s' fs1
+                          | s == s' ->
+                            pure $ VStruct s'
+                                     [ (i,v1)
+                                     | (i,v) <- fs1
+                                     , let v1 = Map.findWithDefault v i fs
+                                     ]
+
+                       _ -> typeError "struct update" ("a `" ++ show x ++ "`.")
+                   Nothing ->
+                     bad ("Undefined struct constant `" ++ show y ++ "`.")
+
+
+        _ -> bad ("Undefined struct type `" ++ show x ++ "`.")
+
+        where
+        evalField (Field f e) = do v <- evalConst env e
+                                   pure (f,v)
 
     Select e sel ->
       do s <- evalSel env sel
@@ -73,14 +114,14 @@ evalConst env expr =
            IntCast   -> sReal2Int v
            RealCast  -> sInt2Real v
 
-           Pre       -> crash "evalMultiConst" "`pre` is not a constant"
-           Current   -> crash "evalMultiConst" "`current` is not a constant"
+           Pre       -> bad "`pre` is not a constant"
+           Current   -> bad "`current` is not a constant"
 
     EOp2 e1 op e2 ->
       do x <- evalConst env e1
          y <- evalConst env e2
          case op of
-           Fby     -> crash "evalConst" "`fby` is not a constant"
+           Fby     -> bad "`fby` is not a constant"
 
            And     -> sAnd x y
            Or      -> sOr x y
@@ -110,6 +151,9 @@ evalConst env expr =
          case op of
            AtMostOne -> sBoolRed "at-most-one" 0 1 vs
            Nor       -> sBoolRed "nor" 0 0 vs
+
+  where
+  bad = crash "evalConst"
 
 
 -- | Evaluate a selector.
