@@ -18,9 +18,14 @@ library
                        Language.Lustre.Parser,
                        Language.Lustre.Parser.Monad,
                        Language.Lustre.Core,
+
+                       Language.Lustre.Transform.ToCore,
+
                        Language.Lustre.Semantics,
-                       Language.Lustre.Semantics.Stream,
+                       Language.Lustre.Semantics.Const,
+
                        Language.Lustre.Semantics.Value,
+                       Language.Lustre.Semantics.Stream,
                        Language.Lustre.Semantics.Env,
                        Language.Lustre.Semantics.BuiltIn,
                        Language.Lustre.Semantics.Expression,
