@@ -244,8 +244,8 @@ constDef :: { [ConstDef] }
 -- Type Declarations -----------------------------------------------------------
 
 typeDecl :: { TypeDecl }
-  : ident                                     { toTypeDecl $1 IsAbstract }
-  | ident '=' typeDef                         { toTypeDecl $1 $3 }
+  : ident                                     { toTypeDecl $1 Nothing }
+  | ident '=' typeDef                         { toTypeDecl $1 (Just $3) }
 
 typeDef :: { TypeDef }
   : type                                               { IsType $1 }
@@ -686,7 +686,7 @@ toMerge r1 x opts = at r1 (last rs) (Merge x cs)
 
 --------------------------------------------------------------------------------
 
-toTypeDecl :: Ident -> TypeDef -> TypeDecl
+toTypeDecl :: Ident -> Maybe TypeDef -> TypeDecl
 toTypeDecl i d = TypeDecl { typeName = i, typeDef = d }
 
 class ToFieldType t where

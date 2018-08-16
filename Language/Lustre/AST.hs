@@ -64,13 +64,12 @@ data TopDecl =
 
 data TypeDecl = TypeDecl
   { typeName :: !Ident
-  , typeDef  :: !TypeDef
+  , typeDef  :: !(Maybe TypeDef)
   } deriving Show
 
 data TypeDef = IsType !Type
              | IsEnum ![ Ident ]
              | IsStruct ![ FieldType ]
-             | IsAbstract
               deriving Show
 
 type Pragmas    = [Pragma]

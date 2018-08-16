@@ -59,6 +59,9 @@ instance Defines a => Defines [a] where
 instance Uses a => Uses (Maybe a) where
   uses = maybe mempty uses
 
+instance Defines a => Defines (Maybe a) where
+  defines = maybe mempty defines
+
 instance (Uses a, Uses b) => Uses (a,b) where
   uses (x,y) = mappend (uses x) (uses y)
 
@@ -94,7 +97,6 @@ instance Uses TypeDef where
       IsType t -> uses t
       IsEnum _ -> mempty
       IsStruct fs -> uses fs
-      IsAbstract -> mempty
 
 instance Defines TypeDef where
   defines td =
@@ -102,8 +104,6 @@ instance Defines TypeDef where
       IsType _ -> mempty
       IsEnum xs -> mconcat (map (aVal . Unqual) xs)
       IsStruct _ -> mempty
-      IsAbstract -> mempty
-
 
 
 instance Uses FieldType where
