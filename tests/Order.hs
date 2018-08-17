@@ -8,11 +8,8 @@ import System.IO(hFlush,stdout)
 import System.Environment(getArgs)
 import Control.Monad(unless, filterM)
 import Control.Exception(catch, SomeException(..), displayException)
-import qualified Data.ByteString as BS
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Text.Encoding.Error as Text
-import Text.Show.Pretty(pPrint)
+import Text.PrettyPrint
+import Data.Graph(SCC(..))
 
 import Language.Lustre.Parser
 import Language.Lustre.AST
@@ -36,11 +33,18 @@ checkFile file =
   do a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
-         do pPrint (orderTopDecls ds)
+         do print $ vcatSep $ map ppSCC $ orderTopDecls ds
             return True
        _ -> do putStrLn "Packages arenot yet supported"
                return False
   `catch` \(SomeException e) ->
             do putStrLn ("[FAIL] " ++ displayException e)
                return False
+
+ppSCC :: Pretty a => SCC a -> Doc
+ppSCC sc =
+  case sc of
+    CyclicSCC xs -> "/* recursive */" $$ nest 2 (vcat (map pp xs))
+    AcyclicSCC x -> pp x
+
 
