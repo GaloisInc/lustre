@@ -8,6 +8,7 @@ module Language.Lustre.Parser.Monad
   ) where
 
 import Control.Monad(liftM,ap)
+import Control.Exception (Exception)
 import Data.Text(Text)
 import AlexTools(prevPos, startPos)
 
@@ -76,6 +77,9 @@ happyGetToken k = Parser $ \ls ->
 
 newtype ParseError = ParseError (Maybe SourcePos) -- ^ Nothing means EOF
                       deriving Show
+
+instance Exception ParseError
+
 
 happyError :: Parser a
 happyError = Parser $ \ls ->
