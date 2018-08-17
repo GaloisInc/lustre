@@ -1,6 +1,7 @@
 {
 module Language.Lustre.Parser
   ( parse, parseStartingAt
+  , parseProgramFromFile
   , program, expression
   , ParseError(..)
   , prettySourcePos, prettySourcePosLong
@@ -8,6 +9,9 @@ module Language.Lustre.Parser
   ) where
 
 import AlexTools
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text
+import Control.Exception(throwIO)
 
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Parser.Monad
@@ -124,8 +128,6 @@ import Language.Lustre.Panic
 
 %left     'else'
 %left     '|'
-%nonassoc 'step'
-%nonassoc '..'
 %nonassoc '->'
 %right    '=>'
 %left     'or' 'xor'
@@ -139,8 +141,7 @@ import Language.Lustre.Panic
 %nonassoc 'int' 'real'
 %nonassoc UMINUS 'pre' 'current'
 %left     '^' '.'
-%right    '[' '{' ';'
-%right    ','
+%right    '['
 %right    'fby'
 
 
@@ -745,4 +746,16 @@ toVarDecl (xs,t) c = [ Binder { binderDefines = x
 
 isUnsafe :: Bool -> Safety
 isUnsafe unsafe = if unsafe then Unsafe else Safe
+
+--------------------------------------------------------------------------------
+
+-- | Parse a UTF8 encoded Lustre program from the given file.
+-- In addition to any exceptions related to reading and decoding the file,
+-- this may throw a 'ParseError' exception if we fail to parse the file.
+parseProgramFromFile :: FilePath -> IO Program
+parseProgramFromFile file =
+  do txt <- Text.readFile file
+     case parse program (Text.pack file) txt of
+       Left err -> throwIO err
+       Right a  -> pure a
 }
