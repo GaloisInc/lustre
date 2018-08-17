@@ -35,7 +35,8 @@ library
 
   build-depends:       base <4.12,
                        alex-tools >=0.4,
-                       text, array, panic, containers, GraphSCC, pretty
+                       bytestring, text, array, panic, containers,
+                       GraphSCC, pretty
   build-tools:         alex, happy
   default-language:    Haskell2010
   ghc-options:         -Wall
@@ -59,8 +60,6 @@ test-suite order
   main-is: Order.hs
   build-depends:
     base, text, filepath, directory, bytestring, language-lustre, pretty-show
-
-
 
 test-suite core
   type: exitcode-stdio-1.0

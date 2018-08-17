@@ -1,7 +1,9 @@
 {
 module Language.Lustre.Parser
   ( parse, parseStartingAt
-  , parseProgramFromFile
+  , parseProgramFrom
+  , parseProgramFromFileUTF8
+  , parseProgramFromFileLatin1
   , program, expression
   , ParseError(..)
   , prettySourcePos, prettySourcePosLong
@@ -9,8 +11,11 @@ module Language.Lustre.Parser
   ) where
 
 import AlexTools
+import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
+import qualified Data.Text.Encoding as Text
+import qualified Data.ByteString as BS
 import Control.Exception(throwIO)
 
 import Language.Lustre.Parser.Lexer
@@ -749,13 +754,28 @@ isUnsafe unsafe = if unsafe then Unsafe else Safe
 
 --------------------------------------------------------------------------------
 
--- | Parse a UTF8 encoded Lustre program from the given file.
--- In addition to any exceptions related to reading and decoding the file,
--- this may throw a 'ParseError' exception if we fail to parse the file.
-parseProgramFromFile :: FilePath -> IO Program
-parseProgramFromFile file =
-  do txt <- Text.readFile file
-     case parse program (Text.pack file) txt of
+-- | Parse a program from the given source.
+-- We throw a 'ParseError' exception if we fail to parse a program.
+parseProgramFrom :: Text    {- ^ Label for parse errors -} ->
+                    IO Text {- ^ The text to parse -} ->
+                    IO Program {- ^ The parsed program, or exception -}
+parseProgramFrom lab io =
+  do txt <- io
+     case parse program lab txt of
        Left err -> throwIO err
        Right a  -> pure a
+
+-- | Parse a program from a UTF-8 encoded file.
+-- May throw 'ParseEror' or exceptions related to reading and decoding the file.
+parseProgramFromFileUTF8 :: FilePath -> IO Program
+parseProgramFromFileUTF8 file =
+  parseProgramFrom (Text.pack file) (Text.readFile file)
+
+-- | Parse a program from a Latin-1 encoded file.
+-- May throw 'ParseEror' or exceptions related to reading and decoding the file.
+parseProgramFromFileLatin1 :: FilePath -> IO Program
+parseProgramFromFileLatin1 file =
+  parseProgramFrom (Text.pack file) (Text.decodeLatin1 <$> BS.readFile file)
+
+
 }
