@@ -80,28 +80,71 @@ instance Pretty Literal where
         t    = fromRational r :: Double
         sh x = integer x <> ".0"
 
--- XXX Prec
+{-
+Precedences:
+1    %left     '|'
+2    %nonassoc '->'
+3    %right    '=>'
+4    %left     'or' 'xor'
+5    %left     'and'
+6    %nonassoc '<' '<=' '=' '>=' '>' '<>'
+7    %nonassoc 'not'                      PREF
+8    %left     '+' '-'
+9    %left     '*' '/' '%' 'mod' 'div'
+10   %left     '**'
+11   %nonassoc 'when'
+12   %nonassoc 'int' 'real'               PREF
+13   %nonassoc UMINUS 'pre' 'current'     PREF
+14   %left     '^' '.'
+15   %right    '['
+-}
 instance Pretty Expression where
   ppPrec n expr =
     case expr of
       ERange _ e    -> ppPrec n e
       Var x         -> pp x
       Lit l         -> pp l
-      EOp1 op e     -> pp op <> parens (pp e)
+      EOp1 op e     -> parenIf (n >= p) doc
+        where doc = pp op <> ppPrec p e
+              p   = case op of
+                      Not      -> 7
+                      IntCast  -> 12
+                      RealCast -> 12
+                      Neg      -> 13
+                      Pre      -> 13
+                      Current  -> 13
 
       EOp2 e1 op e2 -> parenIf (n > p) doc
         where doc = ppPrec lp e1 <+> pp op <+> ppPrec rp e2
               (lp,p,rp) = case op of
-                            _ -> (0,0,0)  -- XXX
+                            Concat  -> (0,0,1)
+                            Fby     -> (2,1,2)
+                            Implies -> (3,2,2)
+                            Or      -> (3,3,4)
+                            Xor     -> (3,3,4)
+                            And     -> (4,4,5)
+                            Lt      -> (6,5,6)
+                            Leq     -> (6,5,6)
+                            Gt      -> (6,5,6)
+                            Geq     -> (6,5,6)
+                            Eq      -> (6,5,6)
+                            Neq     -> (6,5,6)
+                            Add     -> (7,7,8)
+                            Sub     -> (7,7,8)
+                            Mul     -> (8,8,9)
+                            Div     -> (8,8,9)
+                            Mod     -> (8,8,9)
+                            Power   -> (9,9,10)
+                            Replicate -> (13,13,14)
 
-      e `When` ce   -> parenIf (n > 0) doc
-        where doc = ppPrec 1 e <+> "when" <+> pp ce
+      e `When` ce   -> parenIf (n > 10) doc
+        where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce
 
       EOpN op es    -> pp op <> parens (hsep (punctuate comma (map pp es)))
 
       Tuple es      -> parens (hsep (punctuate comma (map pp es)))
       Array es      -> brackets (hsep (punctuate comma (map pp es)))
-      Select e s    -> ppPrec 1 e <> pp s
+      Select e s    -> ppPrec 13 e <> pp s
       Struct s mb fs ->
         pp s <+> braces (mbWith <+> vcat (punctuate semi (map pp fs)))
           where mbWith = case mb of
@@ -110,12 +153,12 @@ instance Pretty Expression where
 
 
       IfThenElse e1 e2 e3  -> parenIf (n > 0) doc
-        where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> pp e2)
-                                   $$ nest 2 ("else" <+> pp e3)
+        where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
+                                   $$ nest 2 ("else" <+> ppPrec 0 e3)
 
       WithThenElse e1 e2 e3 -> parenIf (n > 0) doc
-        where doc = "with" <+> pp e1 $$ nest 2 ("then" <+> pp e2)
-                                     $$ nest 2 ("else" <+> pp e3)
+        where doc = "with" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
+                                     $$ nest 2 ("else" <+> ppPrec 0 e3)
 
       Merge i as  -> parenIf (n > 1) doc
         where doc = "merge" <+> pp i $$ nest 2 (vcat (map pp as))
@@ -196,7 +239,7 @@ instance Pretty Op1 where
 instance Pretty Op2 where
   ppPrec _ op =
     case op of
-      Fby         -> "fby"
+      Fby         -> "->"
       And         -> "and"
       Or          -> "or"
       Xor         -> "xor"
