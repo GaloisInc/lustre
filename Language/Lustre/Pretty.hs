@@ -2,6 +2,7 @@
 module Language.Lustre.Pretty where
 
 import Data.Text (Text)
+import Data.List(intersperse)
 import qualified Data.Text as Text
 import Text.PrettyPrint hiding ( (<>) )
 import qualified Text.PrettyPrint as PP
@@ -16,16 +17,9 @@ class Pretty t where
 pp :: Pretty t => t -> Doc
 pp = ppPrec 0
 
+vcatSep :: [Doc] -> Doc
+vcatSep = vcat . intersperse " "
 
-{-
-instance Pretty TopDecl where
-  ppPrec n td =
-    case td of
-      DeclareType td      -> ppPrec n td
-      DeclareConst cd     -> ppPrec n cd
-      DeclareNode nd      -> ppPrec n nd
-      DeclareNodeInst nid -> ppPrec n nid
--}
 
 instance Pretty Text where
   ppPrec _ = text . Text.unpack
@@ -39,6 +33,26 @@ instance Pretty Name where
       Unqual i   -> ppPrec n i
       Qual _ x y -> ppPrec n x PP.<> "::" PP.<> ppPrec n y
 
+--------------------------------------------------------------------------------
+
+
+instance Pretty TopDecl where
+  ppPrec n td =
+    case td of
+      DeclareType dt      -> ppPrec n dt
+      DeclareConst cd     -> ppPrec n cd <> semi
+      DeclareNode nd      -> ppPrec n nd
+      DeclareNodeInst nid -> ppPrec n nid
+
+instance Pretty ConstDef where
+  ppPrec _ def = "const" <+> pp (constName def) <+>
+                  opt ":" (constType def) <+>
+                  opt "=" (constDef def)
+    where
+    opt x y = case y of
+                Nothing -> empty
+                Just a  -> x <+> pp a
+
 instance Pretty TypeDecl where
   ppPrec _ t = "type" <+> pp (typeName t) <+> mbDef
     where mbDef = case typeDef t of
@@ -51,6 +65,86 @@ instance Pretty TypeDef where
       IsType t    -> pp t
       IsEnum is   -> "enum" <+> braces (hsep (punctuate comma (map pp is)))
       IsStruct fs -> braces (vcat (punctuate semi (map pp fs)))
+
+instance Pretty NodeInstDecl where
+  ppPrec _ nid =
+    ppSafetyOpt (nodeInstSafety nid) <+>
+    pp (nodeInstType nid) <+>
+    pp (nodeInstName nid) <+>
+    ppSaticParams (nodeInstStaticInputs nid) <+>
+    profDoc <+>
+    "=" <+> pp (nodeInstDef nid) PP.<> semi
+    where
+    profDoc =
+      case nodeInstProfile nid of
+        Nothing -> empty
+        Just p  -> pp p
+
+ppSaticParams :: [StaticParam] -> Doc
+ppSaticParams xs =
+  case xs of
+    [] -> empty
+    _  -> "<<" PP.<> hsep (punctuate semi (map pp xs)) PP.<> ">>"
+
+instance Pretty NodeProfile where
+  ppPrec _ np =
+    parens (hsep (punctuate semi (map pp (nodeInputs np)))) <+>
+    "returns" <+> parens (hsep (punctuate semi (map pp (nodeOutputs np))))
+
+instance Pretty Binder where
+  ppPrec _ b = pp (binderDefines b) <+> ":" <+> pp (binderType b) <+> clockDoc
+    where clockDoc = case binderClock b of
+                       Nothing -> empty
+                       Just c  -> "when" <+> pp c
+
+instance Pretty StaticParam where
+  ppPrec _ sp =
+    case sp of
+      TypeParam i         -> "type" <+> pp i
+      ConstParam i t      -> "const" <+> pp i <+> ":" <+> pp t
+      NodeParam s nt f p  -> ppSafetyOpt s <+> pp nt <+> pp f <+> pp p
+
+
+instance Pretty NodeDecl where
+  ppPrec _ nd =
+    ppSafetyOpt (nodeSafety nd) <+>
+    (if nodeExtern nd then "extern" else empty) <+>
+    pp (nodeType nd) <+>
+    pp (nodeName nd) <+>
+    ppSaticParams (nodeStaticInputs nd) <+>
+    pp (nodeProfile nd) $$
+    bodyDoc
+    where bodyDoc = case nodeDef nd of
+                      Nothing -> semi
+                      Just x  -> pp x
+
+instance Pretty NodeBody where
+  ppPrec _ nb =
+    vcat [ pp d <> semi | d <- nodeLocals nb ] $$
+    "let" $$
+    nest 2 (vcat [ pp d <> semi | d <- nodeEqns nb ]) $$
+    "tel"
+
+instance Pretty LocalDecl where
+  ppPrec _ ld =
+    case ld of
+      LocalVar b   -> "var" <+> pp b
+      LocalConst c -> "const" <+> pp c
+
+instance Pretty Equation where
+  ppPrec _ eqn =
+    case eqn of
+      Assert e -> "assert" <+> pp e
+      Define ls e -> hsep (punctuate comma (map pp ls)) <+> "=" <+> pp e
+
+instance Pretty e => Pretty (LHS e) where
+  ppPrec _ lhs =
+    case lhs of
+      LVar x      -> pp x
+      LSelect l s -> pp l <> pp s
+
+--------------------------------------------------------------------------------
+
 
 instance Pretty FieldType where
   ppPrec _ ft = pp (fieldName ft) <+> pp (fieldType ft) <+> optVal
@@ -105,7 +199,7 @@ instance Pretty Expression where
       Var x         -> pp x
       Lit l         -> pp l
       EOp1 op e     -> parenIf (n >= p) doc
-        where doc = pp op <> ppPrec p e
+        where doc = pp op <+> ppPrec p e
               p   = case op of
                       Not      -> 7
                       IntCast  -> 12
@@ -114,28 +208,32 @@ instance Pretty Expression where
                       Pre      -> 13
                       Current  -> 13
 
-      EOp2 e1 op e2 -> parenIf (n > p) doc
+      EOp2 e1 op e2 -> parenIf (n >= p) doc
         where doc = ppPrec lp e1 <+> pp op <+> ppPrec rp e2
+              left x  = (x-1,x,x)
+              right x = (x,x,x-1)
+              non x   = (x,x,x)
+
               (lp,p,rp) = case op of
-                            Concat  -> (0,0,1)
-                            Fby     -> (2,1,2)
-                            Implies -> (3,2,2)
-                            Or      -> (3,3,4)
-                            Xor     -> (3,3,4)
-                            And     -> (4,4,5)
-                            Lt      -> (6,5,6)
-                            Leq     -> (6,5,6)
-                            Gt      -> (6,5,6)
-                            Geq     -> (6,5,6)
-                            Eq      -> (6,5,6)
-                            Neq     -> (6,5,6)
-                            Add     -> (7,7,8)
-                            Sub     -> (7,7,8)
-                            Mul     -> (8,8,9)
-                            Div     -> (8,8,9)
-                            Mod     -> (8,8,9)
-                            Power   -> (9,9,10)
-                            Replicate -> (13,13,14)
+                            Concat  -> left 1
+                            Fby     -> non 2
+                            Implies -> right 3
+                            Or      -> left 4
+                            Xor     -> left 4
+                            And     -> left 5
+                            Lt      -> non 6
+                            Leq     -> non 6
+                            Gt      -> non 6
+                            Geq     -> non 6
+                            Eq      -> non 6
+                            Neq     -> non 6
+                            Add     -> left 8
+                            Sub     -> left 8
+                            Mul     -> left 9
+                            Div     -> left 9
+                            Mod     -> left 9
+                            Power   -> left 10
+                            Replicate -> left 14
 
       e `When` ce   -> parenIf (n > 10) doc
         where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce
@@ -225,6 +323,20 @@ instance Pretty NodeType where
     case nt of
       Node     -> "node"
       Function -> "function"
+
+-- | Pretty print a safety, but don't say anything if safe.
+ppSafetyOpt :: Safety -> Doc
+ppSafetyOpt saf =
+  case saf of
+    Safe -> empty
+    Unsafe -> "unsafe"
+
+instance Pretty Safety where
+  ppPrec _ saf =
+    case saf of
+      Safe   -> "/* safe */"   -- so that it makes sense when printed
+                               -- on its own
+      Unsafe -> "unsafe"
 
 instance Pretty Op1 where
   ppPrec _ op =
