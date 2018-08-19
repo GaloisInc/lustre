@@ -256,15 +256,15 @@ data Field      = Field Ident Expression
 
 
 data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
-                  deriving Show
+                  deriving (Show, Eq, Ord)
 
 data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
          | Mul | Mod | Div | Add | Sub | Power
          | Replicate | Concat
-           deriving Show
+           deriving (Show, Eq, Ord)
 
 data OpN = AtMostOne | Nor
-                  deriving Show
+                  deriving (Show, Eq, Ord)
 
 instance HasRange Ident where
   range = identRange
