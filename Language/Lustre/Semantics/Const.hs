@@ -12,7 +12,6 @@ import Language.Lustre.Semantics.BuiltIn
 
 data Env = Env
   { envConsts   :: Map Name Value
-  , envConstFun :: Map Name ([Value] -> EvalM Value)
   , envStructs  :: Map Name [ (Ident, Maybe Value) ]
   }
 
@@ -27,6 +26,7 @@ evalIntConst env e =
 
 
 -- | Evaluate a constant expression.
+-- Note this does not produce 'Nil' values, unless some came in the 'Env'.
 evalConst :: Env -> Expression -> EvalM Value
 evalConst env expr =
   case expr of
@@ -56,16 +56,8 @@ evalConst env expr =
         Just v  -> pure v
         Nothing -> bad ("Undefined variable `" ++ show x ++ "`.")
 
-    CallPos fe es ->
-      case fe of
-        NodeInst fn [] ->
-          case Map.lookup fn (envConstFun env) of
-            Just f  -> f =<< mapM (evalConst env) es
-            Nothing -> bad "Undefined constant function"
-        _ -> bad "Constant function with static parameters?"
-
-
-    Tuple {} -> bad "Unexpected constant tuple."
+    CallPos fe es -> bad "`call` is not a constant expression."
+    Tuple {}      -> bad "Unexpected constant tuple."
 
     Array es -> sArray =<< mapM (evalConst env) es
 
