@@ -499,10 +499,10 @@ field :: { Field }
   : ident '=' expression              { Field $1 $3 }
 
 clockExpr :: { ClockExpr }
-  : name '(' ident ')'                { WhenClock ($1 <-> $4) (ClockIs $1) $3 }
-  | ident                             { WhenClock (range $1)  ClockIsTrue $1  }
-  | 'not' ident                       { WhenClock ($1 <-> $2) ClockIsFalse $2 }
-  | 'not' '(' ident ')'               { WhenClock ($1 <-> $4) ClockIsFalse $3 }
+  : name '(' ident ')'    { WhenClock ($1 <-> $4) (Var $1) $3 }
+  | ident                 { WhenClock (range $1)  (Lit (Bool True)) $1  }
+  | 'not' ident           { WhenClock ($1 <-> $2) (Lit (Bool False)) $2 }
+  | 'not' '(' ident ')'   { WhenClock ($1 <-> $4) (Lit (Bool False)) $3 }
 
 arraySel :: { Selector Expression }
   : expression                        { SelectElement $1 }

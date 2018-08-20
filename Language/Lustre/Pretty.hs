@@ -297,9 +297,9 @@ instance Pretty e => Pretty (ArraySlice e) where
 instance Pretty ClockExpr where
   ppPrec _ (WhenClock _ cv i) =
     case cv of
-      ClockIsTrue   -> pp i
-      ClockIsFalse  -> "not" <+> pp i
-      ClockIs x     -> pp x <> parens (pp i)
+      Lit (Bool True)  -> pp i
+      Lit (Bool False) -> "not" <+> pp i
+      _                -> ppPrec 15 cv <> parens (pp i)
 
 instance Pretty NodeInst where
   ppPrec _ (NodeInst x as) =

@@ -220,7 +220,11 @@ data Expression = ERange !SourceRange !Expression
 data MergeCase  = MergeCase ClockVal Expression
                   deriving Show
 
-data ClockExpr  = WhenClock SourceRange ClockVal Ident
+-- | The clock activates when the identifier has the given expression.
+-- In the surface syntax, the expression is restricted to `ClockVal`
+-- but allowing arbitrary expressions is more convenient for manipulating
+-- already validated syntax (e.g., we can allow arbitrary values).
+data ClockExpr  = WhenClock SourceRange Expression Ident
                   deriving Show
 
 data ClockVal   = ClockIsTrue   -- ^ Like @ClockIs true@
