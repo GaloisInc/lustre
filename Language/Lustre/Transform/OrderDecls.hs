@@ -176,7 +176,13 @@ instance Defines NodeInstDecl where
   defines nd = aVal (Unqual (nodeInstName nd))
 
 instance Uses NodeInst where
-  uses (NodeInst x as) = aVal x <> uses as
+  uses (NodeInst x as) = uses (x,as)
+
+instance Uses Callable where
+  uses c =
+    case c of
+      CallUser n  -> aVal n
+      CallIter {} -> mempty
 
 instance Uses Expression where
   uses expr =

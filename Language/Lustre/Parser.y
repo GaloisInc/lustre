@@ -1,4 +1,5 @@
 {
+{-# Language OverloadedStrings #-}
 module Language.Lustre.Parser
   ( parse, parseStartingAt
   , parseProgramFrom
@@ -519,8 +520,8 @@ exprList :: { [Expression] }
   | {- empty -}                       { [] }
 
 effNode :: { NodeInst }
-  : name                                          { NodeInst $1 [] }
-  | name '<<' SepBy1(staticArgSep,staticArg) '>>' { NodeInst $1 $3 }
+  : name                                          { toNodeInst $1 [] }
+  | name '<<' SepBy1(staticArgSep,staticArg) '>>' { toNodeInst $1 $3 }
 
 
 -- Static Arguments ------------------------------------------------------------
@@ -570,7 +571,7 @@ staticArgGen(nm) :: { (nm,StaticArg) }
   | nm '*'                               { ($1, Op2Arg Mul)     }
   | nm 'if'                              { ($1, OpIf)           }
   | nm name '<<' SepBy1(staticArgSep,staticArg) '>>'
-                                         { ($1, NodeArg Node (NodeInst $2 $4) )}
+                                    { ($1, NodeArg Node (toNodeInst $2 $4) )}
   | nm simpleType                        { ($1, TypeArg $2) }
   | nm simpExpr                          { ($1, ExprArg $2) }
 
@@ -751,6 +752,25 @@ toVarDecl (xs,t) c = [ Binder { binderDefines = x
 
 isUnsafe :: Bool -> Safety
 isUnsafe unsafe = if unsafe then Unsafe else Safe
+
+--------------------------------------------------------------------------------
+
+toNodeInst :: Name -> [ StaticArg ] -> NodeInst
+toNodeInst nm xs = NodeInst c xs
+  where
+  c = case nm of
+        Unqual i
+          -- XXX: Use KW? Or maybe just use names everywhere and
+          -- identify built-ins in some name resultion pass...
+          | txt == "fill"     -> iter IterFill
+          | txt == "red"      -> iter IterRed
+          | txt == "fillred"  -> iter IterFillRed
+          | txt == "map"      -> iter IterMap
+          | txt == "boolred"  -> iter IterBoolRed
+          where
+          txt  = identText i
+          iter = CallIter (identRange i)
+        _ -> CallUser nm
 
 --------------------------------------------------------------------------------
 

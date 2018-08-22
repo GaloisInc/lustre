@@ -56,7 +56,7 @@ evalConst env expr =
         Just v  -> pure v
         Nothing -> bad ("Undefined variable `" ++ show x ++ "`.")
 
-    CallPos fe es -> bad "`call` is not a constant expression."
+    CallPos {} -> bad "`call` is not a constant expression."
     Tuple {}      -> bad "Unexpected constant tuple."
 
     Array es -> sArray =<< mapM (evalConst env) es

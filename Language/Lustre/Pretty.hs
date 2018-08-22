@@ -14,9 +14,15 @@ import Language.Lustre.AST
 class Pretty t where
   ppPrec :: Int -> t -> Doc
 
+-- | Pretty print with precedence 0.
 pp :: Pretty t => t -> Doc
 pp = ppPrec 0
 
+-- | Pretty print with precedence 0, then convert to a 'String'.
+showPP :: Pretty t => t -> String
+showPP = show . pp
+
+-- | Join vertically, with a space between each element.
 vcatSep :: [Doc] -> Doc
 vcatSep = vcat . intersperse " "
 
@@ -306,6 +312,21 @@ instance Pretty NodeInst where
     case as of
       [] -> pp x
       _  -> pp x <+> "<<" PP.<> hsep (punctuate comma (map pp as)) PP.<> ">>"
+
+instance Pretty Callable where
+  ppPrec p c =
+    case c of
+      CallUser n -> ppPrec p n
+      CallIter _ i -> ppPrec p i
+
+instance Pretty Iter where
+  ppPrec _ i =
+    case i of
+      IterFill    -> "fill"
+      IterRed     -> "red"
+      IterFillRed -> "fillred"
+      IterMap     -> "map"
+      IterBoolRed -> "boolred"
 
 instance Pretty StaticArg where
   ppPrec n arg =

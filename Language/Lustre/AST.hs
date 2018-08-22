@@ -234,7 +234,29 @@ data ClockVal   = ClockIsTrue   -- ^ Like @ClockIs true@
                                 -- can be used for clocks.
                   deriving Show
 
-data NodeInst   = NodeInst Name [StaticArg]
+data NodeInst   = NodeInst Callable [StaticArg]
+                  deriving Show
+
+-- | Things that may be called
+data Callable   = CallUser Name             -- ^ A user-defined node
+                | CallIter SourceRange Iter -- ^ An array iteratir
+                  deriving Show
+
+-- | Built-in array iterators
+data Iter       = IterFill        -- ^ Like @unfold@, but returns state;
+                                  -- can generate multiple arrays at once
+
+                | IterRed         -- ^ Like @fold@, but can fold multiple
+                                  -- arrays at once
+
+                | IterFillRed     -- ^ @fill@ and @red@ at the same time:
+                                  -- the folding accumulator is the unfolding
+                                  -- state
+
+                | IterMap         -- ^ Like @fillred@ but with no accumulator
+
+                | IterBoolRed     -- ^ Check if number of @True@s is within
+                                  -- some bound
                   deriving Show
 
 data StaticParam = TypeParam Ident
@@ -357,6 +379,12 @@ instance HasRange StaticArg where
 
 instance HasRange NodeInst where
   range (NodeInst x _) = range x  -- or args?
+
+instance HasRange Callable where
+  range c =
+    case c of
+      CallUser n -> range n
+      CallIter r _ -> r
 
 instance HasRange Package where
   range = packageRange

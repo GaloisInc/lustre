@@ -62,13 +62,7 @@ evalMultiConst env expr =
         Nothing -> crash "evalMultiConst"
                               ("Undefined variable `" ++ show x ++ "`.")
 
-    CallPos fe es ->
-      case fe of
-        NodeInst fn [] ->
-          case Map.lookup fn (envConstFun env) of
-            Just f  -> f =<< evalConsts env es
-            Nothing -> crash "evalMultiConst" "Undefined constant function"
-        _ -> crash "evalMultiConst" "Constant function with static parameters?"
+    CallPos {} -> crash "evalMultiConst" "calls are not constant."
 
 
     Tuple es -> evalConsts env es
