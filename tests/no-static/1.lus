@@ -1,0 +1,17 @@
+
+
+function f << const a : int >> (b : int) returns (c : int)
+let
+  c = a + b;
+tel
+
+
+function g (a : int; b : int) returns (c : int)
+let
+  c = f<<1>> (b);
+tel
+
+
+
+
+

@@ -1,0 +1,18 @@
+
+
+function f << const a : int >> (b : int) returns (c : int)
+let
+  c = a + b;
+tel
+
+
+function g (a : int; b : int) returns (c : int)
+  const x = 2;
+let
+  c = f<<x>> (b);
+tel
+
+
+
+
+

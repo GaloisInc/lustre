@@ -1,5 +1,9 @@
 {-# Language OverloadedStrings #-}
-module Language.Lustre.Transform.NoStatic where
+{-| This module removes static arguments by constant propagation
+and folding.  We also name different instances of nodes with static parameters,
+and have the option to expand those.
+-}
+module Language.Lustre.Transform.NoStatic (quickEvalDecls) where
 
 import Data.Text(Text)
 import qualified Data.Text as Text
@@ -14,6 +18,26 @@ import Language.Lustre.Semantics.Value
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Pretty
 
+
+-- XXX
+quickEvalDecls :: Bool -> [TopDecl] -> [TopDecl]
+quickEvalDecls expand ds = reverse (readyDecls env)
+  where
+  env = evalTopDecls emptyEnv { expandNodeInsts = expand } ds
+
+
+-- | Does not expand node instances
+emptyEnv :: Env
+emptyEnv = Env { cEnv = C.emptyEnv
+               , enumInfo = Map.empty
+               , typeAliases = Map.empty
+               , nodeTemplates = Map.empty
+               , readyDecls = []
+               , nodeArgs = Map.empty
+               , curModule = Nothing
+               , expandNodeInsts = False
+               , envNameInstSeed = 0
+               }
 
 
 
@@ -38,18 +62,24 @@ data Env = Env
 
   , readyDecls    :: [TopDecl]
 
-  , nodeArgs      :: Map Ident StaticArg
+  , nodeArgs      :: Map Ident NodeInst
     -- ^ Instantiated node arguments: if the node argument was an instantiation,
     -- then we first instantiate the template, give it a name, and use
     -- that name.  So, we should never have any remaining static
     -- arguments.
 
   , curModule :: Maybe Text
-    -- If this is 'Just', then we use this to qualify top-level
+    -- ^ If this is 'Just', then we use this to qualify top-level
     -- 'Ident' when we need a name 'Name'
 
-  , envNameSeed :: !Int
-    -- ^ State used for naming calls to functions with static arguments.
+  , expandNodeInsts :: Bool
+    {- ^ Should we expand node instances, or leave them named at the
+        top level.  Note that we don't do any sharing at the moment,
+        so multiple identical instantiations would be simply copies
+        of each other. -}
+
+  , envNameInstSeed :: !Int
+    -- ^ For generating names for function instantiations (not-expanded)
 
   }
 
@@ -133,7 +163,7 @@ evalDynExpr env expr =
     Select e s      -> do e' <- evalDynExpr env e
                           pure (Select e' (evalSel env s))
 
-    Struct s mb fs  -> undefined
+    Struct s mb fs  -> undefined -- XXX
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
@@ -143,7 +173,7 @@ evalDynExpr env expr =
                       , "*** Value: " ++ showPP (valToExpr env v)
                       ]
 
-    Merge i ms -> undefined
+    Merge i ms -> undefined -- XXX
 
     CallPos f es ->
       do es' <- mapM (evalDynExpr env) es
@@ -153,13 +183,11 @@ evalDynExpr env expr =
                    pure (CallPos f' es')
 
 resolvePlainCall :: Env -> Callable -> [ Expression ] -> Expression
-resolvePlainCall env c es =
-  case c of
-    CallUser (Unqual i)
-      | Just def <- Map.lookup i (nodeArgs env) ->
-        case def of
-          _ -> undefined
-    _ -> CallPos (NodeInst c []) es
+resolvePlainCall env c es = CallPos f es
+  where f = case c of
+              CallUser (Unqual i)
+                | Just ni <- Map.lookup i (nodeArgs env) -> ni
+              _ -> NodeInst c []
 
 
 nameInstance :: Env -> NodeInst -> M NodeInst
@@ -343,36 +371,30 @@ evalNode env nd args =
     Nothing -> panic "evalNode" [ "Node without a definition"
                                 , "*** Name: " ++ showPP (nodeName nd)
                                 ]
-    Just body ->
-      env { readyDecls = DeclareNode newNode : map DeclareNodeInst insts
-                                                            ++ readyDecls env
-          , envNameSeed = newS
-          }
+    Just body -> envRet2 { readyDecls = DeclareNode newNode
+                                      : readyDecls envRet2 }
       where
       prof      = nodeProfile nd
       env0      = addStaticParams (nodeStaticInputs nd) args env
       env1      = shadowBinders env0 (nodeInputs prof)
       (bs,env2) = evalLocalDecls env1 (nodeLocals body)
       env3      = shadowBinders (shadowBinders env2 bs) (nodeOutputs prof)
-      env4      = env3 { envNameSeed = panic "evalNode"
-                          [ "[bug] Incorrect use of `envNameSeed`" ] }
+      env4      = env3 { envNameInstSeed = -77 }
       (eqs,insts,newS) = runNameStatic
                            (curModule env4)
-                           (envNameSeed env)
+                           (envNameInstSeed env)
                            (mapM (evalEqn env4) (nodeEqns body))
 
+      envRet1 = env { envNameInstSeed = newS }
+      envRet2 = addEvluatedNodeInsts envRet1 insts
 
-      newName   = case args of
-                    [] -> nodeName nd
-                    _  -> undefined -- XXX
 
       newDef    = NodeBody
                     { nodeLocals = map LocalVar bs
                     , nodeEqns   = eqs
                     }
 
-      newNode   = nd { nodeName = newName
-                     , nodeStaticInputs = []
+      newNode   = nd { nodeStaticInputs = []
                      , nodeProfile = evalNodeProfile env0 (nodeProfile nd)
                      , nodeDef = Just newDef
                     }
@@ -414,12 +436,21 @@ addStaticParam p a env =
     (ConstParam c t, _) ->
       panic "addStaticParam"
         [ "Invalid static parameter:"
-        , "*** Expected: a constant " ++ showPP c ++ " : " ++ showPP t
+        , "*** Expected: a constant for " ++ showPP c ++ " : " ++ showPP t
         , "*** Got: " ++ showPP a
         ]
 
+    (NodeParam _ _ f _, NodeArg _ ni) ->
+        env { nodeArgs = Map.insert f ni (nodeArgs env) }
+
     (NodeParam _ _ f _, _) ->
-        env { nodeArgs = Map.insert f a (nodeArgs env) }
+      panic "addStaticParam"
+        [ "Invalid static parameter:"
+        , "*** Expected: a node for " ++ showPP f
+        , "*** Got: " ++ showPP a
+        ]
+
+
 
 
 addStaticParams :: [ StaticParam ] -> [ StaticArg ] -> Env -> Env
@@ -429,46 +460,41 @@ addStaticParams ps as env =
     (p : ps1, a : as1) -> addStaticParams ps1 as1 (addStaticParam p a env)
     _ -> panic "addStaticParams" [ "Mismatch in static aruments" ]
 
+
 -- | The arguments are assumed to have been evaluated already
 evalNodeInst :: Env -> NodeInstDecl -> [StaticArg] -> Env
-evalNodeInst env nid args =
-  env { readyDecls  = map DeclareNodeInst (newInst : insts) ++ readyDecls env
-      , envNameSeed = newS
-      }
+evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
   where
   env0 = addStaticParams (nodeInstStaticInputs nid) args env
-  env1 = env0 { envNameSeed = panic "evalNodeInst"
-                                [ "[bug] Incorrect use of `envNameSeed`" ] }
+  env1 = env0 { envNameInstSeed = -78 }
 
   nameNodeInstDef (NodeInst f as) =
     case as of
       [] | CallUser (Unqual fu) <- f
-         , Just def <- Map.lookup fu (nodeArgs env1) ->
-            case def of
-              NodeArg _ n -> pure n
-              _ -> undefined -- XXX: we don't support operators for the moment
-
-
+         , Just ni <- Map.lookup fu (nodeArgs env1) -> pure ni
       _  -> do bs <- mapM (evalStaticArg env1) as
                pure (NodeInst f bs)
 
   (newDef,insts,newS) = runNameStatic
                             (curModule env1)
-                            (envNameSeed env)
+                            (envNameInstSeed env)
                             (nameNodeInstDef (nodeInstDef nid))
 
+  envRet1 = env { envNameInstSeed = newS }
+  envRet2 = addEvluatedNodeInsts envRet1 insts
 
-  newName   = case args of
-                    [] -> nodeInstName nid
-                    _  -> undefined -- XXX
+  -- Note that we leave the name as is because this is the right thing
+  -- for nodes with no static parameters.   If, OTOH, we are instantiating
+  -- a template, then we've already put the correct name in the template.
 
-  newInst = nid { nodeInstName         = newName
-                , nodeInstStaticInputs = []
+  newInst = nid { nodeInstStaticInputs = []
                 , nodeInstProfile      = Nothing -- XXX: do we need this?
                 , nodeInstDef          = newDef
                 }
 
 
+-- | Evaluate a non-parameterized node declaration.
+-- Parameterized ones are added to the template map.
 evalNodeInstDecl :: Env -> NodeInstDecl -> Env
 evalNodeInstDecl env nid =
   case nodeInstStaticInputs nid of
@@ -478,13 +504,61 @@ evalNodeInstDecl env nid =
   where
   name = topIdentToName env (nodeInstName nid)
 
-nsTopDecl :: Env -> TopDecl -> Env
-nsTopDecl env td =
+
+-- | Add an already evaluated node instance to the environment.
+-- This is where we expand instances, if the flag in the environment is set.
+addEvluatedNodeInst :: Env -> NodeInstDecl -> Env
+addEvluatedNodeInst env ni
+  | expandNodeInsts env = expandNodeInstDecl env ni
+  | otherwise = env { readyDecls = DeclareNodeInst ni : readyDecls env }
+
+-- | Add an already evaluated node instance to the environment.
+-- This is where we expand instances, if the flag in the environment is set.
+addEvluatedNodeInsts :: Env -> [NodeInstDecl] -> Env
+addEvluatedNodeInsts = foldl' addEvluatedNodeInst
+
+-- | Replace a previously evaluated node-instance with its expanded version
+-- @f = g<<const 2>>   -->  node f(...) instantiated `g`@
+expandNodeInstDecl :: Env -> NodeInstDecl -> Env
+expandNodeInstDecl env nid =
+  case nodeInstStaticInputs nid of
+    [] ->
+      case nodeInstDef nid of
+        NodeInst (CallUser f) ps@(_ : _) ->
+          case Map.lookup f (nodeTemplates env) of
+            Just nt ->
+              case nt of
+                DeclareNode nd ->
+                  evalNode env nd { nodeName = nodeInstName nid } ps
+                DeclareNodeInst nd ->
+                  evalNodeInst env nd { nodeInstName = nodeInstName nid } ps
+                _ -> panic "expandNodeInstDecl"
+                       [ "Non-node template:"
+                       , "*** template: " ++ showPP nt
+                       ]
+
+            _ -> panic "expandNodeInstDecl"
+                    [ "Unknown template:"
+                    , "*** Name: " ++ showPP f
+                    ]
+
+        _ -> env { readyDecls = DeclareNodeInst nid : readyDecls env }
+
+    _ -> panic "expandNodeInstDecl"
+                [ "Trying to expand a template!"
+                , "*** Name: " ++ showPP (nodeInstName nid)
+                ]
+
+evalTopDecl :: Env -> TopDecl -> Env
+evalTopDecl env td =
   case td of
     DeclareType tde     -> evalTypeDecl env tde
     DeclareConst cd     -> evalConstDef env cd
     DeclareNode nd      -> evalNodeDecl env nd
     DeclareNodeInst nid -> evalNodeInstDecl env nid
+
+evalTopDecls :: Env -> [TopDecl] -> Env
+evalTopDecls = foldl' evalTopDecl
 
 
 --------------------------------------------------------------------------------
@@ -495,7 +569,12 @@ runNameStatic ::
   Int        {- ^ Start generating names using this seed -} ->
   M a        {- ^ This is what we want to do -} ->
   (a, [ NodeInstDecl ], Int) -- ^ result, new instances, new name seed
-runNameStatic qual seed m = (a, reverse (instances rw1), nameSeed rw1)
+runNameStatic qual seed m
+  | seed < 0   = panic "runNameStatic"
+                    [ "Incorrect use of `envNameInstSeed`"
+                    , "*** Negative seed: " ++ show seed
+                    ]
+  | otherwise  = (a, reverse (instances rw1), nameSeed rw1)
   where
   (a,rw1) = runId $ runStateT rw $ runReaderT ro m
   ro      = RO { qualify = qual }

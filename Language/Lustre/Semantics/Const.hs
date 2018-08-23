@@ -1,10 +1,10 @@
 module Language.Lustre.Semantics.Const
-  ( evalConst, evalSel, evalSelFun, Env(..), evalIntConst)
+  ( evalConst, evalSel, evalSelFun, Env(..), emptyEnv, evalIntConst)
   where
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
-import Control.Monad(join, msum)
+import Control.Monad(msum)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty(showPP)
@@ -15,6 +15,11 @@ data Env = Env
   { envConsts   :: Map Name Value
   , envStructs  :: Map Name [ (Ident, Maybe Value) ]
   }
+
+emptyEnv :: Env
+emptyEnv = Env { envConsts = Map.empty
+               , envStructs = Map.empty
+               }
 
 
 -- | Evaluate a constant expression of type @int@.
@@ -147,12 +152,12 @@ evalConst env expr =
                Replicate  -> sReplicate x y
                Concat     -> sConcat x y
 
-           (OpN op, vs) ->
+           (OpN op, _) ->
              case op of
                AtMostOne -> sBoolRed "at-most-one" 0 1 vs
                Nor       -> sBoolRed "nor" 0 0 vs
 
-           (p, _) -> bad ("Unknown primitive expression: " ++ showPP p)
+           (_, _) -> bad ("Unknown primitive expression: " ++ showPP p)
 
 
     CallPos {} -> bad "`call` is not a constant expression."

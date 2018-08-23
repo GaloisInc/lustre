@@ -61,6 +61,15 @@ test-suite order
   build-depends:
     base, filepath, directory, containers, pretty, language-lustre
 
+test-suite no-static
+  type: exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is: NoStatic.hs
+  build-depends:
+    base, filepath, directory, containers, pretty, language-lustre
+
+
+
 test-suite core
   type: exitcode-stdio-1.0
   main-is: Core.hs
