@@ -20,8 +20,8 @@ library
                        Language.Lustre.Pretty,
                        Language.Lustre.Core,
 
-                       Language.Lustre.Transform.ToCore,
                        Language.Lustre.Transform.OrderDecls,
+                       Language.Lustre.Transform.NoStatic,
 
                        Language.Lustre.Semantics,
                        Language.Lustre.Semantics.Const,
@@ -36,7 +36,7 @@ library
   build-depends:       base <4.12,
                        alex-tools >=0.4,
                        bytestring, text, array, panic, containers,
-                       GraphSCC, pretty
+                       GraphSCC, pretty, monadLib
   build-tools:         alex, happy
   default-language:    Haskell2010
   ghc-options:         -Wall
