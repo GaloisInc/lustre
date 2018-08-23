@@ -7,6 +7,7 @@ import qualified Data.Map as Map
 import Control.Monad(join, msum)
 
 import Language.Lustre.AST
+import Language.Lustre.Pretty(showPP)
 import Language.Lustre.Semantics.Value
 import Language.Lustre.Semantics.BuiltIn
 
@@ -39,9 +40,6 @@ evalConst env expr =
         Real n -> sReal n
         Bool n -> sBool n
 
-    IfThenElse b t e ->
-      join (sITE <$> evalConst env b <*> evalConst env t <*> evalConst env e)
-
     WithThenElse be t e ->
       do bv <- evalConst env be
          case bv of
@@ -56,7 +54,6 @@ evalConst env expr =
         Just v  -> pure v
         Nothing -> bad ("Undefined variable `" ++ show x ++ "`.")
 
-    CallPos {} -> bad "`call` is not a constant expression."
     Tuple {}      -> bad "Unexpected constant tuple."
 
     Array es -> sArray =<< mapM (evalConst env) es
@@ -107,51 +104,58 @@ evalConst env expr =
       do s <- evalSel env sel
          evalSelFun s =<< evalConst env e
 
-    EOp1 op e ->
-      do v <- evalConst env e
-         case op of
-           Not       -> sNot v
-           Neg       -> sNeg v
-           IntCast   -> sReal2Int v
-           RealCast  -> sInt2Real v
-
-           Pre       -> bad "`pre` is not a constant"
-           Current   -> bad "`current` is not a constant"
-
-    EOp2 e1 op e2 ->
-      do x <- evalConst env e1
-         y <- evalConst env e2
-         case op of
-           Fby     -> bad "`fby` is not a constant"
-
-           And     -> sAnd x y
-           Or      -> sOr x y
-           Xor     -> sXor x y
-           Implies -> sImplies x y
-
-           Eq      -> sEq x y
-           Neq     -> sNeq x y
-
-           Lt      -> sLt x y
-           Leq     -> sLeq x y
-           Gt      -> sGt x y
-           Geq     -> sGeq x y
-
-           Mul     -> sMul x y
-           Mod     -> sMod x y
-           Div     -> sDiv x y
-           Add     -> sAdd x y
-           Sub     -> sSub x y
-           Power   -> sPow x y
-
-           Replicate -> sReplicate x y
-           Concat    -> sConcat x y
-
-    EOpN op es ->
+    CallPos (NodeInst (CallPrim _ p) []) es ->
       do vs <- mapM (evalConst env) es
-         case op of
-           AtMostOne -> sBoolRed "at-most-one" 0 1 vs
-           Nor       -> sBoolRed "nor" 0 0 vs
+         case (p, vs) of
+
+           (ITE, [b,t,e]) -> sITE b t e
+
+           (Op1 op, [v]) ->
+             case op of
+               Not       -> sNot v
+               Neg       -> sNeg v
+               IntCast   -> sReal2Int v
+               RealCast  -> sInt2Real v
+
+               Pre       -> bad "`pre` is not a constant"
+               Current   -> bad "`current` is not a constant"
+
+           (Op2 op, [x,y]) ->
+             case op of
+               Fby        -> bad "`fby` is not a constant"
+
+               And        -> sAnd x y
+               Or         -> sOr x y
+               Xor        -> sXor x y
+               Implies    -> sImplies x y
+
+               Eq         -> sEq x y
+               Neq        -> sNeq x y
+
+               Lt         -> sLt x y
+               Leq        -> sLeq x y
+               Gt         -> sGt x y
+               Geq        -> sGeq x y
+
+               Mul        -> sMul x y
+               Mod        -> sMod x y
+               Div        -> sDiv x y
+               Add        -> sAdd x y
+               Sub        -> sSub x y
+               Power      -> sPow x y
+
+               Replicate  -> sReplicate x y
+               Concat     -> sConcat x y
+
+           (OpN op, vs) ->
+             case op of
+               AtMostOne -> sBoolRed "at-most-one" 0 1 vs
+               Nor       -> sBoolRed "nor" 0 0 vs
+
+           (p, _) -> bad ("Unknown primitive expression: " ++ showPP p)
+
+
+    CallPos {} -> bad "`call` is not a constant expression."
 
   where
   bad = crash "evalConst"

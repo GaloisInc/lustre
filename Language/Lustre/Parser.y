@@ -402,32 +402,32 @@ expression :: { Expression }
   | 'real'    expression              { toE1 RealCast $1 $2 }
 
   | expression 'when' clockExpr       { $1 `When` $3        }
-  | expression 'fby' expression       { EOp2 $1 Fby      $3 }
-  | expression '->' expression        { EOp2 $1 Fby      $3 }  -- XXX: other op?
-  | expression 'and' expression       { EOp2 $1 And      $3 }
-  | expression 'or' expression        { EOp2 $1 Or       $3 }
-  | expression 'xor' expression       { EOp2 $1 Xor      $3 }
-  | expression '=>' expression        { EOp2 $1 Implies  $3 }
-  | expression '=' expression         { EOp2 $1 Eq       $3 }
-  | expression '<>' expression        { EOp2 $1 Neq      $3 }
-  | expression '<' expression         { EOp2 $1 Lt       $3 }
-  | expression '<=' expression        { EOp2 $1 Leq      $3 }
-  | expression '>' expression         { EOp2 $1 Gt       $3 }
-  | expression '>=' expression        { EOp2 $1 Geq      $3 }
-  | expression 'div' expression       { EOp2 $1 Div      $3 }
-  | expression 'mod' expression       { EOp2 $1 Mod      $3 }
-  | expression '-' expression         { EOp2 $1 Sub      $3 }
-  | expression '+' expression         { EOp2 $1 Add      $3 }
-  | expression '/' expression         { EOp2 $1 Div      $3 }
-  | expression '*' expression         { EOp2 $1 Mul      $3 }
-  | expression '**' expression        { EOp2 $1 Power    $3 }
+  | expression 'fby' expression       { toE2 $1 $2 Fby     $3 }
+  | expression '->' expression        { toE2 $1 $2 Fby     $3 }  -- XXX: other op?
+  | expression 'and' expression       { toE2 $1 $2 And     $3 }
+  | expression 'or' expression        { toE2 $1 $2 Or      $3 }
+  | expression 'xor' expression       { toE2 $1 $2 Xor     $3 }
+  | expression '=>' expression        { toE2 $1 $2 Implies $3 }
+  | expression '=' expression         { toE2 $1 $2 Eq      $3 }
+  | expression '<>' expression        { toE2 $1 $2 Neq     $3 }
+  | expression '<' expression         { toE2 $1 $2 Lt      $3 }
+  | expression '<=' expression        { toE2 $1 $2 Leq     $3 }
+  | expression '>' expression         { toE2 $1 $2 Gt      $3 }
+  | expression '>=' expression        { toE2 $1 $2 Geq     $3 }
+  | expression 'div' expression       { toE2 $1 $2 Div     $3 }
+  | expression 'mod' expression       { toE2 $1 $2 Mod     $3 }
+  | expression '-' expression         { toE2 $1 $2 Sub     $3 }
+  | expression '+' expression         { toE2 $1 $2 Add     $3 }
+  | expression '/' expression         { toE2 $1 $2 Div     $3 }
+  | expression '*' expression         { toE2 $1 $2 Mul     $3 }
+  | expression '**' expression        { toE2 $1 $2 Power   $3 }
 
-  | expression '^' expression         { EOp2 $1 Replicate $3 }
-  | expression '|' expression         { EOp2 $1 Concat    $3 }
+  | expression '^' expression         { toE2 $1 $2 Replicate $3 }
+  | expression '|' expression         { toE2 $1 $2 Concat    $3 }
 
   | 'if' expression
       'then' expression
-      'else' expression               { at $1 $6 (IfThenElse $2 $4 $6) }
+      'else' expression               { toITE $1 $2 $4 $6 }
 
   | 'with' expression
       'then' expression
@@ -435,8 +435,8 @@ expression :: { Expression }
 
   | 'merge' ident ListOf1(mergeCase)  { toMerge $1 $2 $3 }
 
-  | '#' '(' exprList ')'              { at $1 $4 (EOpN AtMostOne $3) }
-  | 'nor' '(' exprList ')'            { at $1 $4 (EOpN Nor $3) }
+  | '#' '(' exprList ')'              { toEN AtMostOne $1 $4 $3 }
+  | 'nor' '(' exprList ')'            { toEN Nor $1 $4 $3 }
 
   | '[' exprList ']'                  { at $1 $3 (Array $2) }
 
@@ -469,27 +469,27 @@ simpExpr :: { Expression }
   | 'not'     simpExpr                        { toE1 Not      $1 $2 }
   | '-'       simpExpr %prec UMINUS           { toE1 Neg      $1 $2 }
 
-  | simpExpr 'and' simpExpr                   { EOp2 $1 And      $3 }
-  | simpExpr 'or' simpExpr                    { EOp2 $1 Or       $3 }
-  | simpExpr 'xor' simpExpr                   { EOp2 $1 Xor      $3 }
-  | simpExpr '=>' simpExpr                    { EOp2 $1 Implies  $3 }
-  | simpExpr '=' simpExpr                     { EOp2 $1 Eq       $3 }
-  | simpExpr '<>' simpExpr                    { EOp2 $1 Neq      $3 }
-  | simpExpr '<' simpExpr                     { EOp2 $1 Lt       $3 }
-  | simpExpr '<=' simpExpr                    { EOp2 $1 Leq      $3 }
-  | simpExpr '>' simpExpr                     { EOp2 $1 Gt       $3 }
-  | simpExpr '>=' simpExpr                    { EOp2 $1 Geq      $3 }
-  | simpExpr 'div' simpExpr                   { EOp2 $1 Div      $3 }
-  | simpExpr 'mod' simpExpr                   { EOp2 $1 Mod      $3 }
-  | simpExpr '-' simpExpr                     { EOp2 $1 Sub      $3 }
-  | simpExpr '+' simpExpr                     { EOp2 $1 Add      $3 }
-  | simpExpr '/' simpExpr                     { EOp2 $1 Div      $3 }
-  | simpExpr '*' simpExpr                     { EOp2 $1 Mul      $3 }
-  | simpExpr '**' simpExpr                    { EOp2 $1 Power    $3 }
+  | simpExpr 'and' simpExpr                   { toE2 $1 $2 And      $3 }
+  | simpExpr 'or' simpExpr                    { toE2 $1 $2 Or       $3 }
+  | simpExpr 'xor' simpExpr                   { toE2 $1 $2 Xor      $3 }
+  | simpExpr '=>' simpExpr                    { toE2 $1 $2 Implies  $3 }
+  | simpExpr '=' simpExpr                     { toE2 $1 $2 Eq       $3 }
+  | simpExpr '<>' simpExpr                    { toE2 $1 $2 Neq      $3 }
+  | simpExpr '<' simpExpr                     { toE2 $1 $2 Lt       $3 }
+  | simpExpr '<=' simpExpr                    { toE2 $1 $2 Leq      $3 }
+  | simpExpr '>' simpExpr                     { toE2 $1 $2 Gt       $3 }
+  | simpExpr '>=' simpExpr                    { toE2 $1 $2 Geq      $3 }
+  | simpExpr 'div' simpExpr                   { toE2 $1 $2 Div      $3 }
+  | simpExpr 'mod' simpExpr                   { toE2 $1 $2 Mod      $3 }
+  | simpExpr '-' simpExpr                     { toE2 $1 $2 Sub      $3 }
+  | simpExpr '+' simpExpr                     { toE2 $1 $2 Add      $3 }
+  | simpExpr '/' simpExpr                     { toE2 $1 $2 Div      $3 }
+  | simpExpr '*' simpExpr                     { toE2 $1 $2 Mul      $3 }
+  | simpExpr '**' simpExpr                    { toE2 $1 $2 Power    $3 }
 
   | 'if' simpExpr
       'then' simpExpr
-      'else' simpExpr                         { at $1 $6 (IfThenElse $2 $4 $6) }
+      'else' simpExpr                         { toITE $1 $2 $4 $6 }
 
   | '(' ')'                                   { at $1 $2 (Tuple []) }
   | '(' simpExpr ')'                          { at $1 $3 $2 }
@@ -548,28 +548,28 @@ staticArgGen(nm) :: { (nm,StaticArg) }
   : 'type' nm type                       { ($2, TypeArg $3)     }
   | 'const' nm expression                { ($2, ExprArg $3)     }
   | nodeType nm effNode                  { ($2, NodeArg $1 $3)  }
-  | nm 'not'                             { ($1, Op1Arg Not)     }
-  | nm 'fby'                             { ($1, Op2Arg Fby)     }
-  | nm 'pre'                             { ($1, Op1Arg Pre)     }
-  | nm 'current'                         { ($1, Op1Arg Current) }
-  | nm '->'                              { ($1, Op2Arg Fby)     }   -- XXX?
-  | nm 'and'                             { ($1, Op2Arg And)     }
-  | nm 'or'                              { ($1, Op2Arg Or)      }
-  | nm 'xor'                             { ($1, Op2Arg Xor)     }
-  | nm '=>'                              { ($1, Op2Arg Implies) }
-  | nm '='                               { ($1, Op2Arg Eq)      }
-  | nm '<>'                              { ($1, Op2Arg Neq)     }
-  | nm '<'                               { ($1, Op2Arg Lt)      }
-  | nm '<='                              { ($1, Op2Arg Leq)     }
-  | nm '>'                               { ($1, Op2Arg Gt)      }
-  | nm '>='                              { ($1, Op2Arg Geq)     }
-  | nm 'div'                             { ($1, Op2Arg Div)     }
-  | nm 'mod'                             { ($1, Op2Arg Mod)     }
-  | nm '-'                               { ($1, Op2Arg Sub)     }
-  | nm '+'                               { ($1, Op2Arg Add)     }
-  | nm '/'                               { ($1, Op2Arg Div)     }
-  | nm '*'                               { ($1, Op2Arg Mul)     }
-  | nm 'if'                              { ($1, OpIf)           }
+  | nm 'not'                             { ($1, op1Arg $2 Not)     }
+  | nm 'fby'                             { ($1, op2Arg $2 Fby)     }
+  | nm 'pre'                             { ($1, op1Arg $2 Pre)     }
+  | nm 'current'                         { ($1, op1Arg $2 Current) }
+  | nm '->'                              { ($1, op2Arg $2 Fby)     }   -- XXX?
+  | nm 'and'                             { ($1, op2Arg $2 And)     }
+  | nm 'or'                              { ($1, op2Arg $2 Or)      }
+  | nm 'xor'                             { ($1, op2Arg $2 Xor)     }
+  | nm '=>'                              { ($1, op2Arg $2 Implies) }
+  | nm '='                               { ($1, op2Arg $2 Eq)      }
+  | nm '<>'                              { ($1, op2Arg $2 Neq)     }
+  | nm '<'                               { ($1, op2Arg $2 Lt)      }
+  | nm '<='                              { ($1, op2Arg $2 Leq)     }
+  | nm '>'                               { ($1, op2Arg $2 Gt)      }
+  | nm '>='                              { ($1, op2Arg $2 Geq)     }
+  | nm 'div'                             { ($1, op2Arg $2 Div)     }
+  | nm 'mod'                             { ($1, op2Arg $2 Mod)     }
+  | nm '-'                               { ($1, op2Arg $2 Sub)     }
+  | nm '+'                               { ($1, op2Arg $2 Add)     }
+  | nm '/'                               { ($1, op2Arg $2 Div)     }
+  | nm '*'                               { ($1, op2Arg $2 Mul)     }
+  | nm 'if'                              { ($1, opIf $2)           }
   | nm name '<<' SepBy1(staticArgSep,staticArg) '>>'
                                     { ($1, NodeArg Node (toNodeInst $2 $4) )}
   | nm simpleType                        { ($1, TypeArg $2) }
@@ -651,10 +651,16 @@ instance At StaticArg where
 --------------------------------------------------------------------------------
 
 toE1 :: Op1 -> SourceRange -> Expression -> Expression
-toE1 op rng expr = at rng expr (EOp1 op expr)
+toE1 op rng expr = ERange (rng <-> expr) (callPrim rng (Op1 op) [expr])
 
-toE2 :: Op2 -> Expression -> Expression -> Expression
-toE2 op e1 e2 = EOp2 e1 op e2
+toE2 :: Expression -> SourceRange -> Op2 -> Expression -> Expression
+toE2 e1 rng op e2 = ERange (e1 <-> e2) (callPrim rng (Op2 op) [e1,e2])
+
+toEN :: OpN -> SourceRange -> SourceRange -> [Expression] -> Expression
+toEN op r1 r2 es = ERange (r1 <-> r2) (callPrim r1 (OpN op) es)
+
+toITE :: SourceRange -> Expression -> Expression -> Expression -> Expression
+toITE r e1 e2 e3 = ERange (r <-> e3) (callPrim r ITE [e1,e2,e3])
 
 --------------------------------------------------------------------------------
 
@@ -769,8 +775,23 @@ toNodeInst nm xs = NodeInst c xs
           | txt == "boolred"  -> iter IterBoolRed
           where
           txt  = identText i
-          iter = CallIter (identRange i)
+          iter x = CallPrim (identRange i) (Iter x)
         _ -> CallUser nm
+
+primArg :: SourceRange -> PrimNode -> StaticArg
+primArg r p = NodeArg Function (NodeInst (CallPrim r p) [])
+
+op1Arg :: SourceRange -> Op1 -> StaticArg
+op1Arg r p = primArg r (Op1 p)
+op2Arg r p = primArg r (Op2 p)
+opIf r     = primArg r ITE
+
+-- | Call a primitive with no static parameters
+callPrim :: SourceRange -> PrimNode -> [Expression] -> Expression
+callPrim r p es = CallPos (NodeInst (CallPrim r p) []) es
+
+
+
 
 --------------------------------------------------------------------------------
 

@@ -190,10 +190,7 @@ data Expression = ERange !SourceRange !Expression
                 | Var !Name
                 | Lit !Literal
 
-                | EOp1 Op1 Expression
-                | EOp2 Expression Op2 Expression
                 | Expression `When` ClockExpr
-                | EOpN OpN [Expression]
 
                 | Tuple ![Expression]
                   -- ^ These are more like unboxed tuples in Haskell
@@ -205,7 +202,6 @@ data Expression = ERange !SourceRange !Expression
                   -- ^ The 'Maybe' parameter corresponds to @with@
                   -- and is used for updating structs.
 
-                | IfThenElse Expression Expression Expression
                 | WithThenElse Expression Expression Expression
                   {- ^ Used for recursive definitions.
                     The decision is evaluated in an earlier phase (i.e.,
@@ -239,8 +235,15 @@ data NodeInst   = NodeInst Callable [StaticArg]
                   deriving Show
 
 -- | Things that may be called
-data Callable   = CallUser Name             -- ^ A user-defined node
-                | CallIter SourceRange Iter -- ^ An array iteratir
+data Callable   = CallUser Name                   -- ^ A user-defined node
+                | CallPrim SourceRange PrimNode   -- ^ A built-in node
+                  deriving Show
+
+data PrimNode   = Iter Iter
+                | Op1 Op1
+                | Op2 Op2
+                | OpN OpN
+                | ITE
                   deriving Show
 
 -- | Built-in array iterators
@@ -268,9 +271,6 @@ data StaticParam = TypeParam Ident
 data StaticArg  = TypeArg Type
                 | ExprArg Expression
                 | NodeArg NodeType NodeInst
-                | Op1Arg Op1
-                | Op2Arg Op2
-                | OpIf
                 | ArgRange SourceRange StaticArg
                   deriving Show
 
@@ -316,16 +316,12 @@ exprRangeMaybe expr =
   case expr of
     ERange r _      -> Just r
     Var x           -> Just (range x)
-    EOp2 e1 _ e2    -> Just (e1 <-> e2)
     e `When` c      -> Just (e  <-> c)
 
     Lit {}          -> Nothing
-    EOp1 {}         -> Nothing
-    EOpN {}         -> Nothing
     Tuple {}        -> Nothing
     Array {}        -> Nothing
     Select {}       -> Nothing
-    IfThenElse {}   -> Nothing
     WithThenElse {} -> Nothing
     Merge {}        -> Nothing
     CallPos {}      -> Nothing
@@ -348,9 +344,6 @@ argRangeMaybe arg =
     TypeArg t    -> typeRangeMaybe t
     ExprArg e    -> exprRangeMaybe e
     NodeArg {}   -> Nothing
-    Op1Arg {}    -> Nothing
-    Op2Arg {}    -> Nothing
-    OpIf {}      -> Nothing
 
 -- | Note that this is a partial function: it will panic if the
 -- expression does not have an exact location.
@@ -385,7 +378,7 @@ instance HasRange Callable where
   range c =
     case c of
       CallUser n -> range n
-      CallIter r _ -> r
+      CallPrim r _ -> r
 
 instance HasRange Package where
   range = packageRange

@@ -162,9 +162,6 @@ instance Uses StaticArg where
       TypeArg t     -> uses t
       ExprArg e     -> uses e
       NodeArg _ ni  -> uses ni
-      Op1Arg _      -> mempty
-      Op2Arg _      -> mempty
-      OpIf          -> mempty
       ArgRange _ a  -> uses a
 
 instance Uses NodeInstDecl where
@@ -182,7 +179,7 @@ instance Uses Callable where
   uses c =
     case c of
       CallUser n  -> aVal n
-      CallIter {} -> mempty
+      CallPrim {} -> mempty
 
 instance Uses Expression where
   uses expr =
@@ -190,15 +187,11 @@ instance Uses Expression where
       ERange _ e -> uses e
       Var x -> aVal x
       Lit _ -> mempty
-      EOp1 _ e -> uses e
-      EOp2 e1 _ e2 -> uses (e1,e2)
       e1 `When` e2 -> uses (e1,e2)
-      EOpN _ es -> uses es
       Tuple es -> uses es
       Array es -> uses es
       Select e s -> uses (e,s)
       Struct x y fs -> mconcat [ aType x, maybe mempty aVal y, uses fs ]
-      IfThenElse e1 e2 e3 -> uses (e1, (e2,e3))
       WithThenElse e1 e2 e3 -> uses (e1, (e2,e3))
       Merge x es -> aVal (Unqual x) <> uses es
       CallPos f es -> uses (f,es)

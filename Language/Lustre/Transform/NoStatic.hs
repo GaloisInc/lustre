@@ -124,25 +124,16 @@ evalDynExpr env expr =
                                 Just v -> valToExpr env v
                                 Nothing -> expr
     Lit _           -> pure expr
-    EOp1 op e       -> EOp1 op <$> evalDynExpr env e
-    EOp2 e1 op e2   -> do e1' <- evalDynExpr env e1
-                          e2' <- evalDynExpr env e2
-                          pure (EOp2 e1' op e2')
+
+
     e1 `When` e2    -> do e1' <- evalDynExpr env e1
                           pure (e1' `When` evalClockExpr env e2)
-    EOpN op es      -> EOpN op <$> mapM (evalDynExpr env) es
     Tuple es        -> Tuple <$> mapM (evalDynExpr env) es
     Array es        -> Array <$> mapM (evalDynExpr env) es
     Select e s      -> do e' <- evalDynExpr env e
                           pure (Select e' (evalSel env s))
 
     Struct s mb fs  -> undefined
-
-
-    IfThenElse e1 e2 e3 ->
-      IfThenElse <$> evalDynExpr env e1 <*>
-                     evalDynExpr env e2 <*> evalDynExpr env e3
-
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
@@ -187,11 +178,6 @@ evalStaticArg env sa =
 
     TypeArg t       -> pure (TypeArg (evalType env t))
     ExprArg e       -> pure (ExprArg (evalExpr env e))
-    Op1Arg _        -> pure sa
-    Op2Arg _        -> pure sa
-    OpIf            -> pure sa
-
-
 
 -- | Evaluate a selector.  The indixes in a selector are constants.
 evalSel :: Env -> Selector Expression -> Selector Expression

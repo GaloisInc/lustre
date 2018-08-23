@@ -43,10 +43,6 @@ evalMultiConst env expr =
         Real n -> sReal n
         Bool n -> sBool n
 
-    IfThenElse b t e ->
-      one $
-      join $ sITE <$> evalConst env b <*> evalConst env t <*> evalConst env e
-
     WithThenElse be t e ->
       do bv <- evalConst env be
          case bv of
@@ -61,6 +57,65 @@ evalMultiConst env expr =
         Just v  -> pure v
         Nothing -> crash "evalMultiConst"
                               ("Undefined variable `" ++ show x ++ "`.")
+
+
+    CallPos (NodeInst (CallPrim _ p) []) es ->
+
+      case (p, es) of
+        (Op1 op, [e]) ->
+          one $
+          do v <- evalConst env e
+             case op of
+               Not       -> sNot v
+               Neg       -> sNeg v
+               IntCast   -> sReal2Int v
+               RealCast  -> sInt2Real v
+
+               Pre       -> crash "evalMultiConst" "`pre` is not a constant"
+               Current   -> crash "evalMultiConst" "`current` is not a constant"
+
+        (Op2 op, [e1,e2]) ->
+          one $
+          do x <- evalConst env e1
+             y <- evalConst env e2
+             case op of
+               Fby     -> crash "evalConst" "`fby` is not a constant"
+
+               And     -> sAnd x y
+               Or      -> sOr x y
+               Xor     -> sXor x y
+               Implies -> sImplies x y
+
+               Eq      -> sEq x y
+               Neq     -> sNeq x y
+
+               Lt      -> sLt x y
+               Leq     -> sLeq x y
+               Gt      -> sGt x y
+               Geq     -> sGeq x y
+
+               Mul     -> sMul x y
+               Mod     -> sMod x y
+               Div     -> sDiv x y
+               Add     -> sAdd x y
+               Sub     -> sSub x y
+               Power   -> sPow x y
+
+               Replicate -> sReplicate x y
+               Concat    -> sConcat x y
+
+        (OpN op, _) ->
+          one $
+          do vs <- evalConsts env es
+             case op of
+               AtMostOne -> sBoolRed "at-most-one" 0 1 vs
+               Nor       -> sBoolRed "nor" 0 0 vs
+
+        (ITE, [b,t,e]) ->
+          one $ join $
+            sITE <$> evalConst env b <*> evalConst env t <*> evalConst env e
+
+        (p, _) -> error ("Unknwon primitive: "  ++ show p)
 
     CallPos {} -> crash "evalMultiConst" "calls are not constant."
 
@@ -77,55 +132,6 @@ evalMultiConst env expr =
       one $
       do s <- evalSel env sel
          evalSelFun s =<< evalConst env e
-
-    EOp1 op e ->
-      one $
-      do v <- evalConst env e
-         case op of
-           Not       -> sNot v
-           Neg       -> sNeg v
-           IntCast   -> sReal2Int v
-           RealCast  -> sInt2Real v
-
-           Pre       -> crash "evalMultiConst" "`pre` is not a constant"
-           Current   -> crash "evalMultiConst" "`current` is not a constant"
-
-    EOp2 e1 op e2 ->
-      one $
-      do x <- evalConst env e1
-         y <- evalConst env e2
-         case op of
-           Fby     -> crash "evalConst" "`fby` is not a constant"
-
-           And     -> sAnd x y
-           Or      -> sOr x y
-           Xor     -> sXor x y
-           Implies -> sImplies x y
-
-           Eq      -> sEq x y
-           Neq     -> sNeq x y
-
-           Lt      -> sLt x y
-           Leq     -> sLeq x y
-           Gt      -> sGt x y
-           Geq     -> sGeq x y
-
-           Mul     -> sMul x y
-           Mod     -> sMod x y
-           Div     -> sDiv x y
-           Add     -> sAdd x y
-           Sub     -> sSub x y
-           Power   -> sPow x y
-
-           Replicate -> sReplicate x y
-           Concat    -> sConcat x y
-
-    EOpN op es ->
-      one $
-      do vs <- evalConsts env es
-         case op of
-           AtMostOne -> sBoolRed "at-most-one" 0 1 vs
-           Nor       -> sBoolRed "nor" 0 0 vs
 
 
 -- | Evaluate a selector.
@@ -188,13 +194,6 @@ evalMultiExpr env expr =
         Real r -> dReal r
         Bool b -> dBool b
 
-    IfThenElse be te ee ->
-      one $
-      do b <- evalExpr env be
-         t <- evalExpr env te
-         e <- evalExpr env ee
-         ite b t e
-
     WithThenElse be t e ->
       do v <- evalConst env be
          case v of
@@ -208,6 +207,31 @@ evalMultiExpr env expr =
       case x of
         Unqual i | Just v <- lookupLocal env i -> one (pure v)
         _ -> map defineConst <$> evalMultiConst env expr
+
+    CallPos (NodeInst (CallPrim _ p) []) es ->
+
+      case (p,es) of
+        (Op1 op, [e]) ->
+          one $ op1 op =<< evalExpr env e
+
+        (Op2 op, [e1,e2]) ->
+          one $
+          do x <- evalExpr env e1
+             y <- evalExpr env e2
+             op2 op x y
+
+        (OpN op, _) ->
+          one $
+          opN op =<< evalExprs env es
+
+        (ITE, [be,te,ee]) ->
+          one $
+          do b <- evalExpr env be
+             t <- evalExpr env te
+             e <- evalExpr env ee
+             ite b t e
+
+        (p, _) -> error ("Unknown primitive: " ++ show p)
 
     CallPos ni es ->
       do f  <- resolveInstance env ni
@@ -227,21 +251,6 @@ evalMultiExpr env expr =
          case lookupLocal env e s of
            Just v  -> pure v
            Nothing -> -}
-
-    EOp1 op e ->
-      one $
-      op1 op =<< evalExpr env e
-
-
-    EOp2 e1 op e2 ->
-      one $
-      do x <- evalExpr env e1
-         y <- evalExpr env e2
-         op2 op x y
-
-    EOpN op es ->
-      one $
-      opN op =<< evalExprs env es
 
 
 one :: EvalM a -> EvalM [a]

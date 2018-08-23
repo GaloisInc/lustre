@@ -204,47 +204,9 @@ instance Pretty Expression where
       ERange _ e    -> ppPrec n e
       Var x         -> pp x
       Lit l         -> pp l
-      EOp1 op e     -> parenIf (n >= p) doc
-        where doc = pp op <+> ppPrec p e
-              p   = case op of
-                      Not      -> 7
-                      IntCast  -> 12
-                      RealCast -> 12
-                      Neg      -> 13
-                      Pre      -> 13
-                      Current  -> 13
-
-      EOp2 e1 op e2 -> parenIf (n >= p) doc
-        where doc = ppPrec lp e1 <+> pp op <+> ppPrec rp e2
-              left x  = (x-1,x,x)
-              right x = (x,x,x-1)
-              non x   = (x,x,x)
-
-              (lp,p,rp) = case op of
-                            Concat  -> left 1
-                            Fby     -> non 2
-                            Implies -> right 3
-                            Or      -> left 4
-                            Xor     -> left 4
-                            And     -> left 5
-                            Lt      -> non 6
-                            Leq     -> non 6
-                            Gt      -> non 6
-                            Geq     -> non 6
-                            Eq      -> non 6
-                            Neq     -> non 6
-                            Add     -> left 8
-                            Sub     -> left 8
-                            Mul     -> left 9
-                            Div     -> left 9
-                            Mod     -> left 9
-                            Power   -> left 10
-                            Replicate -> left 14
-
       e `When` ce   -> parenIf (n > 10) doc
         where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce
 
-      EOpN op es    -> pp op <> parens (hsep (punctuate comma (map pp es)))
 
       Tuple es      -> parens (hsep (punctuate comma (map pp es)))
       Array es      -> brackets (hsep (punctuate comma (map pp es)))
@@ -256,10 +218,6 @@ instance Pretty Expression where
                            Just x  -> pp x <+> "with"
 
 
-      IfThenElse e1 e2 e3  -> parenIf (n > 0) doc
-        where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
-                                   $$ nest 2 ("else" <+> ppPrec 0 e3)
-
       WithThenElse e1 e2 e3 -> parenIf (n > 0) doc
         where doc = "with" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
                                      $$ nest 2 ("else" <+> ppPrec 0 e3)
@@ -268,7 +226,53 @@ instance Pretty Expression where
         where doc = "merge" <+> pp i $$ nest 2 (vcat (map pp as))
 
       CallPos f es ->
-        pp f <+> parens (hsep (punctuate comma (map pp es)))
+        case f of
+          NodeInst (CallPrim _ p) [] ->
+            case (p, es) of
+
+              (Op1 op, [e]) -> parenIf (n >= p) doc
+                where doc = pp op <+> ppPrec p e
+                      p   = case op of
+                              Not      -> 7
+                              IntCast  -> 12
+                              RealCast -> 12
+                              Neg      -> 13
+                              Pre      -> 13
+                              Current  -> 13
+
+              (Op2 op, [e1,e2]) -> parenIf (n >= p) doc
+                 where doc = ppPrec lp e1 <+> pp op <+> ppPrec rp e2
+                       left x  = (x-1,x,x)
+                       right x = (x,x,x-1)
+                       non x   = (x,x,x)
+
+                       (lp,p,rp) = case op of
+                                     Concat  -> left 1
+                                     Fby     -> non 2
+                                     Implies -> right 3
+                                     Or      -> left 4
+                                     Xor     -> left 4
+                                     And     -> left 5
+                                     Lt      -> non 6
+                                     Leq     -> non 6
+                                     Gt      -> non 6
+                                     Geq     -> non 6
+                                     Eq      -> non 6
+                                     Neq     -> non 6
+                                     Add     -> left 8
+                                     Sub     -> left 8
+                                     Mul     -> left 9
+                                     Div     -> left 9
+                                     Mod     -> left 9
+                                     Power   -> left 10
+                                     Replicate -> left 14
+
+              (ITE,[e1,e2,e3]) -> parenIf (n > 0) doc
+                where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
+                                           $$ nest 2 ("else" <+> ppPrec 0 e3)
+
+
+          _ -> pp f <+> parens (hsep (punctuate comma (map pp es)))
 
 parenIf :: Bool -> Doc -> Doc
 parenIf p d = if p then parens d else d
@@ -316,8 +320,17 @@ instance Pretty NodeInst where
 instance Pretty Callable where
   ppPrec p c =
     case c of
-      CallUser n -> ppPrec p n
-      CallIter _ i -> ppPrec p i
+      CallUser n   -> ppPrec p n
+      CallPrim _ i -> ppPrec p i
+
+instance Pretty PrimNode where
+  ppPrec p x =
+    case x of
+      Iter i -> ppPrec p i
+      Op1 op -> ppPrec p op
+      Op2 op -> ppPrec p op
+      OpN op -> ppPrec p op
+      ITE    -> "if"
 
 instance Pretty Iter where
   ppPrec _ i =
@@ -333,10 +346,9 @@ instance Pretty StaticArg where
     case arg of
       TypeArg t     -> "type" <+> pp t
       ExprArg e     -> "const" <+> pp e
-      NodeArg nf x  -> pp nf <+> pp x
-      Op1Arg op     -> pp op
-      Op2Arg op     -> pp op
-      OpIf          -> "if"
+      NodeArg nf x  -> case x of
+                         NodeInst (CallUser _) _ -> pp nf <+> pp x
+                         _ -> pp x
       ArgRange _ a  -> ppPrec n a
 
 instance Pretty NodeType where
