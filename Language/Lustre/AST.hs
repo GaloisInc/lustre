@@ -2,6 +2,7 @@
 -- http://www-verimag.imag.fr/DIST-TOOLS/SYNCHRONE/lustre-v6/doc/lv6-ref-man.pdf
 module Language.Lustre.AST
   ( module Language.Lustre.AST
+  , HasRange(..)
   , SourceRange(..)
   , SourcePos(..)
   ) where
@@ -147,7 +148,7 @@ data Safety     = Safe        -- ^ No side effects
 
 data NodeType   = Node        -- ^ Nodes may have memory (e.g., use @pre@)
                 | Function    -- ^ Functions do not have memory
-                    deriving Show
+                    deriving (Show, Eq)
 
 data Binder = Binder
   { binderDefines :: Ident
