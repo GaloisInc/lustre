@@ -20,20 +20,25 @@ data Env = Env
     -- @x = [ a, b, c ]@.
 
   , nodeTypes :: Map Name NodeProfile
+    -- ^ Information about the types of the nodes that are in scope.
   }
 
+-- | Lookup an name in the environment.
 lkpStrName :: Name -> Env -> Maybe Expression
 lkpStrName n env =
   case n of
     Unqual i -> Map.lookup i (envStructured env)
     Qual {}  -> Nothing
 
+-- | Apply a function but only after you skip all range annotations.
+-- They are applied to the result of the function.
 caseThruRange :: Expression -> (Expression -> Expression) -> Expression
 caseThruRange expr f =
   case expr of
     ERange r e -> ERange r (caseThruRange e f)
     _          -> f expr
 
+-- | Normalize an expression, lifting out structured data to the top.
 evalExpr :: Env -> Expression -> Expression
 evalExpr env expr =
   case expr of
@@ -174,6 +179,9 @@ evalExpr env expr =
               where mk es' = Merge i [ MergeCase p e |
                                           (MergeCase p _, e) <- zip opts es' ]
 
+    -- XXX: The results of the call could be structured data, so we need
+    -- to name them:  f (...) : (a,b)
+    -- x:a, y:b = f (...)
     CallPos f es -> CallPos f [ v | e <- es, v <- toMultiExpr (evalExpr env e) ]
 
 
