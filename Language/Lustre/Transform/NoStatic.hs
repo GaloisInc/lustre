@@ -630,7 +630,10 @@ evalDynExpr env expr =
                       , "*** Value: " ++ showPP (valToExpr env v)
                       ]
 
-    Merge i ms -> undefined -- XXX
+    Merge i ms ->
+      case Map.lookup (Unqual i) (C.envConsts (cEnv env)) of
+        Just v  -> evalMergeConst env v ms
+        Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     CallPos f es ->
       do es' <- mapM (evalDynExpr env) es
@@ -639,6 +642,20 @@ evalDynExpr env expr =
            _ -> do f'  <- nameInstance env f
                    pure (CallPos f' es')
 
+-- | Use a constant to select a branch in a merge.
+evalMergeConst :: Env -> Value -> [MergeCase] -> M Expression
+evalMergeConst env v ms =
+  case ms of
+    MergeCase p e : more
+      | evalExprToVal env p == v -> evalDynExpr env e
+      | otherwise                ->  evalMergeConst env v more
+    [] -> panic "evalMergeConst" [ "None of the branches of a merge matched:"
+                                 , "*** Value: " ++ showPP (valToExpr env v)
+                                 ]
+
+evalMergeCase :: Env -> MergeCase -> M MergeCase
+evalMergeCase env (MergeCase p e) =
+  MergeCase (evalExpr env p) <$> evalDynExpr env e
 
 -- | Evaluate an update to a struct that is not a constant.
 evalUpdExprStruct :: Env -> Name -> Name -> [Field] -> M Expression
