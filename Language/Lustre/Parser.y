@@ -457,9 +457,9 @@ expression :: { Expression }
 mergeCase :: { (SourceRange, MergeCase) }
   : '(' mergePat '->' expression ')'  { ($1 <-> $5, MergeCase $2 $4) }
 
-mergePat :: { ClockVal }
-  : name                              { ClockIs $1 }
-  | BOOL                              { toClockVal $1 }
+mergePat :: { Expression }
+  : name                              { Var $1 }
+  | BOOL                              { toLit $1 }
 
 simpExpr :: { Expression }
   : INT                                       { toLit $1 }
@@ -685,12 +685,6 @@ toLit l =
     TokReal n   -> Real n
     TokBool n   -> Bool n
     _           -> panic "toLit" [ "Unexcpected literal", show l ]
-
-toClockVal :: Lexeme Token -> ClockVal
-toClockVal l =
-  case lexemeToken l of
-    TokBool b -> if b then ClockIsTrue else ClockIsFalse
-    _         -> panic "toClockVal" [ "Expected a boolean, got", show l ]
 
 toMerge :: SourceRange -> Ident -> [(SourceRange,MergeCase)] -> Expression
 toMerge r1 x opts = at r1 (last rs) (Merge x cs)

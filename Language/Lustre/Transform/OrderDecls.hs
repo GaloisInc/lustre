@@ -199,13 +199,6 @@ instance Uses Expression where
 instance Uses MergeCase where
   uses (MergeCase c v) = uses (c,v)
 
-instance Uses ClockVal where
-  uses cv =
-    case cv of
-      ClockIsTrue  -> mempty
-      ClockIsFalse -> mempty
-      ClockIs x    -> aVal x
-
 instance Uses ClockExpr where
   uses (WhenClock _ cv i) = uses cv `mappend` aVal (Unqual i)
 

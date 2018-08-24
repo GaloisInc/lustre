@@ -214,22 +214,19 @@ data Expression = ERange !SourceRange !Expression
                 | CallPos NodeInst [Expression]
                   deriving Show
 
-data MergeCase  = MergeCase ClockVal Expression
+-- | The first expression (the "pattern") should be a constant.
+-- In fact, to check clocks, it restricted to @true@, @false@, or a @Name@.
+data MergeCase  = MergeCase Expression Expression
                   deriving Show
 
 -- | The clock activates when the identifier has the given expression.
--- In the surface syntax, the expression is restricted to `ClockVal`
--- but allowing arbitrary expressions is more convenient for manipulating
+-- In the surface syntax, the expression is restricted to
+-- @true@, @false@, or a @Name@.
+-- However, allowing arbitrary expressions is more convenient for manipulating
 -- already validated syntax (e.g., we can allow arbitrary values).
 data ClockExpr  = WhenClock SourceRange Expression Ident
                   deriving Show
 
-data ClockVal   = ClockIsTrue   -- ^ Like @ClockIs true@
-                | ClockIsFalse  -- ^ Like @ClockIs false@
-                | ClockIs Name  -- ^ Activates when the clock variable gets
-                                -- this value.  In this way non-boolean types
-                                -- can be used for clocks.
-                  deriving Show
 
 data NodeInst   = NodeInst Callable [StaticArg]
                   deriving Show

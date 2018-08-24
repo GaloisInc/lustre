@@ -227,8 +227,8 @@ instance Pretty Expression where
 
       CallPos f es ->
         case f of
-          NodeInst (CallPrim _ p) [] ->
-            case (p, es) of
+          NodeInst (CallPrim _ prim) [] ->
+            case (prim, es) of
 
               (Op1 op, [e]) -> parenIf (n >= p) doc
                 where doc = pp op <+> ppPrec p e
@@ -271,6 +271,7 @@ instance Pretty Expression where
                 where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
                                            $$ nest 2 ("else" <+> ppPrec 0 e3)
 
+              _ -> pp f <+> parens (hsep (punctuate comma (map pp es)))
 
           _ -> pp f <+> parens (hsep (punctuate comma (map pp es)))
 
@@ -280,13 +281,6 @@ parenIf p d = if p then parens d else d
 
 instance Pretty MergeCase where
   ppPrec _ (MergeCase cv e) = parens (pp cv <+> "->" <+> pp e)
-
-instance Pretty ClockVal where
-  ppPrec _ cv =
-    case cv of
-      ClockIsTrue   -> "true"
-      ClockIsFalse  -> "false"
-      ClockIs x     -> pp x
 
 instance Pretty Field where
   ppPrec _ (Field x e) = pp x <+> "=" <+> pp e
