@@ -220,7 +220,7 @@ addAlias env x t =
 
       checkStruct =
         do let cenv = cEnv env
-           i <- lookupNamed env n (C.envStructs cenv)
+           i <- Map.lookup n (C.envStructs cenv)    -- we did addNamed
            let newMap = addNamed x i (C.envStructs cenv)
            pure env1 { cEnv = cenv { C.envStructs = newMap } }
 
@@ -612,7 +612,15 @@ evalDynExpr env expr =
     Select e s      -> do e' <- evalDynExpr env e
                           pure (Select e' (evalSel env s))
 
-    Struct s mb fs  -> undefined -- XXX
+
+    Struct s mb fs  ->
+      case mb of
+        Nothing -> evalNewStruct env s fs
+        Just x  ->
+          case Map.lookup x (C.envConsts (cEnv env)) of
+            Nothing -> evalUpdExprStruct env s x fs
+            Just v  -> evalUpdConstStruct env s v fs
+
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
@@ -630,6 +638,66 @@ evalDynExpr env expr =
            NodeInst c [] -> pure (resolvePlainCall env c es')
            _ -> do f'  <- nameInstance env f
                    pure (CallPos f' es')
+
+
+-- | Evaluate an update to a struct that is not a constant.
+evalUpdExprStruct :: Env -> Name -> Name -> [Field] -> M Expression
+evalUpdExprStruct env s x fs =
+  do fs' <- mapM evalField fs
+     pure (Struct s (Just x) fs')
+  where
+  evalField (Field l e) = Field l <$> evalDynExpr env e
+
+
+-- | Evaluate an update to a struct constant.
+evalUpdConstStruct :: Env -> Name -> Value -> [Field] -> M Expression
+evalUpdConstStruct env s v fs =
+  evalNewStructWithDefs env s fs $
+  case v of
+    VStruct _ fvs -> [ (l, Just fv) | (l,fv) <- fvs ]
+    _ -> panic "evalUpdConstStruct"
+                [ "Not a struct value:"
+                , "*** Value: " ++ showPP (valToExpr env v)
+                ]
+
+-- | Evaluate a dynamic expression declaring a struct literal.
+-- Missing fields are added by using the default values declared in the type.
+evalNewStruct :: Env -> Name -> [Field] -> M Expression
+evalNewStruct env s fs =
+  evalNewStructWithDefs env s fs $
+  case Map.lookup s (C.envStructs (cEnv env)) of
+    Just def  -> def
+    Nothing   -> panic "evalDynExpr" [ "Undefined struct type:"
+                                     , "*** Name: " ++ showPP s
+                                     ]
+
+
+{- | Evaluate a dynamic expression declaring a struct literal, using
+the given list of fields.  The list if fields should contain all fields
+in the struct, and the 'Maybe' value is an optional default--if it is
+'Nothing', then the filed must be defined, otherwise the dfault is used
+in case the filed ismissing. -}
+evalNewStructWithDefs ::
+  Env -> Name -> [Field] -> [(Ident, Maybe Value)] -> M Expression
+evalNewStructWithDefs env s fs def =
+  do fieldMap <- Map.fromList <$> mapM evalField fs
+     let setField (f,mbV) =
+           Field f $
+           case Map.lookup f fieldMap of
+             Just e -> e
+             Nothing ->
+               case mbV of
+                 Just v  -> valToExpr env v
+                 Nothing  -> panic "evalDynExpr" [ "Missing field in struct:"
+                                                 , "*** Name: " ++ showPP f
+                                                 ]
+     pure (Struct s Nothing (map setField def))
+  where
+  evalField (Field l e) = do e' <- evalDynExpr env e
+                             return (l,e')
+
+
+
 
 resolvePlainCall :: Env -> Callable -> [ Expression ] -> Expression
 resolvePlainCall env c es = CallPos f es
