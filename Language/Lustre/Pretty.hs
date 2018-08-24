@@ -41,6 +41,8 @@ instance Pretty Name where
 
 --------------------------------------------------------------------------------
 
+instance Pretty Integer where
+  ppPrec _ = integer
 
 instance Pretty TopDecl where
   ppPrec n td =
