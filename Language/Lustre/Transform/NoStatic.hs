@@ -6,6 +6,31 @@ and given an explicit name.
 Optionally, we can also expand functions applied to static arguments
 to functions using a specialized definition instead.
 -}
+
+{-
+XXX: While not strictly necessary for this pass, it would be convenient
+to name function calls here also:
+
+if @f(x,y)@ is a call that appears somewhere in an expression,
+we add a new equation:
+
+p,q,r = f (x,y)
+
+and replace the function call with @(p,q,r)@.
+
+
+This will help with the following transformations:
+  1. when removing structured data, it is convenient if structured data is
+     either explicit or a variable:  we can work around that for "simple"
+     expressions such as "when" and "merge", however we don't want to
+     duplicate function calls, so naming them is useful.
+
+  2. if function calls are named, it should be simpler to inline the
+     function's definition, as we can use the equations from `f` to
+     define `p`, `q`, and `r`.
+-}
+
+ 
 module Language.Lustre.Transform.NoStatic (quickEvalDecls) where
 
 import Data.Text(Text)
