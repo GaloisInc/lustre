@@ -613,6 +613,8 @@ evalDynExpr env expr =
                           pure (Select e' (evalSel env s))
 
 
+    -- INVARIANT: the fields in a struct value are in the same order is
+    -- in the declaration.
     Struct s mb fs  ->
       case mb of
         Nothing -> evalNewStruct env s fs

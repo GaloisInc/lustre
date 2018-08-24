@@ -65,6 +65,8 @@ evalConst env expr =
 
     -- NOTE: we don't report an error if there is a field that
     -- is not part of a struct.  We assume that another pass checked this.
+    -- INVARIANT: the fields in a struct value are in the same order is
+    -- in the declaration.
     Struct s x fes ->
       case Map.lookup s (envStructs env) of
         Just d ->
