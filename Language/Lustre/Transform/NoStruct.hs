@@ -6,7 +6,7 @@ module Language.Lustre.Transform.NoStruct where
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Maybe(fromMaybe)
-import Data.List(genericDrop)
+import Data.List(genericDrop, sortBy)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -15,7 +15,7 @@ import Language.Lustre.Panic
 
 data Env = Env
   { envStructured :: Map Ident Expression
-    -- ^ Contains expansion for variable of strucutred types.
+    -- ^ Contains the expansions for variables of strucutred types.
     -- For example, if @x : T ^ 3@, then we shoud have a binding
     -- @x = [ a, b, c ]@.
 
@@ -23,7 +23,9 @@ data Env = Env
     -- ^ Information about the types of the nodes that are in scope.
   }
 
--- | Lookup an name in the environment.
+-- | Lookup a name in the structure expansion environment.
+-- Since constants are already eliminated, the only things that might
+-- be exandable are local variables, which are never qualified.
 lkpStrName :: Name -> Env -> Maybe Expression
 lkpStrName n env =
   case n of
@@ -51,10 +53,12 @@ evalExpr env expr =
 
     Lit _ -> expr
 
-    {- Note the clock expressions are typically small, so it is OK
-    to duplicate them.  We also assume that they don't contain structured
-    data, which is why we don't evaluate them;
-    They are supposed to be simple expressions (e.g., no selectors)
+    {- [a,b] when c   -->    [a when c, b when c ]
+
+    Note that clock expressions (e.g., `c` above) are small,
+    so it is OK to duplicate them.  We also assume that they don't contain
+    structured data, which is why we don't evaluate them---
+    they are supposed to be simple expressions (e.g., no selectors)
     of boolean or enum type. -}
     e1 `When` ce ->
 
@@ -168,6 +172,10 @@ evalExpr env expr =
                         , "*** Should have been eliminated by 'NoStatic'"
                         ]
 
+    -- merge c (A -> [1,2]; B -> [3,4])  -->
+    -- becomes
+    -- [ merge c (A -> 1; B -> 3), merge c (A -> 2; B -> 4) ]
+    --
     -- Again here we assume that patterns are simple things, as they should be
     Merge i as ->
       case [ MergeCase p (evalExpr env e) | MergeCase p e <- as ] of
@@ -185,6 +193,8 @@ evalExpr env expr =
     CallPos f es -> CallPos f [ v | e <- es, v <- toMultiExpr (evalExpr env e) ]
 
 
+-- | Convert a potentially structured expression (already evaluated)
+-- into a list of expressions.
 toMultiExpr :: Expression -> [Expression]
 toMultiExpr expr =
   case expr of
@@ -193,10 +203,12 @@ toMultiExpr expr =
                        es   -> es
     Array es      -> concatMap toMultiExpr es
     Tuple es      -> concatMap toMultiExpr es
-    Struct _ _ fs -> [ v | Field _ e <- fs, v <- toMultiExpr e ]
+    Struct _ _ fs -> [ v | Field _ e <- sortBy cmp fs, v <- toMultiExpr e ]
+      where cmp (Field l1 _) (Field l2 _) = compare l1 l2
     _             -> [ expr ]
 
 
+--------------------------------------------------------------------------------
 
 data Shape = ArrayShape Int | StructShape Name [Ident] | TupleShape Int
 
@@ -256,7 +268,7 @@ rebuildShape sh mk es =
 
 
 
-
+-- | Get the shape of an expressio.
 getShape :: Expression -> Maybe Shape
 getShape expr =
   case expr of
@@ -267,6 +279,7 @@ getShape expr =
     _ -> Nothing
 
 
+-- | Convert a literal expression to integer, or panic.
 exprToInteger :: Expression -> Integer
 exprToInteger expr =
   case expr of
@@ -277,6 +290,8 @@ exprToInteger expr =
            , "*** Expression: " ++ showPP expr
            ]
 
+-- | Eval a selector.  Since all comstants are expanded, the selectors
+-- would be known integers.
 evalSelect :: Selector Expression -> Selector Integer
 evalSelect sel =
   case sel of
@@ -284,6 +299,7 @@ evalSelect sel =
     SelectElement e -> SelectElement (exprToInteger e)
     SelectSlice s   -> SelectSlice (evalSlice s)
 
+-- | Evaluate a sllice, replacing literal expressions with integers.
 evalSlice :: ArraySlice Expression -> ArraySlice Integer
 evalSlice s = ArraySlice { arrayStart = exprToInteger (arrayStart s)
                          , arrayEnd   = exprToInteger (arrayEnd s)
