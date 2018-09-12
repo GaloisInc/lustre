@@ -6,7 +6,7 @@ module Language.Lustre.Transform.NoStruct where
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Maybe(fromMaybe)
-import Data.List(genericDrop, sortBy)
+import Data.List(genericDrop)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -203,8 +203,13 @@ toMultiExpr expr =
                        es   -> es
     Array es      -> concatMap toMultiExpr es
     Tuple es      -> concatMap toMultiExpr es
-    Struct _ _ fs -> [ v | Field _ e <- sortBy cmp fs, v <- toMultiExpr e ]
-      where cmp (Field l1 _) (Field l2 _) = compare l1 l2
+
+    -- Here we are assuming that fields are already in some normal form.
+    -- Currently, this invariant should be enforced by `NoStatic`, which
+    -- places explicit struct fields in the order specified by the struct
+    -- declaration.
+    Struct _ _ fs -> [ v | Field _ e <- fs, v <- toMultiExpr e ]
+
     _             -> [ expr ]
 
 
