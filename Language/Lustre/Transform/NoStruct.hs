@@ -190,6 +190,8 @@ evalExpr env expr =
     -- XXX: The results of the call could be structured data, so we need
     -- to name them:  f (...) : (a,b)
     -- x:a, y:b = f (...)
+
+    -- XXX: Here we should handle array operators: concat and replicate
     CallPos f es -> CallPos f [ v | e <- es, v <- toMultiExpr (evalExpr env e) ]
 
 
