@@ -3,23 +3,19 @@
 Calls to functions with static arguments are lifted to the top-level
 and given an explicit name.
 
-Optionally, we can also expand functions applied to static arguments
-to functions using a specialized definition instead.
--}
+Optionally (flag 'expandNodeInstDecl'), we can also expand functions
+applied to static arguments to functions using a specialized definition instead.
 
-{-
-XXX: While not strictly necessary for this pass, it would be convenient
-to name function calls here also:
-
-if @f(x,y)@ is a call that appears somewhere in an expression,
-we add a new equation:
+Optionally (flag 'nameCallSites), we can add explicit names for nested call
+sites.  For example, if @f(x,y)@ is a call that appears somewhere in an
+expression, we add a new equation:
 
 p,q,r = f (x,y)
 
 and replace the function call with @(p,q,r)@.
 
-
 This will help with the following transformations:
+
   1. when removing structured data, it is convenient if structured data is
      either explicit or a variable:  we can work around that for "simple"
      expressions such as "when" and "merge", however we don't want to
@@ -28,9 +24,11 @@ This will help with the following transformations:
   2. if function calls are named, it should be simpler to inline the
      function's definition, as we can use the equations from `f` to
      define `p`, `q`, and `r`.
+
+NOTE: We do NOT name calls to primitives that return a single result
+(e.g., +, #, |, or ITE)
 -}
 
- 
 module Language.Lustre.Transform.NoStatic (quickEvalDecls) where
 
 import Data.Text(Text)
@@ -39,6 +37,7 @@ import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
 import MonadLib
+import Text.PrettyPrint(punctuate,comma,hsep)
 
 import Language.Lustre.AST
 import qualified Language.Lustre.Semantics.Const as C
@@ -51,7 +50,8 @@ import Language.Lustre.Pretty
 quickEvalDecls :: Bool -> [TopDecl] -> [TopDecl]
 quickEvalDecls expand ds = reverse (readyDecls env)
   where
-  env = evalTopDecls emptyEnv { expandNodeInsts = expand } ds
+  env = evalTopDecls emptyEnv { expandNodeInsts = expand
+                              , nameCallSites   = True } ds
 
 
 -- | Evaluate a top-level declaration.
@@ -84,6 +84,18 @@ data Env = Env
     -- ^ For each enum, a map that maps identifiers to the names to
     -- use for the corresponding values.
 
+  , nodeInfo :: Map Name NodeProfile
+    -- ^ Types of the nodes that are in scope.
+    -- This is used to determine how to name the call sites.
+
+  , nodeTemplateInfo :: Map Name ( [StaticParam]
+                                 , Either NodeProfile NodeInst
+                                 )
+    -- ^ Types for node templates.
+    -- Note that the 'NodeProfile's in the map are NOT evaluated, and should
+    -- be evaluated for each concrete instantiation.
+    -- This is used to determine how to name the call sites.
+
   , typeAliases :: Map Name Type
     -- ^ Maps type names to evaluated types.
     -- The only named types in an evaluated type are either structs or enums,
@@ -95,6 +107,8 @@ data Env = Env
     -- ^ Nodes with static parameters, used when we expand definitions.
 
   , readyDecls    :: [TopDecl]
+    -- ^ Declarations that we've already processed.
+    -- These are the output of the algorithm.
 
   , nodeArgs      :: Map Ident NodeInst
     -- ^ Instantiated node arguments: if the node argument was an instantiation,
@@ -112,6 +126,9 @@ data Env = Env
         so multiple identical instantiations would be simply copies
         of each other. -}
 
+  , nameCallSites :: Bool
+    {- ^ Should we add explicit equations for each call site? -}
+
   , envNameInstSeed :: !Int
     -- ^ For generating names for function instantiations (not-expanded)
 
@@ -122,12 +139,15 @@ data Env = Env
 emptyEnv :: Env
 emptyEnv = Env { cEnv = C.emptyEnv
                , enumInfo = Map.empty
+               , nodeInfo = Map.empty
+               , nodeTemplateInfo = Map.empty
                , typeAliases = Map.empty
                , nodeTemplates = Map.empty
                , readyDecls = []
                , nodeArgs = Map.empty
                , curModule = Nothing
                , expandNodeInsts = False
+               , nameCallSites = False
                , envNameInstSeed = 0
                }
 
@@ -362,8 +382,10 @@ evalNodeDecl :: Env -> NodeDecl -> Env
 evalNodeDecl env nd =
   case nodeStaticInputs nd of
     [] -> evalNode env nd []
-    _  -> env { nodeTemplates = Map.insert name (DeclareNode nd)
-                                                (nodeTemplates env) }
+    ps -> env { nodeTemplates = Map.insert name (DeclareNode nd)
+                                                (nodeTemplates env)
+              , nodeTemplateInfo = Map.insert name (ps, Left (nodeProfile nd))
+                                                   (nodeTemplateInfo env) }
   where
   name = topIdentToName env (nodeName nd)
 
@@ -377,30 +399,36 @@ evalNode env nd args =
                                 , "*** Name: " ++ showPP (nodeName nd)
                                 ]
     Just body -> envRet2 { readyDecls = DeclareNode newNode
-                                      : readyDecls envRet2 }
+                                      : readyDecls envRet2
+                         , nodeInfo = addNamed name newProf (nodeInfo envRet2)
+                         }
       where
+      name      = topIdentToName env (nodeName nd)
       prof      = nodeProfile nd
       env0      = addStaticParams (nodeStaticInputs nd) args env
       env1      = shadowBinders env0 (nodeInputs prof)
       (bs,env2) = evalLocalDecls env1 (nodeLocals body)
       env3      = shadowBinders (shadowBinders env2 bs) (nodeOutputs prof)
-      env4      = env3 { envNameInstSeed = -77 } -- Shouldn't be used
-      (eqs,insts,newS) = runNameStatic
+      env4      = env3 { envNameInstSeed = -77 }
+      -- Shouldn't be used, sanity;
+
+      (eqs,newLs,insts,newS) = runNameStatic
                            (curModule env4)
                            (envNameInstSeed env)
-                           (mapM (evalEqn env4) (nodeEqns body))
+                           (concat <$> mapM (evalEqn env4) (nodeEqns body))
 
       envRet1 = env { envNameInstSeed = newS }
       envRet2 = addEvluatedNodeInsts envRet1 insts
 
 
       newDef    = NodeBody
-                    { nodeLocals = map LocalVar bs
+                    { nodeLocals = map LocalVar (newLs ++ bs)
                     , nodeEqns   = eqs
                     }
 
+      newProf   = evalNodeProfile env0 (nodeProfile nd)
       newNode   = nd { nodeStaticInputs = []
-                     , nodeProfile = evalNodeProfile env0 (nodeProfile nd)
+                     , nodeProfile = newProf
                      , nodeDef = Just newDef
                     }
 
@@ -446,11 +474,12 @@ evalLocalDecls env ds = ( [ evalBinder env1 b | LocalVar b <- ds ]
 
 
 -- | Evaluate an equation.
-evalEqn :: Env -> Equation -> M Equation
+evalEqn :: Env -> Equation -> M [Equation]
 evalEqn env eqn =
+  collectFunEqns $
   case eqn of
-    Assert e    -> Assert <$> evalDynExpr env e
-    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr env e
+    Assert e    -> Assert <$> evalDynExpr NestedExpr env e
+    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
 
 -- | Evaluate a left-hand-side of an equation.
 evalLHS :: Env -> LHS Expression -> LHS Expression
@@ -469,8 +498,11 @@ evalNodeInstDecl :: Env -> NodeInstDecl -> Env
 evalNodeInstDecl env nid =
   case nodeInstStaticInputs nid of
     [] -> evalNodeInst env nid []
-    _  -> env { nodeTemplates = Map.insert name (DeclareNodeInst nid)
-                                                (nodeTemplates env) }
+    ps -> env { nodeTemplates = Map.insert name (DeclareNodeInst nid)
+                                                (nodeTemplates env)
+              , nodeTemplateInfo = Map.insert name (ps, Right (nodeInstDef nid))
+                                                   (nodeTemplateInfo env)
+              }
   where
   name = topIdentToName env (nodeInstName nid)
 
@@ -482,6 +514,7 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
   where
   env0 = addStaticParams (nodeInstStaticInputs nid) args env
   env1 = env0 { envNameInstSeed = -78 } -- Do not use, bogus value for sanity
+                                        -- (strict, so no error/undefined)
 
   nameNodeInstDef (NodeInst f as) =
     case as of
@@ -490,7 +523,7 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
       _  -> do bs <- mapM (evalStaticArg env1) as
                pure (NodeInst f bs)
 
-  (newDef,insts,newS) = runNameStatic
+  (newDef,[],insts,newS) = runNameStatic
                             (curModule env1)
                             (envNameInstSeed env)
                             (nameNodeInstDef (nodeInstDef nid))
@@ -503,10 +536,114 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
   -- a template, then we've already put the correct name in the template.
 
   newInst = nid { nodeInstStaticInputs = []
-                , nodeInstProfile      = Nothing -- XXX: shold we keep this?
+                , nodeInstProfile      = Nothing
                 , nodeInstDef          = newDef
                 }
 
+
+
+-- | Determine the (result) arity of the give node instance.
+getNodeInstProfile :: Env -> NodeInst -> Maybe NodeProfile
+getNodeInstProfile env (NodeInst c as) =
+  case c of
+    CallUser f ->
+      case as of
+        [] -> case lookupNamed env f (nodeInfo env) of
+                Just a -> Just a
+                Nothing -> panic "getNodeInstProfile"
+                            [ "Unknown profile for node:"
+                            , "*** Node name: " ++ showPP f
+                            ]
+        _ -> case lookupNamed env f (nodeTemplateInfo env) of
+               Just (ps,lrProf) ->
+                 let env1 = addStaticParams ps as env
+                 in case lrProf of
+                      Left prof -> Just (evalNodeProfile env1 prof)
+                      Right ni  -> getNodeInstProfile env1 ni
+               _ -> panic "getNodeInstProfile"
+                      [ "Unknown profile for parameterized node:"
+                      , "*** Node name: " ++ showPP f
+                      ]
+
+
+    CallPrim _ p ->
+      case p of
+        Iter it ->
+          case it of
+            IterFill    ->
+              case as of
+                [ NodeArg _ ni, ExprArg n ] ->
+                  do prof <- getNodeInstProfile env ni
+                     case nodeOutputs prof of
+                       b : bs -> Just prof { nodeOutputs = b : map (toArr n) bs}
+                       _ -> bad
+                _ -> bad
+
+            IterRed ->
+              case as of
+                [ NodeArg _ ni, ExprArg n ] ->
+                  do prof <- getNodeInstProfile env ni
+                     case nodeInputs prof of
+                       b : bs -> Just prof { nodeInputs = b : map (toArr n) bs }
+                       _ -> bad
+                _ -> bad
+
+
+            IterFillRed ->
+              case as of
+                [ NodeArg _ ni, ExprArg n ] ->
+                  do prof <- getNodeInstProfile env ni
+                     case (nodeInputs prof, nodeOutputs prof) of
+                       (i:is,o:os) ->
+                          Just NodeProfile
+                                 { nodeInputs = i : map (toArr n) is
+                                 , nodeOutputs = o : map (toArr n) os
+                                 }
+
+                       _ -> bad
+                _ -> bad
+
+
+            IterMap ->
+              case as of
+                [ NodeArg _ ni, ExprArg n ] ->
+                  do prof <- getNodeInstProfile env ni
+                     Just NodeProfile
+                            { nodeInputs = map (toArr n) (nodeInputs prof)
+                            , nodeOutputs = map (toArr n) (nodeOutputs prof)
+                            }
+                _ -> bad
+
+
+            IterBoolRed ->
+              case as of
+                [ _, _, ExprArg k ] ->
+                  let ident x = Ident { identText = x
+                                      , identRange = range c
+                                      , identPragmas = []
+                                      }
+                      param x t = Binder { binderDefines = ident x
+                                         , binderType = t
+                                         , binderClock = Nothing
+                                         }
+                  in Just NodeProfile
+                            { nodeInputs = [ param "a" (ArrayType BoolType k) ]
+                            , nodeOutputs = [ param "b" BoolType ]
+                            }
+                _ -> bad
+
+            where
+            toArr n x = x { binderType = ArrayType (binderType x) n }
+            bad = panic "getNodeInstProfile"
+                    [ "Unexpecetd iterator instantiation."
+                    , "*** Iterator: " ++ showPP it
+                    , "*** Arguments: " ++ show ( hsep $ punctuate comma
+                                                        $ map pp as )
+                    ]
+        Op1 _ -> Nothing
+        Op2 _ -> Nothing
+        OpN _ -> Nothing
+        ITE   -> Nothing
 
 
 -- | Add an already evaluated node instance to the environment.
@@ -514,7 +651,7 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
 addEvluatedNodeInst :: Env -> NodeInstDecl -> Env
 addEvluatedNodeInst env ni
   | expandNodeInsts env = expandNodeInstDecl env ni
-  | otherwise = env { readyDecls = DeclareNodeInst ni : readyDecls env }
+  | otherwise = doAddNodeInstDecl ni env
 
 -- | Add an already evaluated node instance to the environment.
 -- This is where we expand instances, if the flag in the environment is set.
@@ -551,12 +688,24 @@ expandNodeInstDecl env nid =
                     ] ++ [ "      " ++ showPP x
                                        | x <- Map.keys (nodeTemplates env) ]
 
-        _ -> env { readyDecls = DeclareNodeInst nid : readyDecls env }
+        _ -> doAddNodeInstDecl nid env
 
     _ -> panic "expandNodeInstDecl"
                 [ "Trying to expand a template!"
                 , "*** Name: " ++ showPP (nodeInstName nid)
                 ]
+
+
+-- | Add a finished node instance declaration to the environment.
+doAddNodeInstDecl :: NodeInstDecl -> Env -> Env
+doAddNodeInstDecl ni env =
+  env { readyDecls = DeclareNodeInst ni : readyDecls env
+      , nodeInfo = case getNodeInstProfile env (nodeInstDef ni) of
+                     Just prof -> addNamed name prof (nodeInfo env)
+                     Nothing   -> nodeInfo env
+      }
+  where name = topIdentToName env (nodeInstName ni)
+
 
 --------------------------------------------------------------------------------
 -- Static Arguments
@@ -619,22 +768,26 @@ addStaticParam p a env
 --------------------------------------------------------------------------------
 -- Evaluation of expressions
 
+-- | Is this a top-level or a nested expression.
+-- This is used to decide if we should lift-out function calls.
+data ExprLoc = TopExpr | NestedExpr
+
 -- | Rewrite an expression that is not neccessarily constant.
-evalDynExpr :: Env -> Expression -> M Expression
-evalDynExpr env expr =
+evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
+evalDynExpr eloc env expr =
   case expr of
-    ERange r e      -> ERange r <$> evalDynExpr env e
+    ERange r e      -> ERange r <$> evalDynExpr eloc env e
     Var x           -> pure $ case Map.lookup x (C.envConsts (cEnv env)) of
                                 Just v  -> valToExpr env v
                                 Nothing -> expr
     Lit _           -> pure expr
 
 
-    e1 `When` e2    -> do e1' <- evalDynExpr env e1
+    e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
                           pure (e1' `When` evalClockExpr env e2)
-    Tuple es        -> Tuple <$> mapM (evalDynExpr env) es
-    Array es        -> Array <$> mapM (evalDynExpr env) es
-    Select e s      -> do e' <- evalDynExpr env e
+    Tuple es        -> Tuple <$> mapM (evalDynExpr NestedExpr env) es
+    Array es        -> Array <$> mapM (evalDynExpr NestedExpr env) es
+    Select e s      -> do e' <- evalDynExpr NestedExpr env e
                           pure (Select e' (evalSel env s))
 
 
@@ -651,7 +804,7 @@ evalDynExpr env expr =
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
-        VBool b -> evalDynExpr env (if b then e2 else e3)
+        VBool b -> evalDynExpr eloc env (if b then e2 else e3)
         v       -> panic "evalDynExpr"
                       [ "Decision in `with-then-else` is not a `bool`"
                       , "*** Value: " ++ showPP (valToExpr env v)
@@ -659,30 +812,59 @@ evalDynExpr env expr =
 
     Merge i ms ->
       case Map.lookup (Unqual i) (C.envConsts (cEnv env)) of
-        Just v  -> evalMergeConst env v ms
+        Just v  -> evalMergeConst eloc env v ms
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     CallPos f es ->
-      do es' <- mapM (evalDynExpr env) es
-         case f of
-           NodeInst c [] -> pure (resolvePlainCall env c es')
-           _ -> do f'  <- nameInstance env f
-                   pure (CallPos f' es')
+      do es' <- mapM (evalDynExpr NestedExpr env) es
+         ni  <- case f of
+                  NodeInst c [] ->
+                    pure $
+                    case c of
+                      CallUser (Unqual i)
+                        | Just ni <- Map.lookup i (nodeArgs env) -> ni
+                      _ -> NodeInst c []
+                  _ -> nameInstance env f
+         let shouldName = case eloc of
+                            TopExpr -> False
+                            NestedExpr -> nameCallSites env
+         if shouldName
+            then nameCallSite env ni es'
+            else pure (CallPos ni es')
+
+-- | Name a call site, by adding an additional equation for the call,
+-- and replacing the call with a tuple containing the results.
+-- We leave primitives with a single result as calls though.
+nameCallSite :: Env -> NodeInst -> [Expression] -> M Expression
+nameCallSite env ni es =
+  case getNodeInstProfile env ni of
+    Just prof ->
+      do let outs = nodeOutputs prof
+         ns <- replicateM (length outs) (newIdent (range ni))
+         let toBind n b = Binder { binderDefines = n
+                                 , binderType    = binderType b
+                                 , binderClock   = Nothing
+                                 }
+             binds = zipWith toBind ns outs
+         addFunEqn binds (Define (map LVar ns) (CallPos ni es))
+         pure (Tuple (map (Var . Unqual) ns))
+    Nothing -> pure (CallPos ni es)
+
 
 -- | Use a constant to select a branch in a merge.
-evalMergeConst :: Env -> Value -> [MergeCase] -> M Expression
-evalMergeConst env v ms =
+evalMergeConst :: ExprLoc -> Env -> Value -> [MergeCase] -> M Expression
+evalMergeConst eloc env v ms =
   case ms of
     MergeCase p e : more
-      | evalExprToVal env p == v -> evalDynExpr env e
-      | otherwise                ->  evalMergeConst env v more
+      | evalExprToVal env p == v -> evalDynExpr eloc env e
+      | otherwise                -> evalMergeConst eloc env v more
     [] -> panic "evalMergeConst" [ "None of the branches of a merge matched:"
                                  , "*** Value: " ++ showPP (valToExpr env v)
                                  ]
 
 evalMergeCase :: Env -> MergeCase -> M MergeCase
 evalMergeCase env (MergeCase p e) =
-  MergeCase (evalExpr env p) <$> evalDynExpr env e
+  MergeCase (evalExpr env p) <$> evalDynExpr NestedExpr env e
 
 -- | Evaluate an update to a struct that is not a constant.
 evalUpdExprStruct :: Env -> Name -> Name -> [Field] -> M Expression
@@ -690,7 +872,7 @@ evalUpdExprStruct env s x fs =
   do fs' <- mapM evalField fs
      pure (Struct s (Just x) fs')
   where
-  evalField (Field l e) = Field l <$> evalDynExpr env e
+  evalField (Field l e) = Field l <$> evalDynExpr NestedExpr env e
 
 
 -- | Evaluate an update to a struct constant.
@@ -711,7 +893,7 @@ evalNewStruct env s fs =
   evalNewStructWithDefs env s fs $
   case Map.lookup s (C.envStructs (cEnv env)) of
     Just def  -> def
-    Nothing   -> panic "evalDynExpr" [ "Undefined struct type:"
+    Nothing   -> panic "evalNewStruct" [ "Undefined struct type:"
                                      , "*** Name: " ++ showPP s
                                      ]
 
@@ -732,23 +914,16 @@ evalNewStructWithDefs env s fs def =
              Nothing ->
                case mbV of
                  Just v  -> valToExpr env v
-                 Nothing  -> panic "evalDynExpr" [ "Missing field in struct:"
+                 Nothing  -> panic "evalNewStructWithDefs"
+                                                 [ "Missing field in struct:"
                                                  , "*** Name: " ++ showPP f
                                                  ]
      pure (Struct s Nothing (map setField def))
   where
-  evalField (Field l e) = do e' <- evalDynExpr env e
+  evalField (Field l e) = do e' <- evalDynExpr NestedExpr env e
                              return (l,e')
 
 
-
-
-resolvePlainCall :: Env -> Callable -> [ Expression ] -> Expression
-resolvePlainCall env c es = CallPos f es
-  where f = case c of
-              CallUser (Unqual i)
-                | Just ni <- Map.lookup i (nodeArgs env) -> ni
-              _ -> NodeInst c []
 
 
 -- | Generate a new top-level declaration for this node instance.
@@ -781,17 +956,18 @@ runNameStatic ::
   Maybe Text {- ^ Qualify generated names with this -} ->
   Int        {- ^ Start generating names using this seed -} ->
   M a        {- ^ This is what we want to do -} ->
-  (a, [ NodeInstDecl ], Int) -- ^ result, new instances, new name seed
+  (a, [Binder], [ NodeInstDecl ], Int)
+  -- ^ result, new locals, new instances, new name seed
 runNameStatic qual seed m
   | seed < 0   = panic "runNameStatic"
                     [ "Incorrect use of `envNameInstSeed`"
                     , "*** Negative seed: " ++ show seed
                     ]
-  | otherwise  = (a, reverse (instances rw1), nameSeed rw1)
+  | otherwise  = (a, newLocals rw1, reverse (instances rw1), nameSeed rw1)
   where
   (a,rw1) = runId $ runStateT rw $ runReaderT ro m
   ro      = RO { qualify = qual }
-  rw      = RW { nameSeed = seed, instances = [] }
+  rw      = RW { nameSeed = seed, instances = [], funEqns = [], newLocals = [] }
 
 newtype RO = RO
   { qualify :: Maybe Text             -- ^ Qualify references to generated names
@@ -800,6 +976,8 @@ newtype RO = RO
 data RW = RW
   { nameSeed    :: !Int               -- ^ Generate new names
   , instances   :: [ NodeInstDecl ]   -- ^ Generated declarations
+  , newLocals   :: [ Binder ]         -- ^ New locals to declare for 'funEqns'
+  , funEqns     :: [ Equation ]       -- ^ Generated named function call sites
   }
 
 
@@ -844,4 +1022,14 @@ identToName i =
 addInst :: NodeInstDecl -> M ()
 addInst ni = sets_ $ \s -> s { instances = ni : instances s }
 
+-- | Run a computation and collect all named function call sites,
+-- returning them.  The result of the computation is added last to the list.
+collectFunEqns :: M Equation -> M [Equation]
+collectFunEqns m =
+  do e <- m
+     sets $ \s -> (reverse (e : funEqns s), s { funEqns = [] })
 
+-- | Record a new function equation.
+addFunEqn :: [Binder] -> Equation -> M ()
+addFunEqn bs eqn = sets_ $ \s -> s { newLocals = bs ++ newLocals s
+                                   , funEqns = eqn : funEqns s }
