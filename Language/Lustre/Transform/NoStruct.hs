@@ -1,12 +1,13 @@
 {- | The purpose of this module is to eliminate structured data.
 It should be called after constants have been eliminated, as we then
-know that shape of all data. -}
+know that shape of all data. We also assume that function calls have
+been names, see "Language.Lustre.Transform.NoStatic". -}
 module Language.Lustre.Transform.NoStruct where
 
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Maybe(fromMaybe)
-import Data.List(genericDrop)
+import Data.List(genericDrop,genericReplicate)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -187,12 +188,60 @@ evalExpr env expr =
               where mk es' = Merge i [ MergeCase p e |
                                           (MergeCase p _, e) <- zip opts es' ]
 
-    -- XXX: The results of the call could be structured data, so we need
-    -- to name them:  f (...) : (a,b)
-    -- x:a, y:b = f (...)
+    CallPos f es ->
+      case (f, map (evalExpr env) es) of
 
-    -- XXX: Here we should handle array operators: concat and replicate
-    CallPos f es -> CallPos f [ v | e <- es, v <- toMultiExpr (evalExpr env e) ]
+        (NodeInst (CallPrim _ (Op2 Concat)) [], [e1,e2]) ->
+          Array (asArray e1 ++ asArray e2)
+          where asArray x = case x of
+                              ERange _ y -> asArray y
+                              Array xs   -> xs
+                              _ -> panic "asArray"
+                                    [ "Not an array:"
+                                    , "*** Expression: " ++ showPP x ]
+
+        -- XXX: This duplicates stuff, perhaps bad
+        (NodeInst (CallPrim _ (Op2 Replicate)) [], [e1,e2]) ->
+          Array (genericReplicate (exprToInteger e2) e1)
+
+        (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2])
+          | Just res <- liftBin (bin r Fby) e1 e2 -> res
+
+        (NodeInst (CallPrim r ITE) [], [e1,e2,e3])
+          | Just res <- liftBin (\a b -> ite r e1 a b) e2 e3 -> res
+
+        (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2])
+          | Just res <- liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2 -> res
+
+        (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2])
+          | Just res <- liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2 -> res
+
+        (_, evs) -> CallPos f [ v | e <- evs, v <- toMultiExpr e ]
+
+  where
+  ite r e1 e2 e3 = CallPos (NodeInst (CallPrim r ITE) []) [e1,e2,e3]
+  bin r op e1 e2 = CallPos (NodeInst (CallPrim r (Op2 op)) []) [e1,e2]
+
+  fTrue = Lit (Bool True)
+  fFalse = Lit (Bool False)
+
+  liftBin f e1 e2 =
+    do sh <- getShape e1
+       pure (rebuildShape sh (\ ~[x,y] -> f x y) [e1,e2])
+
+  liftFoldBin f cons nil e1 e2 =
+    do r <- liftBin f e1 e2
+       pure $ case r of
+                Array as            -> fold cons nil as
+                Struct _ Nothing fs -> fold cons nil [ e | Field _ e <- fs ]
+                Tuple es            -> fold cons nil es
+                _ -> panic "liftFoldBin"
+                       [ "Unexpected result of `rebuildShape`"
+                       , "*** Expression: " ++ showPP r ]
+  fold cons nil xs =
+    case xs of
+      [] -> nil
+      _  -> foldr1 cons xs
 
 
 -- | Convert a potentially structured expression (already evaluated)
