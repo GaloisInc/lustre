@@ -191,6 +191,7 @@ evalExpr env expr =
     CallPos f es ->
       case (f, map (evalExpr env) es) of
 
+        -- [x1,x2] | [y1,y2]  ~~> [ x1,x2,y1,y2 ]
         (NodeInst (CallPrim _ (Op2 Concat)) [], [e1,e2]) ->
           Array (asArray e1 ++ asArray e2)
           where asArray x = case x of
@@ -201,21 +202,29 @@ evalExpr env expr =
                                     , "*** Expression: " ++ showPP x ]
 
         -- XXX: This duplicates stuff, perhaps bad
+        -- x ^ 2  ~~>  [x,x]
         (NodeInst (CallPrim _ (Op2 Replicate)) [], [e1,e2]) ->
           Array (genericReplicate (exprToInteger e2) e1)
 
+        -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
         (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2])
           | Just res <- liftBin (bin r Fby) e1 e2 -> res
 
+        -- if a then [x1,x2] else [y1,y2]  ~~>
+        -- [ if a then x1 else y1, if a then x2 else y2 ]
+        -- XXX: Duplicates `a`
         (NodeInst (CallPrim r ITE) [], [e1,e2,e3])
           | Just res <- liftBin (\a b -> ite r e1 a b) e2 e3 -> res
 
+        -- [x1, x2] = [y1,y2]  ~~~>  (x1 = x2) && (y1 = y2)
         (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2])
           | Just res <- liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2 -> res
 
+        -- [x1, x2] <> [y1,y2]  ~~~>  (x1 <> x2) || (y1 <> y2)
         (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2])
           | Just res <- liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2 -> res
 
+        -- f([x1,x2])  ~~~>  f(x1,x2)
         (_, evs) -> CallPos f [ v | e <- evs, v <- toMultiExpr e ]
 
   where
