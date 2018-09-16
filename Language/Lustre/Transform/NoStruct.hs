@@ -93,6 +93,17 @@ evalMerge i as =
                      [ MergeCase p e | (MergeCase p _, e) <- zip opts es' ]
 
 
+-- | Lift a binary operator to the leaves of structured data.
+-- Assumes that the arguments have the same types, and hence the same shapes.
+evalBin :: (Expression -> Expression -> Expression) ->
+           Expression -> Expression -> Expression
+evalBin f e1 e2 =
+  case getShape e1 of
+    Just sh -> rebuildShape sh (\ ~[x,y] -> evalBin f x y) [e1,e2]
+    Nothing -> f e1 e2
+
+
+
 
 -- | Evaluate a struct update
 evalStructUpdate :: Env -> Name {- type -} -> Name -> [Field] -> Expression
@@ -118,6 +129,7 @@ evalStructUpdate env s x es =
   where
   fldMap = Map.fromList [ (l, evalExpr env v) | Field l v <- es ]
 
+-- | Select an item from an array.
 selectFromArray :: [Expression] -> Selector Integer -> Expression
 selectFromArray vs s =
   case s of
@@ -146,6 +158,7 @@ selectFromArray vs s =
                      , "*** Array: " ++ showPP (Array vs)
                      ]
 
+-- | Select an item from a struct.
 selectFromStruct :: Name -> [Field] -> Selector Integer -> Expression
 selectFromStruct ty fs s =
     case s of
@@ -201,12 +214,12 @@ evalExpr env expr =
 
       caseThruRange (evalExpr env e) $ \ev ->
         case ev of
-          Array vs            -> selectFromArray vs s
-          Struct ty Nothing fs -> selectFromStruct ty fs s
-          _                   -> panic "selectFromStruct"
-                                    [ "Selection from a non structured type:"
-                                    , "*** Expression: " ++ showPP ev
-                                    ]
+          Array vs              -> selectFromArray vs s
+          Struct ty Nothing fs  -> selectFromStruct ty fs s
+          _                     -> panic "selectFromStruct"
+                                     [ "Selection from a non structured type:"
+                                     , "*** Expression: " ++ showPP ev
+                                     ]
       where s = evalSelect sel
 
 
@@ -218,7 +231,7 @@ evalExpr env expr =
     Merge i as ->
       evalMerge i [ MergeCase p (evalExpr env e) | MergeCase p e <- as ]
 
-    -- XXX: DEAL WITH NESTED DATA + ITERATORS
+    -- XXX: ITERATORS
     CallPos f es ->
       case (f, map (evalExpr env) es) of
 
@@ -238,22 +251,63 @@ evalExpr env expr =
           Array (genericReplicate (exprToInteger e2) e1)
 
         -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
-        (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2])
-          | Just res <- liftBin (bin r Fby) e1 e2 -> res
+        (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2]) ->
+          evalBin (bin r Fby) e1 e2
 
         -- if a then [x1,x2] else [y1,y2]  ~~>
         -- [ if a then x1 else y1, if a then x2 else y2 ]
         -- XXX: Duplicates `a`
-        (NodeInst (CallPrim r ITE) [], [e1,e2,e3])
-          | Just res <- liftBin (\a b -> ite r e1 a b) e2 e3 -> res
+        (NodeInst (CallPrim r ITE) [], [e1,e2,e3]) ->
+          evalBin (\a b -> ite r e1 a b) e2 e3
 
         -- [x1, x2] = [y1,y2]  ~~~>  (x1 = x2) && (y1 = y2)
-        (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2])
-          | Just res <- liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2 -> res
+        (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2]) ->
+          liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2
 
         -- [x1, x2] <> [y1,y2]  ~~~>  (x1 <> x2) || (y1 <> y2)
-        (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2])
-          | Just res <- liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2 -> res
+        (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2]) ->
+          liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2
+
+        (NodeInst (CallPrim r (Iter it)) as, vs) ->
+          case (it, as, vs) of
+            (IterFill, [ NodeArg _ _ni, sz ], [s]) -> undefined
+                {- let s1, x1, y1 = ni s
+                       s2, x2, y2 = ni s1
+                       s3, x3, y3 = ni s2
+                       ...
+                       sN, xN, yN = ni s{N-1}
+                   in (sN, [ x1 .. xN ], [ y1 .. yN ]) -}
+
+            (IterRed, [ NodeArg _ ni, sz ], (s : xs)) -> undefined
+              {- let s1 = ni (s , x1, y1)
+                     s2 = ni (s1, x2, y2)
+                     ...
+                     sN = ni (s{N-1}, xN, Yn)
+                 in sN -}
+
+            (IterFill, [ NodeArg _ ni, sz ], (s : xs)) -> undefined
+              {- let s1, a1, b1 = ni (s, x1, y1)
+                     s2, a2, b2 = ni (s1, x2, y2)
+                     ...
+                     sN, aN, bN = ni (s{N-1}, xN, yN)
+                 in (sN, [ a1 .. aN ], [b1 .. bN]) -}
+
+
+            (IterFill, [ NodeArg _ ni, sz ], xs) -> undefined
+              {- let a1, b1 = ni (x1,y1)
+                     a2, b2 = ni (x2,y2)
+                     ...
+                     aN, bN = ni (xN,yN)
+                  in ([a1..N], [b1..bN]) -}
+
+            (IterBoolRed, [ i, j, n ], [xs]) -> undefined
+              {- let n1 = if x1 then 1 else 0
+                     n2 = if x2 then n1 + 1 else n1 
+                     ...
+                     nN = if xN then n{N-1} + 1 else n{N-1}
+                  in i <= nN && nN <= j
+              -}
+
 
         -- f([x1,x2])  ~~~>  f(x1,x2)
         (_, evs) -> CallPos f [ v | e <- evs, v <- toMultiExpr e ]
@@ -265,19 +319,9 @@ evalExpr env expr =
   fTrue = Lit (Bool True)
   fFalse = Lit (Bool False)
 
-  liftBin f e1 e2 =
-    do sh <- getShape e1
-       pure (rebuildShape sh (\ ~[x,y] -> f x y) [e1,e2])
-
   liftFoldBin f cons nil e1 e2 =
-    do r <- liftBin f e1 e2
-       pure $ case r of
-                Array as            -> fold cons nil as
-                Struct _ Nothing fs -> fold cons nil [ e | Field _ e <- fs ]
-                Tuple es            -> fold cons nil es
-                _ -> panic "liftFoldBin"
-                       [ "Unexpected result of `rebuildShape`"
-                       , "*** Expression: " ++ showPP r ]
+    fold cons nil (zipWith f (toMultiExpr e1) (toMultiExpr e2))
+
   fold cons nil xs =
     case xs of
       [] -> nil
