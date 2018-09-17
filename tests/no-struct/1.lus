@@ -5,3 +5,9 @@ node f (a : S) returns (b : S ^ 2)
 let
   b = [a,a];
 tel
+
+
+node g () returns (a : S ^ 2)
+let
+  a = f (S { x = 1; y = true } );
+tel
