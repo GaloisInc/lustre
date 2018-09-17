@@ -69,6 +69,13 @@ test-suite no-static
   build-depends:
     base, filepath, directory, containers, pretty, language-lustre
 
+test-suite no-struct
+  type: exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is: NoStruct.hs
+  build-depends:
+    base, filepath, directory, containers, pretty, language-lustre
+
 
 
 test-suite core

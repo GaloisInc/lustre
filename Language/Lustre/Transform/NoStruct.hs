@@ -1,17 +1,24 @@
+{-# Language OverloadedStrings #-}
 {- | The purpose of this module is to eliminate structured data.
 It should be called after constants have been eliminated, as we then
 know that shape of all data. We also assume that function calls have
 been names, see "Language.Lustre.Transform.NoStatic". -}
-module Language.Lustre.Transform.NoStruct where
+module Language.Lustre.Transform.NoStruct (quickNoStruct) where
 
 import Data.Map(Map)
 import qualified Data.Map as Map
-import Data.Maybe(fromMaybe)
-import Data.List(genericDrop,genericReplicate)
+import Data.Text(Text)
+import qualified Data.Text as Text
+import Data.Maybe(fromMaybe, catMaybes)
+import Data.List(genericDrop,genericReplicate,mapAccumL)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
+
+-- XXX: More flexible interface
+quickNoStruct :: [TopDecl] -> [TopDecl]
+quickNoStruct = catMaybes . snd . mapAccumL evalTopDecl emptyEnv
 
 
 data Env = Env
@@ -24,8 +31,18 @@ data Env = Env
   , envStructs :: Map Name [(Ident,Type)]
     -- ^ Definitions for strcut types.
 
-  , nodeTypes :: Map Name NodeProfile
-    -- ^ Information about the types of the nodes that are in scope.
+  , envCurModule :: Maybe Text
+    -- ^ If this is 'Just', then we use this to qualify top-level
+    -- 'Ident' when we need a name 'Name'
+  }
+
+
+-- | An empty environment.
+emptyEnv :: Env
+emptyEnv = Env
+  { envStructured = Map.empty
+  , envStructs    = Map.empty
+  , envCurModule  = Nothing
   }
 
 -- | Lookup a name in the structure expansion environment.
@@ -46,18 +63,99 @@ caseThruRange expr f =
     _          -> f expr
 
 --------------------------------------------------------------------------------
+-- Evaluation of Top Level Declarations
+
+evalTopDecl :: Env -> TopDecl -> (Env, Maybe TopDecl)
+evalTopDecl env td =
+  case td of
+    DeclareType tde     -> addStructDef env tde
+    DeclareConst cd     -> panic "evalTopDecl"
+                              [ "Unexpecetd constant declaration."
+                              , "*** Declaration: " ++ showPP cd ]
+    DeclareNode nd      -> (env, Just (DeclareNode (evalNode env nd)))
+    DeclareNodeInst nid -> panic "evalTopDecl"
+                             [ "Node instance declarations should be expanded."
+                             , "*** Node instance: " ++ showPP nid
+                             ]
+
+-- | Add a structure definition to the environemnt, or do nothing.
+addStructDef :: Env -> TypeDecl -> (Env, Maybe TopDecl)
+addStructDef env td =
+  case typeDef td of
+    Just (IsStruct fs) -> (doAddStructDef env (typeName td) fs, Nothing)
+    _ -> (env, Just (DeclareType td))
+
+-- | Add a struct definition to the environment. We add an unqialifeid name,
+-- and also a qualified one, if a qualifier was provided in the environemnt.
+doAddStructDef :: Env -> Ident -> [FieldType] -> Env
+doAddStructDef env i fs = env { envStructs = Map.insert (Unqual i) def
+                                           $ addQual
+                                           $ envStructs env }
+  where
+  def     = [ (fieldName f, fieldType f) | f <- fs ]
+  addQual = case envCurModule env of
+              Nothing -> id
+              Just m  -> Map.insert (Qual (identRange i) m (identText i)) def
+
+
+-- | Evaluate a node, expanding structured data.
+evalNode :: Env -> NodeDecl -> NodeDecl
+evalNode env nd
+  | null (nodeStaticInputs nd) =
+    let prof = nodeProfile nd
+        (inMap, inBs)   = expandBinders env (nodeInputs prof)
+        (outMap, outBs) = expandBinders env (nodeOutputs prof)
+        -- NOTE: it appears that inputs are not in scope in the outputs in Lus.
+        newProf = NodeProfile { nodeInputs = inBs
+                              , nodeOutputs = outBs
+                              }
+        newEnv = env { envStructured = Map.unions [ inMap
+                                                  , outMap
+                                                  , envStructured env
+                                                  ] }
+      in nd { nodeProfile = newProf
+            , nodeDef     = evalNodeBody newEnv <$> nodeDef nd
+            }
+
+  | otherwise = panic "evalNode"
+                  [ "Unexpected parameterized node."
+                  , "Node parameters should have been eliminated by NoStatic."
+                  , "*** Node: " ++ showPP nd
+                  ]
+
+
+-- | Evaluate a node's definition.  Expands the local variables,
+-- and rewrites the equations.
+evalNodeBody :: Env -> NodeBody -> NodeBody
+evalNodeBody env body =
+  NodeBody { nodeLocals = map LocalVar locBs
+           , nodeEqns = concatMap (evalEqn newEnv) (nodeEqns body)
+           }
+  where
+  (locMap, locBs) = expandBinders env [ b | LocalVar b <- nodeLocals body ]
+  newEnv = env { envStructured = Map.union locMap (envStructured env) }
+
+
+
+
+--------------------------------------------------------------------------------
+-- Mappings between structured types/data and flat representations.
 
 -- | Compute the list of atomic types in a type.
-expandType :: Env -> Type -> [Type]
+-- Also returns a boolean to indicate if this was a structured type.
+expandType :: Env -> Type -> (Bool, [Type])
 expandType env ty =
   case ty of
-    TypeRange r t -> map (TypeRange r) (expandType env t)
+    TypeRange r t -> (b, map (TypeRange r) ts)
+      where (b,ts) = expandType env t
     NamedType s | Just fs <- Map.lookup s (envStructs env) ->
-                      concatMap (expandType env . snd) fs
+                      (True, concatMap (snd . expandType env . snd) fs)
     ArrayType t e ->
-      concat (genericReplicate (exprToInteger e) (expandType env t))
+      ( True
+      , concat (genericReplicate (exprToInteger e) (snd (expandType env t)))
+      )
 
-    _ -> [ty]
+    _ -> (False, [ty])
 
 -- | Given a type, and epxressions for the leaves of a structured value,
 -- rebuild the actual value.
@@ -90,30 +188,131 @@ toNormE env t0 es0 =
             e : more -> (more, e)
             [] -> panic "toNormE" ["Not enogh expressions"]
 
+-- | Convert a potentially structured expression (already evaluated)
+-- into a list of expressions.
+toMultiExpr :: Expression -> [Expression]
+toMultiExpr expr =
+  case expr of
+    ERange r e    -> case toMultiExpr e of
+                       [e1] -> [ ERange r e1 ]
+                       es   -> es
+    Array es      -> concatMap toMultiExpr es
+    Tuple es      -> concatMap toMultiExpr es
 
--- parameters: x : int ^ 3     
--- becomes:
--- 3 parameters: x1, x2, x3 : int
--- x = [ x1, x2, x3 ]
---
--- local x : int ^ 3
--- becomes:
--- 3 locals: x1, x2, x3 : int
--- x = [ x1, x2, x3 ]   -- for references to local
--- in LHS:
--- x --> x1,x2,x3
--- x[1] --> [x1,x2,x3][1] --> x2
---
--- nested case:
--- x : int ^ 2 ^ 3
--- x1 .. x6 : int
--- x = [ [x1,x2], [x3,x4], [x5,x6] ]
--- in LHS:
--- x[0] = ...
--- ->
--- x[0] = [x1,x2] --> x1,x2
+    -- Here we are assuming that fields are already in some normal form.
+    -- Currently, this invariant should be enforced by `NoStatic`, which
+    -- places explicit struct fields in the order specified by the struct
+    -- declaration.
+    Struct _ _ fs -> [ v | Field _ e <- fs, v <- toMultiExpr e ]
 
-type M = IO -- XXX
+    _             -> [ expr ]
+
+
+
+--------------------------------------------------------------------------------
+
+
+-- | Expand multiple binders.  For details, have a look at 'expandBinder'.
+-- The binders are all evaluated in the same environemnt (i.e., they should
+-- not affect each other).
+expandBinders :: Env -> [Binder] -> (Map Ident Expression, [Binder])
+expandBinders env bs = (Map.fromList (catMaybes defs), concat newBs)
+  where
+  (defs,newBs) = unzip (map (expandBinder env) bs)
+
+
+{- | Expand a binder to a list of binder (non-structured binder are left as is).
+For structured binders we also return a mapping from the original name,
+to its normal form.  For example:
+
+> x : int ^ 3
+
+results in
+
+> x1 : int; x2 : int; x3 : int
+
+and a mapping:
+
+> x = [ x1, x2, x3 ]
+-}
+expandBinder :: Env -> Binder -> (Maybe (Ident,Expression), [Binder])
+expandBinder env b =
+  case expandType env (binderType b) of
+    (False,_) -> (Nothing, [b])
+    (True, ts) -> (Just (binderDefines b, expr), bs)
+      where
+      toBinder x t = Binder { binderDefines = x
+                            , binderType    = t
+                            , binderClock   = binderClock b
+                            }
+
+      bs = zipWith toBinder (nameVariants (binderDefines b)) ts
+
+      expr = toNormE env (binderType b)
+                [ Var (Unqual (binderDefines i)) | i <- bs ]
+
+{- | Given a base name, generate a bunch of different names.
+Assuming that the original name is unique, the variants should
+also not clash with anything.
+XXX: Strictly speaking, this does not avoid name clashes,
+so in the future we should make up some alternative scheme.
+(the whole naming story could probably use some work). -}
+nameVariants :: Ident -> [Ident]
+nameVariants i = [ i { identText = t } | t <- nameVariantsText (identText i) ]
+
+-- | Assuming that the original name is unique, the variants should
+-- also not clash with anything.
+nameVariantsText :: Text -> [Text]
+nameVariantsText t = [ variant n | n <- [ 1 :: Integer .. ] ]
+  where
+  variant n = t <> "_ns_" <> Text.pack (show n)
+
+--------------------------------------------------------------------------------
+
+-- | Expan an equation.  If structured data was involved, the result might
+-- be multiple equations.
+evalEqn :: Env -> Equation -> [Equation]
+evalEqn env eqn =
+  case eqn of
+    Assert e     -> [ Assert (evalExpr env e) ]
+    Define lhs e
+      | isCall e1 -> [ Define ls e1 ]
+      | otherwise -> zipExact def ls (toMultiExpr e1)
+      where
+      def l a = Define [l] a
+      e1 = evalExpr env e
+      ls = concatMap (expandLHS env) lhs
+      isCall ex = case ex of
+                    ERange _ ex1 -> isCall ex1
+                    CallPos {}   -> True
+                    _            -> False
+
+-- | Like 'zipWith' except panic if the lists have different lenghts.
+zipExact :: (a -> b -> c) -> [a] -> [b] -> [c]
+zipExact _ [] [] = []
+zipExact f (x : xs) (y : ys) = f x y : zipExact f xs ys
+zipExact _ [] _ = panic "zipExact" [ "More on the left" ]
+zipExact _ _ _  = panic "zipExact" [ "More on the right" ]
+
+
+-- | Convert a possible complex LHS, to a simple (i.e., identifier) LHS
+-- on primitive types.
+expandLHS :: Env -> LHS Expression -> [ LHS Expression ]
+expandLHS env lhs = map exprIdLhs (toMultiExpr (evalExpr env (lhsToExpr lhs)))
+  where
+  exprIdLhs e =
+    case e of
+      ERange _ e1    -> exprIdLhs e1
+      Var (Unqual i) -> LVar i
+      _ -> panic "expandLHS" [ "LHS is not an identifier"
+                             , "*** Expression: " ++ showPP e ]
+
+-- | Convert a LHS to an expression corresponding to thing being defined.
+lhsToExpr :: LHS Expression -> Expression
+lhsToExpr lhs =
+  case lhs of
+    LVar x      -> Var (Unqual x)
+    LSelect l s -> Select (lhsToExpr l) s
 
 --------------------------------------------------------------------------------
 
@@ -360,26 +559,6 @@ evalExpr env expr =
     case xs of
       [] -> nil
       _  -> foldr1 cons xs
-
-
--- | Convert a potentially structured expression (already evaluated)
--- into a list of expressions.
-toMultiExpr :: Expression -> [Expression]
-toMultiExpr expr =
-  case expr of
-    ERange r e    -> case toMultiExpr e of
-                       [e1] -> [ ERange r e1 ]
-                       es   -> es
-    Array es      -> concatMap toMultiExpr es
-    Tuple es      -> concatMap toMultiExpr es
-
-    -- Here we are assuming that fields are already in some normal form.
-    -- Currently, this invariant should be enforced by `NoStatic`, which
-    -- places explicit struct fields in the order specified by the struct
-    -- declaration.
-    Struct _ _ fs -> [ v | Field _ e <- fs, v <- toMultiExpr e ]
-
-    _             -> [ expr ]
 
 
 --------------------------------------------------------------------------------

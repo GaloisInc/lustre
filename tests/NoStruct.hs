@@ -16,11 +16,12 @@ import Language.Lustre.Parser
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Transform.NoStatic
+import Language.Lustre.Transform.NoStruct
 
 main :: IO ()
 main =
   do args <- getArgs
-     let dir = "tests/no-static"
+     let dir = "tests/no-struct"
      fs0 <- getDirectoryContents dir
      let candidates = [ dir </> f | f <- sort fs0 ]
      fs  <- filterM doesFileExist candidates
@@ -32,7 +33,7 @@ checkFile file =
   do a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
-         do print $ vcatSep $ map pp $ quickNoConst True ds
+         do print $ vcatSep $ map pp $ quickNoStruct $ quickNoConst True ds
             putStrLn "----------------------------"
             return True
        _ -> do putStrLn "Packages are not yet supported"

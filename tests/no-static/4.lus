@@ -1,0 +1,8 @@
+
+
+node f () returns (a : int ^ 3)
+let
+  a = map <<+; 3>>([1,0,2],[3,6,-1]);
+tel
+
+

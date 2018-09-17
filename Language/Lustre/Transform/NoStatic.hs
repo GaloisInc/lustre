@@ -29,7 +29,7 @@ NOTE: We do NOT name calls to primitives that return a single result
 (e.g., +, #, |, or ITE)
 -}
 
-module Language.Lustre.Transform.NoStatic (quickEvalDecls) where
+module Language.Lustre.Transform.NoStatic (quickNoConst) where
 
 import Data.Text(Text)
 import qualified Data.Text as Text
@@ -47,8 +47,8 @@ import Language.Lustre.Pretty
 
 
 -- XXX
-quickEvalDecls :: Bool -> [TopDecl] -> [TopDecl]
-quickEvalDecls expand ds = reverse (readyDecls env)
+quickNoConst :: Bool -> [TopDecl] -> [TopDecl]
+quickNoConst expand ds = reverse (readyDecls env)
   where
   env = evalTopDecls emptyEnv { expandNodeInsts = expand
                               , nameCallSites   = True } ds
