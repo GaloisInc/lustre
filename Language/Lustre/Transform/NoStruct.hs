@@ -21,6 +21,9 @@ data Env = Env
     -- @x = [ a, b, c ]@.
     -- The expressions in the map should be in evaluated form.
 
+  , envStructs :: Map Name [(Ident,Type)]
+    -- ^ Definitions for strcut types.
+
   , nodeTypes :: Map Name NodeProfile
     -- ^ Information about the types of the nodes that are in scope.
   }
@@ -41,6 +44,78 @@ caseThruRange expr f =
   case expr of
     ERange r e -> ERange r (caseThruRange e f)
     _          -> f expr
+
+--------------------------------------------------------------------------------
+
+-- | Compute the list of atomic types in a type.
+expandType :: Env -> Type -> [Type]
+expandType env ty =
+  case ty of
+    TypeRange r t -> map (TypeRange r) (expandType env t)
+    NamedType s | Just fs <- Map.lookup s (envStructs env) ->
+                      concatMap (expandType env . snd) fs
+    ArrayType t e ->
+      concat (genericReplicate (exprToInteger e) (expandType env t))
+
+    _ -> [ty]
+
+-- | Given a type, and epxressions for the leaves of a structured value,
+-- rebuild the actual value.
+toNormE :: Env -> Type -> [Expression] -> Expression
+toNormE env t0 es0 =
+  case go es0 t0 of
+    ([], e) -> e
+    _       -> panic "toNormE" [ "Left over expressions after rebuilt" ]
+  where
+  goMany inEs tys =
+    case tys of
+      [] -> (inEs , [])
+      t : more -> let (rest, outE)   = go inEs t
+                      (rest', outEs) = goMany rest more
+                  in (rest', outE : outEs)
+
+  go es ty =
+   case ty of
+     TypeRange _ t -> go es t
+     NamedType s | Just fs <- Map.lookup s (envStructs env) ->
+
+      let (es', outEs) = goMany es (map snd fs)
+      in (es', Struct s Nothing [ Field l e | ((l,_) ,e) <- zip fs outEs ])
+
+     ArrayType t e ->
+       let (es', outEs) = goMany es (genericReplicate (exprToInteger e) t)
+       in (es', Array outEs)
+
+     _ -> case es of
+            e : more -> (more, e)
+            [] -> panic "toNormE" ["Not enogh expressions"]
+
+
+-- parameters: x : int ^ 3     
+-- becomes:
+-- 3 parameters: x1, x2, x3 : int
+-- x = [ x1, x2, x3 ]
+--
+-- local x : int ^ 3
+-- becomes:
+-- 3 locals: x1, x2, x3 : int
+-- x = [ x1, x2, x3 ]   -- for references to local
+-- in LHS:
+-- x --> x1,x2,x3
+-- x[1] --> [x1,x2,x3][1] --> x2
+--
+-- nested case:
+-- x : int ^ 2 ^ 3
+-- x1 .. x6 : int
+-- x = [ [x1,x2], [x3,x4], [x5,x6] ]
+-- in LHS:
+-- x[0] = ...
+-- ->
+-- x[0] = [x1,x2] --> x1,x2
+
+type M = IO -- XXX
+
+--------------------------------------------------------------------------------
 
 
 {- | Move @when@ to the leaves of a structured expressions.
