@@ -240,7 +240,7 @@ data PrimNode   = Iter Iter
                 | Op1 Op1
                 | Op2 Op2
                 | OpN OpN
-                | ITE
+                | ITE         -- (bool,a,a) -> a          -- (bool,a,a) -> a
                   deriving Show
 
 -- | Built-in array iterators
@@ -279,12 +279,28 @@ data Field      = Field Ident Expression
                   deriving Show
 
 
-data Op1 = Not | Neg | Pre | Current | IntCast | RealCast
+data Op1 = Not          -- bool -> bool
+         | Neg          -- Num a => a -> a
+         | Pre          -- a -> a
+         | Current      -- a -> a
+         | IntCast      -- real -> int
+         | RealCast     -- int -> real
                   deriving (Show, Eq, Ord)
 
-data Op2 = Fby | And | Or | Xor | Implies | Eq | Neq | Lt | Leq | Gt | Geq
-         | Mul | Mod | Div | Add | Sub | Power
-         | Replicate | Concat
+data Op2 = Fby          -- a -> a -> a
+         | And          -- bool -> bool -> boo
+         | Or           -- bool -> bool -> boo
+         | Xor          -- bool -> bool -> boo
+         | Implies      -- bool -> bool -> boo
+         | Eq           -- a -> a -> bool
+         | Neq          -- a -> a -> bool
+         | Lt           -- Num a => a -> a -> bool
+         | Leq          -- Num a => a -> a -> bool
+         | Gt           -- Num a => a -> a -> bool
+         | Geq          -- Num a => a -> a -> bool
+         | Mul | Mod | Div | Add | Sub | Power    -- Num a => a -> a -> a
+         | Replicate    -- a -> a^N
+         | Concat       -- a^M -> a^N -> a^(M+N)
            deriving (Show, Eq, Ord)
 
 data OpN = AtMostOne | Nor
