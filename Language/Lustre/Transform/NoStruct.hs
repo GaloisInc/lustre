@@ -268,47 +268,6 @@ evalExpr env expr =
         (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2]) ->
           liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2
 
-        (NodeInst (CallPrim r (Iter it)) as, vs) ->
-          case (it, as, vs) of
-            (IterFill, [ NodeArg _ _ni, sz ], [s]) -> undefined
-                {- let s1, x1, y1 = ni s
-                       s2, x2, y2 = ni s1
-                       s3, x3, y3 = ni s2
-                       ...
-                       sN, xN, yN = ni s{N-1}
-                   in (sN, [ x1 .. xN ], [ y1 .. yN ]) -}
-
-            (IterRed, [ NodeArg _ ni, sz ], (s : xs)) -> undefined
-              {- let s1 = ni (s , x1, y1)
-                     s2 = ni (s1, x2, y2)
-                     ...
-                     sN = ni (s{N-1}, xN, Yn)
-                 in sN -}
-
-            (IterFill, [ NodeArg _ ni, sz ], (s : xs)) -> undefined
-              {- let s1, a1, b1 = ni (s, x1, y1)
-                     s2, a2, b2 = ni (s1, x2, y2)
-                     ...
-                     sN, aN, bN = ni (s{N-1}, xN, yN)
-                 in (sN, [ a1 .. aN ], [b1 .. bN]) -}
-
-
-            (IterFill, [ NodeArg _ ni, sz ], xs) -> undefined
-              {- let a1, b1 = ni (x1,y1)
-                     a2, b2 = ni (x2,y2)
-                     ...
-                     aN, bN = ni (xN,yN)
-                  in ([a1..N], [b1..bN]) -}
-
-            (IterBoolRed, [ i, j, n ], [xs]) -> undefined
-              {- let n1 = if x1 then 1 else 0
-                     n2 = if x2 then n1 + 1 else n1 
-                     ...
-                     nN = if xN then n{N-1} + 1 else n{N-1}
-                  in i <= nN && nN <= j
-              -}
-
-
         -- f([x1,x2])  ~~~>  f(x1,x2)
         (_, evs) -> CallPos f [ v | e <- evs, v <- toMultiExpr e ]
 

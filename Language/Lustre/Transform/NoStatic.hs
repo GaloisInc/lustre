@@ -542,7 +542,121 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
 
 
 
--- | Determine the (result) arity of the give node instance.
+
+-- | Add an already evaluated node instance to the environment.
+-- This is where we expand instances, if the flag in the environment is set.
+addEvluatedNodeInst :: Env -> NodeInstDecl -> Env
+addEvluatedNodeInst env ni
+  | expandNodeInsts env = expandNodeInstDecl env ni
+  | otherwise = doAddNodeInstDecl ni env
+
+-- | Add an already evaluated node instance to the environment.
+-- This is where we expand instances, if the flag in the environment is set.
+addEvluatedNodeInsts :: Env -> [NodeInstDecl] -> Env
+addEvluatedNodeInsts = foldl' addEvluatedNodeInst
+
+-- | Replace a previously evaluated node-instance with its expanded version
+-- @f = g<<const 2>>   -->  node f(...) instantiated `g`@
+expandNodeInstDecl :: Env -> NodeInstDecl -> Env
+expandNodeInstDecl env nid =
+  case nodeInstStaticInputs nid of
+    [] ->
+      case nodeInstDef nid of
+        NodeInst (CallUser f) ps@(_ : _) ->
+          case lookupNamed env f (nodeTemplates env) of
+            Just nt ->
+              case nt of
+
+                DeclareNode nd ->
+                  evalNode env nd { nodeName = nodeInstName nid } ps
+
+                DeclareNodeInst nd ->
+                  evalNodeInst env nd { nodeInstName = nodeInstName nid } ps
+
+                _ -> panic "expandNodeInstDecl"
+                       [ "Non-node template:"
+                       , "*** template: " ++ showPP nt
+                       ]
+
+            _ -> panic "expandNodeInstDecl" $
+                    [ "Unknown template:"
+                    , "*** Name: " ++ showPP f
+                    , "*** Available: "
+                    ] ++ [ "      " ++ showPP x
+                                       | x <- Map.keys (nodeTemplates env) ]
+
+        _ -> doAddNodeInstDecl nid env
+
+    _ -> panic "expandNodeInstDecl"
+                [ "Trying to expand a template!"
+                , "*** Name: " ++ showPP (nodeInstName nid)
+                ]
+
+
+
+-- expandIterAt :: Env -> [Binder] -> Iter -> [StaticArg] ->
+{-
+expandIterAt env resTys it args = undefined
+  case (it,args) of
+    (IterFill, [ NodeArg _ _ni, sz ], [s]) -> undefined
+        {- let s1, x1, y1 = ni s
+               s2, x2, y2 = ni s1
+               s3, x3, y3 = ni s2
+               ...
+               sN, xN, yN = ni s{N-1}
+           in (sN, [ x1 .. xN ], [ y1 .. yN ]) -}
+
+    (IterRed, [ NodeArg _ ni, sz ], (s : xs)) -> undefined
+      {- let s1 = ni (s , x1, y1)
+             s2 = ni (s1, x2, y2)
+             ...
+             sN = ni (s{N-1}, xN, Yn)
+         in sN -}
+
+    (IterFill, [ NodeArg _ ni, sz ], (s : xs)) -> undefined
+      {- let s1, a1, b1 = ni (s, x1, y1)
+             s2, a2, b2 = ni (s1, x2, y2)
+             ...
+             sN, aN, bN = ni (s{N-1}, xN, yN)
+         in (sN, [ a1 .. aN ], [b1 .. bN]) -}
+
+
+    (IterMap, [ NodeArg _ ni, sz ], xs) -> undefined
+      {- let a1, b1 = ni (x1,y1)
+             a2, b2 = ni (x2,y2)
+             ...
+             aN, bN = ni (xN,yN)
+          in ([a1..N], [b1..bN]) -}
+
+    (IterBoolRed, [ i, j, n ], [xs]) -> undefined
+      {- let n1 = if x1 then 1 else 0
+             n2 = if x2 then n1 + 1 else n1 
+             ...
+             nN = if xN then n{N-1} + 1 else n{N-1}
+          in i <= nN && nN <= j
+      -}
+-}
+
+
+
+-- | Add a finished node instance declaration to the environment.
+doAddNodeInstDecl :: NodeInstDecl -> Env -> Env
+doAddNodeInstDecl ni env =
+  env { readyDecls = DeclareNodeInst ni : readyDecls env
+      , nodeInfo = case getNodeInstProfile env (nodeInstDef ni) of
+                     Just prof -> addNamed name prof (nodeInfo env)
+                     Nothing   -> nodeInfo env
+      }
+  where name = topIdentToName env (nodeInstName ni)
+
+
+--------------------------------------------------------------------------------
+-- Typing of Node Instances
+
+{- | Determine the type of a node instance.
+Returns 'Maybe' because in some cases we can't determine the
+(e.g. some primitives are polymorphic).  We don't name the call sites
+for such primitces. -}
 getNodeInstProfile :: Env -> NodeInst -> Maybe NodeProfile
 getNodeInstProfile env (NodeInst c as) =
   case c of
@@ -644,67 +758,6 @@ getNodeInstProfile env (NodeInst c as) =
         Op2 _ -> Nothing
         OpN _ -> Nothing
         ITE   -> Nothing
-
-
--- | Add an already evaluated node instance to the environment.
--- This is where we expand instances, if the flag in the environment is set.
-addEvluatedNodeInst :: Env -> NodeInstDecl -> Env
-addEvluatedNodeInst env ni
-  | expandNodeInsts env = expandNodeInstDecl env ni
-  | otherwise = doAddNodeInstDecl ni env
-
--- | Add an already evaluated node instance to the environment.
--- This is where we expand instances, if the flag in the environment is set.
-addEvluatedNodeInsts :: Env -> [NodeInstDecl] -> Env
-addEvluatedNodeInsts = foldl' addEvluatedNodeInst
-
--- | Replace a previously evaluated node-instance with its expanded version
--- @f = g<<const 2>>   -->  node f(...) instantiated `g`@
-expandNodeInstDecl :: Env -> NodeInstDecl -> Env
-expandNodeInstDecl env nid =
-  case nodeInstStaticInputs nid of
-    [] ->
-      case nodeInstDef nid of
-        NodeInst (CallUser f) ps@(_ : _) ->
-          case lookupNamed env f (nodeTemplates env) of
-            Just nt ->
-              case nt of
-
-                DeclareNode nd ->
-                  evalNode env nd { nodeName = nodeInstName nid } ps
-
-                DeclareNodeInst nd ->
-                  evalNodeInst env nd { nodeInstName = nodeInstName nid } ps
-
-                _ -> panic "expandNodeInstDecl"
-                       [ "Non-node template:"
-                       , "*** template: " ++ showPP nt
-                       ]
-
-            _ -> panic "expandNodeInstDecl" $
-                    [ "Unknown template:"
-                    , "*** Name: " ++ showPP f
-                    , "*** Available: "
-                    ] ++ [ "      " ++ showPP x
-                                       | x <- Map.keys (nodeTemplates env) ]
-
-        _ -> doAddNodeInstDecl nid env
-
-    _ -> panic "expandNodeInstDecl"
-                [ "Trying to expand a template!"
-                , "*** Name: " ++ showPP (nodeInstName nid)
-                ]
-
-
--- | Add a finished node instance declaration to the environment.
-doAddNodeInstDecl :: NodeInstDecl -> Env -> Env
-doAddNodeInstDecl ni env =
-  env { readyDecls = DeclareNodeInst ni : readyDecls env
-      , nodeInfo = case getNodeInstProfile env (nodeInstDef ni) of
-                     Just prof -> addNamed name prof (nodeInfo env)
-                     Nothing   -> nodeInfo env
-      }
-  where name = topIdentToName env (nodeInstName ni)
 
 
 --------------------------------------------------------------------------------
@@ -862,6 +915,7 @@ evalMergeConst eloc env v ms =
                                  , "*** Value: " ++ showPP (valToExpr env v)
                                  ]
 
+-- | Evaluate a case branch of a merge construct.
 evalMergeCase :: Env -> MergeCase -> M MergeCase
 evalMergeCase env (MergeCase p e) =
   MergeCase (evalExpr env p) <$> evalDynExpr NestedExpr env e
@@ -948,7 +1002,7 @@ evalStaticArg env sa =
 
 
 --------------------------------------------------------------------------------
-
+-- Expression Evalutaion Monad
 
 type M = ReaderT RO (StateT RW Id)
 
