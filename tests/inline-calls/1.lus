@@ -1,0 +1,10 @@
+
+node f (a : int; b : bool) returns (x : int ^ 3)
+let
+  x = [ a, a, a ];
+tel
+
+node g () returns (x : int ^ 3)
+let
+  x = f(1,true);
+tel

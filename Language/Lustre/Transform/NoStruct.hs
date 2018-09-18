@@ -14,6 +14,7 @@ import Data.List(genericDrop,genericReplicate,mapAccumL)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
+import Language.Lustre.Utils
 import Language.Lustre.Panic
 
 -- XXX: More flexible interface
@@ -286,13 +287,6 @@ evalEqn env eqn =
                     ERange _ ex1 -> isCall ex1
                     CallPos {}   -> True
                     _            -> False
-
--- | Like 'zipWith' except panic if the lists have different lenghts.
-zipExact :: (a -> b -> c) -> [a] -> [b] -> [c]
-zipExact _ [] [] = []
-zipExact f (x : xs) (y : ys) = f x y : zipExact f xs ys
-zipExact _ [] _ = panic "zipExact" [ "More on the left" ]
-zipExact _ _ _  = panic "zipExact" [ "More on the right" ]
 
 
 -- | Convert a possible complex LHS, to a simple (i.e., identifier) LHS
