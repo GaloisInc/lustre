@@ -5,6 +5,7 @@ module Language.Lustre.Transform.ToCore
 
 import Data.Map(Map)
 import qualified Data.Map as Map
+import Data.Semigroup ( (<>) )
 import Data.Text (Text)
 import qualified Data.Text as Text
 import MonadLib
