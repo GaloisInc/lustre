@@ -3,15 +3,18 @@ module Language.Lustre.Core
 
 import Data.Text(Text)
 import qualified Data.Text as Text
+import Data.Map(Map)
+import qualified Data.Map as Map
 import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
-import Text.PrettyPrint( Doc, integer, text, (<+>)
+import Text.PrettyPrint( Doc, text, (<+>)
                        , hsep, vcat, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
 
 import Language.Lustre.AST (Literal(..))
+import Language.Lustre.Pretty
 
 data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
@@ -105,17 +108,10 @@ ppType ty =
 ppBinder :: Binder -> Doc
 ppBinder (x ::: t) = ppIdent x <+> text ":" <+> ppType t
 
-ppLiteral :: Literal -> Doc
-ppLiteral lit =
-  case lit of
-    Int n  -> integer n
-    Real n -> text (show n)
-    Bool b -> text (show b)
-
 ppAtom :: Atom -> Doc
 ppAtom atom =
   case atom of
-    Lit l -> ppLiteral l
+    Lit l -> pp l
     Var x -> ppIdent x
 
 ppExpr :: Expr -> Doc
@@ -127,6 +123,7 @@ ppExpr expr =
     a `When` b  -> ppAtom a <+> text "when" <+> ppAtom b
     Current a   -> text "current" <+> ppAtom a
     Prim f as   -> ppPrim f PP.<> ppTuple (map ppAtom as)
+
 
 ppTuple :: [Doc] -> Doc
 ppTuple ds = parens (hsep (punctuate comma ds))
@@ -144,7 +141,91 @@ ppNode node =
   $$ nest 2 (vcat (map ppEqn (nEqns node)))
   $$ text "tel"
 
+instance Pretty Ident where
+  ppPrec _ = ppIdent
+
+instance Pretty Op where
+  ppPrec _ = ppPrim
+
+instance Pretty Type where
+  ppPrec _ = ppType
+
+instance Pretty Binder where
+  ppPrec _ = ppBinder
+
+instance Pretty Atom where
+  ppPrec _ = ppAtom
+
+instance Pretty Expr where
+  ppPrec _ = ppExpr
+
+instance Pretty Eqn where
+  ppPrec _ = ppEqn
+
+instance Pretty Node where
+  ppPrec _ = ppNode
 
 
 --------------------------------------------------------------------------------
+
+class TypeOf t where
+  typeOf :: Map Ident Type -> t -> Maybe Type
+
+instance TypeOf Literal where
+  typeOf _ lit =
+    Just $
+    case lit of
+      Int _  -> TInt
+      Real _ -> TReal
+      Bool _ -> TBool
+
+instance TypeOf Atom where
+  typeOf env atom =
+    case atom of
+      Var x -> Map.lookup x env
+      Lit l -> typeOf env l
+
+instance TypeOf Expr where
+  typeOf env expr =
+    case expr of
+      Atom a      -> typeOf env a
+      a :-> _     -> typeOf env a
+      Pre a       -> typeOf env a
+      a `When` _  -> typeOf env a
+      Current a   -> typeOf env a
+      Prim op as  ->
+        case as of
+          a : _ ->
+            let t    = typeOf env a
+                bool = Just TBool
+            in case op of
+                 IntCast    -> Just TInt
+                 RealCast   -> Just TReal
+
+                 Not        -> bool
+                 And        -> bool
+                 Or         -> bool
+                 Xor        -> bool
+                 Implies    -> bool
+                 Eq         -> bool
+                 Neq        -> bool
+                 Lt         -> bool
+                 Leq        -> bool
+                 Gt         -> bool
+                 Geq        -> bool
+                 AtMostOne  -> bool
+                 Nor        -> bool
+
+                 Neg        -> t
+                 Mul        -> t
+                 Mod        -> t
+                 Div        -> t
+                 Add        -> t
+                 Sub        -> t
+                 Power      -> t
+
+                 ITE        -> case as of
+                                 _ : b : _ -> typeOf env b
+                                 _ -> Nothing
+          _ -> Nothing
 

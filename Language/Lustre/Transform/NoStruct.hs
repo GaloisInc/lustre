@@ -272,6 +272,8 @@ nameVariantsText t = [ variant n | n <- [ 1 :: Integer .. ] ]
 
 -- | Expan an equation.  If structured data was involved, the result might
 -- be multiple equations.
+-- Note that the only equations that have multiple binders on the LHS
+-- are ones that have a call on the RHS.
 evalEqn :: Env -> Equation -> [Equation]
 evalEqn env eqn =
   case eqn of

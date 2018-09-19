@@ -25,6 +25,7 @@ library
                        Language.Lustre.Transform.NoStatic,
                        Language.Lustre.Transform.NoStruct,
                        Language.Lustre.Transform.Inline,
+                       Language.Lustre.Transform.ToCore,
 
                        Language.Lustre.Semantics,
                        Language.Lustre.Semantics.Const,
