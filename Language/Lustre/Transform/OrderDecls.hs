@@ -1,6 +1,7 @@
 module Language.Lustre.Transform.OrderDecls (orderTopDecls) where
 
 import qualified Data.Map as Map
+import Data.Semigroup ( (<>) )
 import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Graph(SCC(..))

@@ -36,6 +36,7 @@ import qualified Data.Text as Text
 import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
+import Data.Semigroup ( (<>) )
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
 

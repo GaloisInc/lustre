@@ -1,4 +1,9 @@
-{-# Language OverloadedStrings, HexFloatLiterals #-}
+{-# LANGUAGE CPP          #-}
+{-# Language OverloadedStrings #-}
+#if __GLASGOW_HASKELL__ >= 840
+{-# HexFloatLiterals #-}
+#endif
+
 module Main(main) where
 
 import Data.Text(Text)
@@ -23,9 +28,11 @@ tests =
           "1.1 1. .1 2e10 2e+10 2e-10 1.e3 1.2"
           $ map TokReal [ 1.1, 1, 0.1, 2e10, 2e10, 2e-10 , 1e3, 1.2 ]
 
+#if __GLASGOW_HASKELL__ >= 840
   , test "Reals 16"
           "0x10.1 0x1. 0x0.11 0x.11p-1"
           $ map TokReal [ 0x10.1, 1, 0x0.11, 0x0.11p-1 ]
+#endif
 
   , test "Comments"
           "(* 1*'\n *) 2 (* 3 *) 4 /* 5 */ 6 /* 7 */ /*****\n****\n*****/"

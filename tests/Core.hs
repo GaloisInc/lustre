@@ -20,8 +20,8 @@ main =
 instance IsString Ident where
   fromString = Ident . Text.pack
 
-instance IsString Name where
-  fromString = Name . Text.pack
+-- instance IsString Name where
+--   fromString = Name . Text.pack
 
 instance IsString Atom where
   fromString = Var . fromString
@@ -50,13 +50,12 @@ instance Fractional Expr where
 
 ex1 = toNode <$> orderedEqns
         [ "nats" ::: TInt := "start" :-> "next"
-        , "next" ::: TInt := Call "add" [ 1, "prev" ]
+        -- , "next" ::: TInt := Call "add" [ 1, "prev" ]
         , "prev" ::: TInt := Pre "nats"
         ]
   where
   toNode eqns =
-    Node { nName    = "natsFrom"
-         , nInputs  = [ "start" ::: TInt ]
+    Node { nInputs  = [ "start" ::: TInt ]
          , nOutputs = [ "nats" ]
          , nAsserts = []
          , nEqns    = eqns

@@ -11,6 +11,7 @@ import Data.Text(Text)
 import qualified Data.Text as Text
 import Data.Maybe(fromMaybe, catMaybes)
 import Data.List(genericDrop,genericReplicate,mapAccumL)
+import Data.Semigroup ( (<>) )
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty

@@ -1,6 +1,7 @@
 {-# Language OverloadedStrings #-}
 module Language.Lustre.Pretty where
 
+import Data.Semigroup ( (<>) )
 import Data.Text (Text)
 import Data.List(intersperse)
 import qualified Data.Text as Text
