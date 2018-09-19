@@ -55,8 +55,7 @@ ex1 = toNode <$> orderedEqns
         ]
   where
   toNode eqns =
-    Node { nName    = "natsFrom"
-         , nInputs  = [ "start" ::: TInt ]
+    Node { nInputs  = [ "start" ::: TInt ]
          , nOutputs = [ "nats" ]
          , nAsserts = []
          , nEqns    = eqns
