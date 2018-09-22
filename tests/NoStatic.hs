@@ -29,7 +29,8 @@ main =
 
 checkFile :: FilePath -> IO Bool
 checkFile file =
-  do a <- parseProgramFromFileLatin1 file
+  do putStrLn ("FILE: " ++ file)
+     a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
          do print $ vcatSep $ map pp $ quickNoConst True ds

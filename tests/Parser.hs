@@ -14,7 +14,7 @@ import Language.Lustre.Parser
 main :: IO ()
 main =
   do args <- getArgs
-     let dir = "tests/parser-tests"
+     let dir = "tests/parser"
      fs0 <- getDirectoryContents dir
      let candidates = [ dir </> f | f <- fs0 ]
      -- let candidates = [ dir </> "yav.lv6" ]
