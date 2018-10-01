@@ -261,7 +261,7 @@ numDotDot =
 
 qualIdent :: Action s [ Lexeme Token ]
 qualIdent =
-  do [a,b] <- Text.splitOn "::" <$> matchText
+  do ~[a,b] <- Text.splitOn "::" <$> matchText
      lexeme (TokQualIdent a b)
 
 integerAtBase :: Integer -> Text -> Integer

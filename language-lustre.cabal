@@ -37,7 +37,7 @@ library
                        Language.Lustre.Semantics.Expression,
                        Language.Lustre.Semantics.Equation
 
-  build-depends:       base <4.12,
+  build-depends:       base < 4.13,
                        alex-tools >=0.4,
                        bytestring, text, array, panic, containers,
                        GraphSCC, pretty, monadLib
