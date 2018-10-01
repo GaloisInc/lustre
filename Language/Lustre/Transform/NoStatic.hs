@@ -188,7 +188,7 @@ addNamed x a mp =
 --------------------------------------------------------------------------------
 -- Evaluation of types
 
--- | Evaluate a type declarations.
+-- | Evaluate a type declaration.
 evalTypeDecl :: Env -> TypeDecl -> Env
 evalTypeDecl env td =
   case typeDef td of
@@ -395,11 +395,13 @@ evalNodeDecl env nd =
 -- We assume that the arguments have been evaluated already.
 evalNode :: Env -> NodeDecl -> [StaticArg] -> Env
 evalNode env nd args =
+  
   case nodeDef nd of
     Nothing -> panic "evalNode" [ "Node without a definition"
                                 , "*** Name: " ++ showPP (nodeName nd)
                                 ]
-    Just body -> envRet2 { readyDecls = DeclareNode newNode
+    Just body ->
+         envRet2 { readyDecls = DeclareNode newNode
                                       : readyDecls envRet2
                          , nodeInfo = addNamed name newProf (nodeInfo envRet2)
                          }
@@ -419,7 +421,7 @@ evalNode env nd args =
                            (concat <$> mapM (evalEqn env4) (nodeEqns body))
 
       envRet1 = env { envNameInstSeed = newS }
-      envRet2 = addEvluatedNodeInsts envRet1 insts
+      envRet2 = addEvaluatedNodeInsts envRet1 insts
 
 
       newDef    = NodeBody
@@ -511,7 +513,7 @@ evalNodeInstDecl env nid =
 -- | Evaluate a node-instance declaration using the given static arguments.
 -- The static arguments should have been evaluated already.
 evalNodeInst :: Env -> NodeInstDecl -> [StaticArg] -> Env
-evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
+evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
   where
   env0 = addStaticParams (nodeInstStaticInputs nid) args env
   env1 = env0 { envNameInstSeed = -78 } -- Do not use, bogus value for sanity
@@ -530,7 +532,7 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
                             (nameNodeInstDef (nodeInstDef nid))
 
   envRet1 = env { envNameInstSeed = newS }
-  envRet2 = addEvluatedNodeInsts envRet1 insts
+  envRet2 = addEvaluatedNodeInsts envRet1 insts
 
   -- Note that we leave the name as is because this is the right thing
   -- for nodes with no static parameters.   If, OTOH, we are instantiating
@@ -546,15 +548,15 @@ evalNodeInst env nid args = addEvluatedNodeInst envRet2 newInst
 
 -- | Add an already evaluated node instance to the environment.
 -- This is where we expand instances, if the flag in the environment is set.
-addEvluatedNodeInst :: Env -> NodeInstDecl -> Env
-addEvluatedNodeInst env ni
+addEvaluatedNodeInst :: Env -> NodeInstDecl -> Env
+addEvaluatedNodeInst env ni
   | expandNodeInsts env = expandNodeInstDecl env ni
   | otherwise = doAddNodeInstDecl ni env
 
 -- | Add an already evaluated node instance to the environment.
 -- This is where we expand instances, if the flag in the environment is set.
-addEvluatedNodeInsts :: Env -> [NodeInstDecl] -> Env
-addEvluatedNodeInsts = foldl' addEvluatedNodeInst
+addEvaluatedNodeInsts :: Env -> [NodeInstDecl] -> Env
+addEvaluatedNodeInsts = foldl' addEvaluatedNodeInst
 
 -- | Replace a previously evaluated node-instance with its expanded version
 -- @f = g<<const 2>>   -->  node f(...) instantiated `g`@
@@ -824,7 +826,8 @@ addStaticParam p a env
 
 -- | Is this a top-level or a nested expression.
 -- This is used to decide if we should lift-out function calls.
-data ExprLoc = TopExpr | NestedExpr
+data ExprLoc  = TopExpr       -- ^ Directly on the RHS of an equation.
+              | NestedExpr    -- ^ A sub-expression of another expression.
 
 -- | Rewrite an expression that is not neccessarily constant.
 evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
@@ -891,18 +894,23 @@ evalDynExpr eloc env expr =
 -- We leave primitives with a single result as calls though.
 nameCallSite :: Env -> NodeInst -> [Expression] -> M Expression
 nameCallSite env ni es =
-  case getNodeInstProfile env ni of
-    Just prof ->
-      do let outs = nodeOutputs prof
-         ns <- replicateM (length outs) (newIdent (range ni))
-         let toBind n b = Binder { binderDefines = n
-                                 , binderType    = binderType b
-                                 , binderClock   = Nothing
-                                 }
-             binds = zipWith toBind ns outs
-         addFunEqn binds (Define (map LVar ns) (CallPos ni es))
-         pure (Tuple (map (Var . Unqual) ns))
-    Nothing -> pure (CallPos ni es)
+  do mb <- findInstProf env ni
+     case mb of
+       Just prof ->
+         do let outs = nodeOutputs prof
+            ns <- replicateM (length outs) (newIdent (range ni))
+            let toBind n b = Binder { binderDefines = n
+                                    , binderType    = binderType b
+                                    , binderClock   = Nothing
+                                    }
+                binds = zipWith toBind ns outs
+            addFunEqn binds (Define (map LVar ns) (CallPos ni es))
+            pure $ case map (Var . Unqual) ns of
+                     [one] -> one
+                     notOne -> Tuple notOne
+       Nothing -> pure (CallPos ni es)
+
+
 
 
 -- | Use a constant to select a branch in a merge.
@@ -1054,6 +1062,9 @@ addNameInstDecl c as =
                 }
      identToName i
 
+
+
+
 -- | Generate a fresh name associated with the given source location.
 newIdent :: SourceRange -> M Ident
 newIdent r = sets $ \s -> let x = nameSeed s
@@ -1076,6 +1087,21 @@ identToName i =
 -- | Remember the given instance.
 addInst :: NodeInstDecl -> M ()
 addInst ni = sets_ $ \s -> s { instances = ni : instances s }
+
+findInstProf :: Env -> NodeInst -> M (Maybe NodeProfile)
+findInstProf env ni@(NodeInst c as) =
+  case (c,as) of
+    (CallUser n, [])
+       | Unqual i <- n -> search (identText i)
+       | Qual _ m t <- n, Just m' <- curModule env, m == m' -> search t
+       where
+       search t = do is <- instances <$> get
+                     case filter ((t ==) . identText . nodeInstName) is of
+                       d : _ -> findInstProf env (nodeInstDef d)
+                       _ -> pure (getNodeInstProfile env ni)
+
+    _ -> pure (getNodeInstProfile env ni)
+
 
 -- | Run a computation and collect all named function call sites,
 -- returning them.  The result of the computation is added last to the list.
