@@ -1,0 +1,9 @@
+node f << const x : int >> () returns (y : int)
+let
+  y = with x > 0 then 1 + f << (x - 1) >> () else 0;
+tel
+
+node main () returns (y : int)
+let
+  y = f << 3 >> ();
+tel

@@ -10,8 +10,8 @@ import Data.Graph.SCC(stronglyConnComp)
 import Language.Lustre.AST
 
 
-orderTopDecls :: [TopDecl] -> [SCC TopDecl]
-orderTopDecls ds = stronglyConnComp graph
+orderTopDecls :: [TopDecl] -> [TopDecl]
+orderTopDecls ds = concatMap orderRec (stronglyConnComp graph)
   where
   getRep x = Map.findWithDefault x x repMap
 
@@ -25,6 +25,23 @@ orderTopDecls ds = stronglyConnComp graph
         , (d, a, map getRep (Set.toList (uses d))) : gs
         )
 
+
+-- | Place declarations with no static parameters after declarations with
+-- static parameters.  We assume that the inputs were already validated,
+-- so this does not do proper error checking.
+orderRec :: SCC TopDecl -> [TopDecl]
+orderRec comp =
+  case comp of
+    AcyclicSCC x -> [x]
+    CyclicSCC xs -> case break noParam xs of
+                      (as,b:bs) -> as ++ bs ++ [b]
+                      _         -> xs
+      where
+      noParam td =
+        case td of
+          DeclareNode nd      -> null (nodeStaticInputs nd)
+          DeclareNodeInst nid -> null (nodeInstStaticInputs nid)
+          _                   -> False
 
 
 --------------------------------------------------------------------------------
