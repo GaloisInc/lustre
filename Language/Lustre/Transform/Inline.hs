@@ -274,13 +274,13 @@ inlineCallsNode env nd =
         case eqn of
           Define ls e
             | Just (f,es) <- isCall e
-            , Just cnd     <- Map.lookup f (envNodes env)
-            , Just def     <- nodeDef cnd ->
+            , Just cnd    <- Map.lookup f (envNodes env)
+            , Just def    <- nodeDef cnd ->
             let prof = nodeProfile cnd
                 (newUsed, su, newLocals) = computeRenaming used ls cnd
-                paramDef b p = rename su (Define [ LVar (binderDefines b) ] p)
-                paramDefs             = zipExact paramDef (nodeInputs prof) es
-                thisEqns              = rename su (nodeEqns def)
+                paramDef b p = Define [ LVar (rename su (binderDefines b)) ] p
+                paramDefs    = zipExact paramDef (nodeInputs prof) es
+                thisEqns     = rename su (nodeEqns def)
                 (otherDefs,otherEqns) = renameEqns newUsed more
             in ( newLocals ++ otherDefs
                , paramDefs ++ thisEqns ++ otherEqns
