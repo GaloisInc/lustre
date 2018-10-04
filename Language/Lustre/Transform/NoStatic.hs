@@ -395,7 +395,7 @@ evalNodeDecl env nd =
 -- We assume that the arguments have been evaluated already.
 evalNode :: Env -> NodeDecl -> [StaticArg] -> Env
 evalNode env nd args =
-  
+
   case nodeDef nd of
     Nothing -> panic "evalNode" [ "Node without a definition"
                                 , "*** Name: " ++ showPP (nodeName nd)
@@ -900,6 +900,14 @@ nameCallSite env ni es =
          do let outs = nodeOutputs prof
             ns <- replicateM (length outs) (newIdent (range ni))
             let nameMap = Map.fromList (zip (map binderDefines outs) ns)
+
+                -- XXX: This assumes none of the clocks came from
+                -- the parameters; it is not quite clear if that's allowed or
+                -- not:  it works in stand alone examples, but it appears
+                -- that one cannot actually call functions where the result
+                -- clocks depend on the parameters.  The reason is (probably)
+                -- that in general it would be hard to reason about clock
+                -- equality.
                 renClock (WhenClock r e i) =  -- loc?
                   WhenClock r (evalExpr env e) (nameMap Map.! i)
 
