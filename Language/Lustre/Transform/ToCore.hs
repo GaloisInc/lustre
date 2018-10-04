@@ -49,7 +49,8 @@ evalNodeDecl enumCs nd
          outs <- mapM evalBinder (P.nodeOutputs prof)
          mapM_ addBinder ins
          mapM_ addBinder outs
-         mapM_ evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
+         locs <- mapM evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
+         mapM_ addBinder locs
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
          pure C.Node { C.nInputs  = ins
