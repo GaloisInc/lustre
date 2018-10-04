@@ -899,10 +899,15 @@ nameCallSite env ni es =
        Just prof ->
          do let outs = nodeOutputs prof
             ns <- replicateM (length outs) (newIdent (range ni))
-            let toBind n b = Binder { binderDefines = n
-                                    , binderType    = binderType b
-                                    , binderClock   = Nothing
-                                    }
+            let nameMap = Map.fromList (zip (map binderDefines outs) ns)
+                renClock (WhenClock r e i) =  -- loc?
+                  WhenClock r (evalExpr env e) (nameMap Map.! i)
+
+                toBind n b = Binder
+                               { binderDefines = n
+                               , binderType    = binderType b
+                               , binderClock   = renClock <$> binderClock b
+                               }
                 binds = zipWith toBind ns outs
             addFunEqn binds (Define (map LVar ns) (CallPos ni es))
             pure $ case map (Var . Unqual) ns of
