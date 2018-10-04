@@ -47,6 +47,8 @@ evalNodeDecl enumCs nd
       do let prof = P.nodeProfile nd
          ins  <- mapM evalBinder (P.nodeInputs prof)
          outs <- mapM evalBinder (P.nodeOutputs prof)
+         mapM_ addBinder ins
+         mapM_ addBinder outs
          mapM_ evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
@@ -138,6 +140,9 @@ getSrcLocalTypes = stSrcLocalTypes <$> get
 addLocal :: C.Ident -> C.Type -> M ()
 addLocal i t = sets_ $ \s -> s { stLocalTypes = Map.insert i t (stLocalTypes s)}
 
+addBinder :: C.Binder -> M ()
+addBinder (i C.::: t) = addLocal i t
+
 -- | Add a type for a declared local.
 addSrcLocal :: P.Ident -> C.Type -> M ()
 addSrcLocal x t = sets_ $ \s ->
@@ -174,6 +179,7 @@ nameExpr expr =
              pure (C.Var i)
        Nothing -> panic "nameExpr" [ "Failed to compute the type of:"
                                    , "*** Expression: " ++ showPP expr
+                                   , "*** Types: " ++ show tys
                                    ]
 
 -- | Remember that the given identifier was used for an assert.
