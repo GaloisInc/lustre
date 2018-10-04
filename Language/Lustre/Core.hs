@@ -37,7 +37,8 @@ data Expr     = Atom Atom
               | Prim Op [Atom]
                 deriving Show
 
-data Op       = Not | Neg | IntCast | RealCast
+data Op       = Not | Neg
+              | IntCast | RealCast
               | And | Or | Xor | Implies
               | Eq | Neq | Lt | Leq | Gt | Geq
               | Mul | Mod | Div | Add | Sub | Power
@@ -59,7 +60,12 @@ data Node     = Node { nInputs  :: [Binder]
 
 
 
---------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+Ordering equations.
+
+The translation from source Lustre should be producing properly ordered
+equations, so these functions are not needed in that case. -}
+
 usesAtom :: Atom -> Set Ident
 usesAtom atom =
   case atom of
@@ -92,6 +98,8 @@ orderedEqns eqns
 
 
 --------------------------------------------------------------------------------
+-- Pretty Printing
+
 ppIdent :: Ident -> Doc
 ppIdent (Ident x) = text (Text.unpack x)
 
@@ -167,6 +175,7 @@ instance Pretty Node where
 
 
 --------------------------------------------------------------------------------
+-- Computing the the type of an expression.
 
 class TypeOf t where
   typeOf :: Map Ident Type -> t -> Maybe Type
