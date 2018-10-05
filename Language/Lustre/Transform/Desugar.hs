@@ -23,8 +23,12 @@ import Language.Lustre.Panic
 --    2. Currently we process everything, but we could be lazier
 --       and only process what's actually needed for the particular
 --       definition.
-desugarNode :: [P.TopDecl] -> P.Name -> C.Node
-desugarNode decls n = evalNodeDecl enumInfo theNode
+desugarNode ::
+  [P.TopDecl] ->
+  Maybe P.Name
+  {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
+  C.Node
+desugarNode decls mbN = evalNodeDecl enumInfo theNode
   where
   ordered  = orderTopDecls decls
   noStatic = quickNoConst True ordered
@@ -35,17 +39,36 @@ desugarNode decls n = evalNodeDecl enumInfo theNode
                Just i  -> i
                Nothing -> panic "desugarNode"
                             [ "Cannot find node delcaration."
-                            , "*** Name: " ++ show (pp n)
+                            , case mbN of
+                                Nothing -> "*** No node has --$MAIN"
+                                Just n -> "*** Name: " ++ show (pp n)
                             ]
 
-  matches = case n of
-              P.Qual {} -> panic "desugarNode"
+  -- if no name is specified we just pick one of the nodes that are
+  -- marked with @--%MAIN@
+  matches =
+    case mbN of
+      Nothing -> isNode checkMain
+      Just nm ->
+        case nm of
+          P.Qual {}  -> panic "desugarNode"
                             [ "We only support unqualifed names for now." ]
-              P.Unqual i -> \td -> case td of
-                                     P.DeclareNode nd | P.nodeName nd == i ->
-                                                            Just nd
-                                     _                -> Nothing
+          P.Unqual i -> isNode (checkByName i)
 
+  checkMain nd = case P.nodeDef nd of
+                   Just body -> any isMain (P.nodeEqns body)
+                   _ -> False
+
+  checkByName i = \nd -> P.nodeName nd == i
+
+  isMain eqn = case eqn of
+                P.IsMain -> True
+                _        -> False
+
+
+  isNode p = \td -> case td of
+                      P.DeclareNode nd | p nd -> Just nd
+                      _                       -> Nothing
 
 
 

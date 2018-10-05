@@ -49,6 +49,8 @@ let
   e = e3
   c = e4
   d = e5
+  assume e6
+  show e7
 tel
 
 
@@ -87,6 +89,8 @@ let
   e1 = e3 [renaming]
   x  = e4 [renaming]
   y  = e5 [renaming]
+  assume (e6 [renaming])    -- note: no polarity switching
+  show (e7 [renaming])      -- note: no polarity switching
   ...
 
 -}
@@ -232,6 +236,8 @@ instance Rename Equation where
   rename su eqn =
     case eqn of
       Assert e    -> Assert (rename su e)
+      Property e  -> Property (rename su e)
+      IsMain      -> IsMain
       Define ls e -> Define (rename su ls) (rename su e)
 
 --------------------------------------------------------------------------------

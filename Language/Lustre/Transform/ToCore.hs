@@ -10,7 +10,6 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import MonadLib
 
-
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Panic
@@ -53,10 +52,12 @@ evalNodeDecl enumCs nd
          mapM_ addBinder locs
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
-         pure C.Node { C.nInputs  = ins
-                     , C.nOutputs = [ i | i C.::: _ <- outs ]
-                     , C.nAsserts = asts
-                     , C.nEqns    = concat eqnss
+         props <- getPropertyNames
+         pure C.Node { C.nInputs   = ins
+                     , C.nOutputs  = [ i | i C.::: _ <- outs ]
+                     , C.nAssuming = asts
+                     , C.nShows    = props
+                     , C.nEqns     = concat eqnss
                      }
 
   | otherwise = panic "evalNodeDecl"
@@ -71,15 +72,16 @@ evalNodeDecl enumCs nd
 evalType :: P.Type -> C.Type
 evalType ty =
   case ty of
-    P.NamedType {}  -> C.TInt -- ^ Only enum types should be left by now
-    P.IntType       -> C.TInt
-    P.RealType      -> C.TReal
-    P.BoolType      -> C.TBool
-    P.TypeRange _ t -> evalType t
-    P.ArrayType {}  -> panic "evalType"
-                        [ "Unexpected array type"
-                        , "*** Type: " ++ showPP ty
-                        ]
+    P.NamedType {}   -> C.TInt -- ^ Only enum types should be left by now
+    P.IntSubrange {} -> C.TInt -- ^ Represented with a number
+    P.IntType        -> C.TInt
+    P.RealType       -> C.TReal
+    P.BoolType       -> C.TBool
+    P.TypeRange _ t  -> evalType t
+    P.ArrayType {}   -> panic "evalType"
+                         [ "Unexpected array type"
+                         , "*** Type: " ++ showPP ty
+                         ]
 
 --------------------------------------------------------------------------------
 type M = StateT St Id
@@ -93,6 +95,7 @@ runProcessNode enumCs m = fst $ runId $ runStateT st m
           , stNameSeed = 1
           , stEqns = []
           , stAssertNames = []
+          , stPropertyNames = []
           }
 
 data St = St
@@ -119,11 +122,19 @@ data St = St
 
   , stAssertNames :: [C.Ident]
     -- ^ The names of the equatiosn corresponding to asserts.
+
+  , stPropertyNames :: [C.Ident]
+    -- ^ The names of the equatiosn corresponding to properties.
+
   }
 
 -- | Get the collected assert names.
 getAssertNames :: M [C.Ident]
 getAssertNames = stAssertNames <$> get
+
+-- | Get the collected property names.
+getPropertyNames :: M [C.Ident]
+getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
 getEnumCons :: M (Map P.Name C.Expr)
@@ -187,6 +198,13 @@ nameExpr expr =
 addAssertName :: C.Ident -> M ()
 addAssertName i = sets_ $ \s -> s { stAssertNames = i : stAssertNames s }
 
+-- | Remember that the given identifier was used for a property.
+addPropertyName :: C.Ident -> M ()
+addPropertyName i = sets_ $ \s -> s { stPropertyNames = i : stPropertyNames s }
+
+
+
+
 --------------------------------------------------------------------------------
 
 -- | Add the type of a binder to the environment.
@@ -201,6 +219,15 @@ evalBinder b =
 evalEqn :: P.Equation -> M [C.Eqn]
 evalEqn eqn =
   case eqn of
+    P.IsMain -> pure []
+
+    P.Property e ->
+        do e1 <- evalExpr e
+           i  <- newIdent
+           addEqn (i C.::: C.TBool C.:= e1)
+           addPropertyName i
+           clearEqns
+
     P.Assert e ->
       do e1 <- evalExpr e
          i  <- newIdent

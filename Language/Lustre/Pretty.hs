@@ -145,6 +145,8 @@ instance Pretty Equation where
     case eqn of
       Assert e -> "assert" <+> pp e
       Define ls e -> hsep (punctuate comma (map pp ls)) <+> "=" <+> pp e
+      IsMain -> "--%MAIN"
+      Property e -> "--%PROPERTY" <+> pp e
 
 instance Pretty e => Pretty (LHS e) where
   ppPrec _ lhs =
@@ -164,12 +166,15 @@ instance Pretty FieldType where
 instance Pretty Type where
   ppPrec n ty =
     case ty of
-      NamedType x   -> pp x
-      ArrayType t e -> pp t <+> "^" <+> pp e      -- precedence?
-      IntType       -> "int"
-      RealType      -> "real"
-      BoolType      -> "bool"
-      TypeRange _ t -> ppPrec n t
+      NamedType x       -> pp x
+      ArrayType t e     -> pp t <+> "^" <+> pp e      -- precedence?
+      IntType           -> "int"
+      RealType          -> "real"
+      BoolType          -> "bool"
+      IntSubrange e1 e2 ->
+        "subrange" <+> brackets (hsep (punctuate comma (map pp [e1,e2])))
+                   <+> "of" <+> "int"
+      TypeRange _ t     -> ppPrec n t
 
 instance Pretty Literal where
   ppPrec _ lit =

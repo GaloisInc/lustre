@@ -135,6 +135,7 @@ instance Uses Type where
     case ty of
       NamedType t -> aType t
       ArrayType t e -> uses (t,e)
+      IntSubrange e1 e2 -> uses (e1,e2)
       IntType -> mempty
       RealType -> mempty
       BoolType -> mempty
@@ -250,7 +251,9 @@ instance Uses Equation where
   uses eqn =
     case eqn of
       Assert e -> uses e
+      Property e -> uses e
       Define lhs e -> uses (lhs,e)
+      IsMain -> mempty
 
 instance Uses e => Uses (LHS e) where
   uses lhs =

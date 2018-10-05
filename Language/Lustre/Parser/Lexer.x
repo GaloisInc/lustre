@@ -13,6 +13,7 @@ module Language.Lustre.Parser.Lexer
   ) where
 import Data.Text(Text)
 import qualified Data.Text as Text
+import qualified Data.Map as Map
 import Data.Char(isAscii,toLower)
 import Data.Ratio((%))
 
@@ -46,8 +47,9 @@ $hexdigit       = [0-9a-fA-F]
                 | (@num16        "." @digs16?) @exp16?
                 | ("0x" @digs16? "." @digs16) @exp16?
 
-@line_comment   = "--".*
-@not_star       = \n | ~\*
+@line_comment    = "--"[^\%].*
+@special_comment = "--%"($letter|$digit)*
+@not_star        = \n | ~\*
 
 @not_cparen     = [^\*\)] | \n
 @block1_cont    = @not_star | ("*"+ @not_cparen)
@@ -62,6 +64,8 @@ $white+         { return [] }
 @line_comment   { return [] }
 @block_comment1 { return [] }
 @block_comment2 { return [] }
+
+@special_comment    { specailComment }
 
 "package"           { lexeme TokKwPackage }
 "model"             { lexeme TokKwModel }
@@ -117,6 +121,7 @@ $white+         { return [] }
 
 
 "int"               { lexeme TokKwInt }
+"floor"             { lexeme TokKwInt }   -- jkind
 "real"              { lexeme TokKwReal }
 "bool"              { lexeme TokKwBool }
 
@@ -214,6 +219,9 @@ data Token =
   | TokKwStep
   | TokKwFby
 
+  | TokPragmaProperty
+  | TokPragmaMain
+
   | TokColon
   | TokComma
   | TokSemi
@@ -258,6 +266,18 @@ numDotDot =
                      , lexemeRange = SourceRange { sourceFrom = mid
                                                  , sourceTo = to } }
             ]
+
+specailComment :: Action s [ Lexeme Token ]
+specailComment =
+  do txt <- matchText
+     rng <- matchRange
+     pure [ Lexeme { lexemeText = txt
+                   , lexemeToken = Map.findWithDefault TokError txt known
+                   , lexemeRange = rng } ]
+  where
+  known = Map.fromList [ ("--%PROPERTY", TokPragmaProperty)
+                       , ("--%MAIN", TokPragmaMain)
+                       ]
 
 qualIdent :: Action s [ Lexeme Token ]
 qualIdent =

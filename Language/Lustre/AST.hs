@@ -97,6 +97,7 @@ data Type =
     NamedType Name
   | ArrayType Type Expression
   | IntType | RealType | BoolType
+  | IntSubrange Expression Expression  -- ^ An extension
   | TypeRange SourceRange Type
     deriving Show
 
@@ -166,7 +167,10 @@ data LocalDecl  = LocalVar Binder
                 | LocalConst ConstDef
                   deriving Show
 
-data Equation   = Assert Expression
+data Equation   = Assert Expression       -- ^ Assuming this
+                | Property Expression     -- ^ Prove this
+                | IsMain                  -- ^ This is the main node,
+                                          -- use it if nothing specified
                 | Define [LHS Expression] Expression
                   deriving Show
 
@@ -343,12 +347,13 @@ exprRangeMaybe expr =
 typeRangeMaybe :: Type -> Maybe SourceRange
 typeRangeMaybe ty =
   case ty of
-    TypeRange r _ -> Just r
-    NamedType n   -> Just (range n)
-    ArrayType {}  -> Nothing
-    IntType {}    -> Nothing
-    RealType {}   -> Nothing
-    BoolType {}   -> Nothing
+    TypeRange r _   -> Just r
+    NamedType n     -> Just (range n)
+    ArrayType {}    -> Nothing
+    IntType {}      -> Nothing
+    RealType {}     -> Nothing
+    BoolType {}     -> Nothing
+    IntSubrange {}  -> Nothing
 
 argRangeMaybe :: StaticArg -> Maybe SourceRange
 argRangeMaybe arg =

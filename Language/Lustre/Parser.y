@@ -72,6 +72,8 @@ import Language.Lustre.Panic
   'struct'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwStruct } }
   'enum'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwEnum } }
   'assert'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwAssert } }
+  '--%PROPERTY' { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaProperty } }
+  '--%MAIN'     { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaMain } }
 
   'when'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWhen } }
   'current'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrent } }
@@ -115,8 +117,8 @@ import Language.Lustre.Panic
   '{'         { Lexeme { lexemeRange = $$, lexemeToken = TokOpenBrace } }
   '}'         { Lexeme { lexemeRange = $$, lexemeToken = TokCloseBrace } }
 
-
   '%'         { Lexeme { lexemeRange = $$, lexemeToken = TokMod } }
+
 
   IDENT       { $$@Lexeme { lexemeToken = TokIdent {} } }
   QIDENT      { $$@Lexeme { lexemeToken = TokQualIdent {} } }
@@ -272,6 +274,8 @@ type :: { Type }
   : builtInType                               { $1 }
   | name                                      { NamedType $1 }
   | type '^' expression                       { at $1 $3 (ArrayType $1 $3) }
+  -- jkind notation
+  | type '[' expression ']'                   { at $1 $4 (ArrayType $1 $3) }
 
 simpleType :: { Type }
   : builtInType                               { $1 }
@@ -360,6 +364,8 @@ body :: { [Equation] }
 
 equation :: { Equation }
   : 'assert' expression                    { Assert $2 }
+  | '--%PROPERTY' expression               { Property $2 }
+  | '--%MAIN'                              { IsMain }
   | SepBy1(',',LHS) '=' expression         { Define $1 $3 }
   | '(' SepBy1(',',LHS) ')' '=' expression { Define $2 $5 }
 

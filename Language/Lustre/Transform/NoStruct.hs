@@ -279,6 +279,8 @@ evalEqn :: Env -> Equation -> [Equation]
 evalEqn env eqn =
   case eqn of
     Assert e     -> [ Assert (evalExpr env e) ]
+    Property e   -> [ Property (evalExpr env e) ]
+    IsMain       -> [ IsMain ]
     Define lhs e
       | isCall e1 -> [ Define ls e1 ]
       | otherwise -> zipExact def ls (toMultiExpr e1)

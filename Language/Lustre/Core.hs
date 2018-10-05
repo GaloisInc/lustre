@@ -19,6 +19,8 @@ import Language.Lustre.Pretty
 data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
 
+-- XXX: Support for integer ranges.
+-- This would be useful to model enums, as well as "subrange [x,y] of int"
 data Type     = TInt | TReal | TBool
                 deriving Show
 
@@ -51,10 +53,13 @@ data Eqn      = Binder := Expr
 
 infix 1 :=
 
-data Node     = Node { nInputs  :: [Binder]
-                     , nOutputs :: [Ident]
-                     , nAsserts :: [Ident]
-                     , nEqns    :: [Eqn]    -- ^ In dependency order
+data Node     = Node { nInputs      :: [Binder]
+                     , nOutputs     :: [Ident]
+                     , nAssuming    :: [Ident]
+                       -- ^ Assuming that these are true
+                     , nShows       :: [Ident]
+                       -- ^ Need to show that these are also true
+                     , nEqns        :: [Eqn]
                      } deriving Show
 
 
@@ -143,7 +148,8 @@ ppNode :: Node -> Doc
 ppNode node =
   text "node" <+> ppTuple (map ppBinder (nInputs node))
   $$ nest 2 (  text "returns" <+> ppTuple (map ppIdent (nOutputs node))
-            $$ text "asserts" <+> ppTuple (map ppIdent (nAsserts node))
+            $$ text "assumes" <+> ppTuple (map ppIdent (nAssuming node))
+            $$ text "shows" <+> ppTuple (map ppIdent (nShows node))
             )
   $$ text "let"
   $$ nest 2 (vcat (map ppEqn (nEqns node)))

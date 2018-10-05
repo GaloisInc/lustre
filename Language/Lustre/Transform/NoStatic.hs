@@ -235,6 +235,8 @@ evalType env ty =
 
     ArrayType t e -> ArrayType   (evalType env t) (evalIntExpr env e)
 
+    IntSubrange e1 e2 -> IntSubrange (evalIntExpr env e1) (evalIntExpr env e2)
+
     -- XXX: Are the locations in the aliased type meaningful?
     NamedType n   -> case lookupNamed env n (typeAliases env)  of
                        Just t1 -> t1
@@ -482,7 +484,9 @@ evalEqn env eqn =
   collectFunEqns $
   case eqn of
     Assert e    -> Assert <$> evalDynExpr NestedExpr env e
+    Property e  -> Property <$> evalDynExpr NestedExpr env e
     Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
+    IsMain      -> pure IsMain
 
 -- | Evaluate a left-hand-side of an equation.
 evalLHS :: Env -> LHS Expression -> LHS Expression
