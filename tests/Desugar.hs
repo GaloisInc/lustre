@@ -33,7 +33,7 @@ checkFile file =
      a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
-         do print $ pp $ desugarNode ds $ Unqual ident
+         do print $ pp $ desugarNode ds $ Just $ Unqual ident
             putStrLn "----------------------------"
             return True
        _ -> do putStrLn "Packages are not yet supported"
