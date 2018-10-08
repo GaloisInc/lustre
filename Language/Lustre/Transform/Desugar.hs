@@ -17,7 +17,9 @@ import Language.Lustre.Panic
 
 
 -- | Given the declarations from a single module, and the name of a
--- node, compute the node in Core Lustre form.
+-- node, compute the node in Core Lustre form.  If the named node does
+-- not exist, a Panic exception is thrown.
+--
 -- XXX: This could use many improvements:
 --    1. Support for multiple modules
 --    2. Currently we process everything, but we could be lazier
@@ -28,21 +30,32 @@ desugarNode ::
   Maybe P.Name
   {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
   C.Node
-desugarNode decls mbN = evalNodeDecl enumInfo theNode
+desugarNode decls mbN =
+  case desugarNode' decls mbN of
+    Just n -> n
+    Nothing -> panic "desugarNode"
+               [ "Cannot find node declaration."
+               , case mbN of
+                   Nothing -> "*** No node has --%MAIN"
+                   Just n -> "*** Name: " ++ show (pp n)
+               ]
+
+-- | Computes the node in Core Lustre form given the declaratins from
+-- a single module and the name of a node; returns Nothing if the
+-- named node does not exist.
+desugarNode' ::
+  [P.TopDecl] ->
+  Maybe P.Name
+  {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
+  Maybe C.Node
+desugarNode' decls mbN = evalNodeDecl enumInfo <$> theNode
   where
   ordered  = orderTopDecls decls
   noStatic = quickNoConst True ordered
   noStruct = quickNoStruct noStatic
   inlined  = quickInlineCalls noStruct
   enumInfo = getEnumInfo Nothing inlined
-  theNode  = case msum (map matches inlined) of
-               Just i  -> i
-               Nothing -> panic "desugarNode"
-                            [ "Cannot find node declaration."
-                            , case mbN of
-                                Nothing -> "*** No node has --%MAIN"
-                                Just n -> "*** Name: " ++ show (pp n)
-                            ]
+  theNode  = msum (map matches inlined)
 
   -- if no name is specified we just pick one of the nodes that are
   -- marked with @--%MAIN@
