@@ -130,6 +130,7 @@ evalConst env expr =
            (Op2 op, [x,y]) ->
              case op of
                Fby        -> bad "`fby` is not a constant"
+               FbyArr     -> bad "`->` is not a constant"
 
                And        -> sAnd x y
                Or         -> sOr x y

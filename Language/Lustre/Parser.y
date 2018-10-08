@@ -558,7 +558,7 @@ staticArgGen(nm) :: { (nm,StaticArg) }
   | nm 'fby'                             { ($1, op2Arg $2 Fby)     }
   | nm 'pre'                             { ($1, op1Arg $2 Pre)     }
   | nm 'current'                         { ($1, op1Arg $2 Current) }
-  | nm '->'                              { ($1, op2Arg $2 Fby)     }   -- XXX?
+  | nm '->'                              { ($1, op2Arg $2 FbyArr)  }
   | nm 'and'                             { ($1, op2Arg $2 And)     }
   | nm 'or'                              { ($1, op2Arg $2 Or)      }
   | nm 'xor'                             { ($1, op2Arg $2 Xor)     }

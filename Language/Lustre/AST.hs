@@ -291,7 +291,8 @@ data Op1 = Not          -- bool -> bool
          | RealCast     -- int -> real
                   deriving (Show, Eq, Ord)
 
-data Op2 = Fby          -- a -> a -> a
+data Op2 = FbyArr       -- a -> a -> a
+         | Fby          -- a -> a -> a
          | And          -- bool -> bool -> boo
          | Or           -- bool -> bool -> boo
          | Xor          -- bool -> bool -> boo

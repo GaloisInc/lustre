@@ -204,7 +204,8 @@ Precedences:
 12   %nonassoc 'int' 'real'               PREF
 13   %nonassoc UMINUS 'pre' 'current'     PREF
 14   %left     '^' '.'
-15   %right    '['
+15   %right     'fby'
+16   %right    '['
 -}
 instance Pretty Expression where
   ppPrec n expr =
@@ -256,7 +257,7 @@ instance Pretty Expression where
 
                        (lp,p,rp) = case op of
                                      Concat  -> left 1
-                                     Fby     -> non 2
+                                     FbyArr  -> non 2
                                      Implies -> right 3
                                      Or      -> left 4
                                      Xor     -> left 4
@@ -274,6 +275,7 @@ instance Pretty Expression where
                                      Mod     -> left 9
                                      Power   -> left 10
                                      Replicate -> left 14
+                                     Fby     -> right 15
 
               (ITE,[e1,e2,e3]) -> parenIf (n > 0) doc
                 where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
@@ -311,7 +313,7 @@ instance Pretty ClockExpr where
     case cv of
       Lit (Bool True)  -> pp i
       Lit (Bool False) -> "not" <+> pp i
-      _                -> ppPrec 15 cv <> parens (pp i)
+      _                -> ppPrec 16 cv <> parens (pp i)
 
 instance Pretty NodeInst where
   ppPrec _ (NodeInst x as) =
@@ -386,7 +388,8 @@ instance Pretty Op1 where
 instance Pretty Op2 where
   ppPrec _ op =
     case op of
-      Fby         -> "->"
+      FbyArr      -> "->"
+      Fby         -> "fby"
       And         -> "and"
       Or          -> "or"
       Xor         -> "xor"

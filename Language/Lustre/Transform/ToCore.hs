@@ -316,58 +316,59 @@ evalExpr expr =
 
     P.CallPos ni es ->
       do as <- mapM evalExprAtom es
-         let prim x = C.Prim x as
-         pure $
-           case ni of
-             P.NodeInst (P.CallPrim _ p) [] ->
-               case p of
+         let prim x = pure (C.Prim x as)
+         case ni of
+           P.NodeInst (P.CallPrim _ p) [] ->
+             case p of
 
-                 P.Op1 op1 ->
-                   case as of
-                     [v] -> case op1 of
-                              P.Not      -> prim C.Not
-                              P.Neg      -> prim C.Neg
-                              P.Pre      -> C.Pre v
-                              P.Current  -> C.Current v
-                              P.IntCast  -> prim C.IntCast
-                              P.RealCast -> prim C.IntCast
-                     _ -> bad "unary operator"
+               P.Op1 op1 ->
+                 case as of
+                   [v] -> case op1 of
+                            P.Not      -> prim C.Not
+                            P.Neg      -> prim C.Neg
+                            P.Pre      -> pure (C.Pre v)
+                            P.Current  -> pure (C.Current v)
+                            P.IntCast  -> prim C.IntCast
+                            P.RealCast -> prim C.IntCast
+                   _ -> bad "unary operator"
 
-                 P.Op2 op2 ->
-                   case as of
-                     [v1,v2] -> case op2 of
-                                  P.Fby       -> v1 C.:-> v2
-                                  P.And       -> prim C.And
-                                  P.Or        -> prim C.Or
-                                  P.Xor       -> prim C.Xor
-                                  P.Implies   -> prim C.Implies
-                                  P.Eq        -> prim C.Eq
-                                  P.Neq       -> prim C.Neq
-                                  P.Lt        -> prim C.Lt
-                                  P.Leq       -> prim C.Leq
-                                  P.Gt        -> prim C.Gt
-                                  P.Geq       -> prim C.Geq
-                                  P.Mul       -> prim C.Mul
-                                  P.Mod       -> prim C.Mod
-                                  P.Div       -> prim C.Div
-                                  P.Add       -> prim C.Add
-                                  P.Sub       -> prim C.Sub
-                                  P.Power     -> prim C.Power
-                                  P.Replicate -> bad "`^`"
-                                  P.Concat    -> bad "`|`"
-                     _ -> bad "binary operator"
+               P.Op2 op2 ->
+                 case as of
+                   [v1,v2] -> case op2 of
+                                P.Fby       -> do v3 <- nameExpr (C.Pre v2)
+                                                  pure (v1 C.:-> v3)
+                                P.FbyArr    -> pure (v1 C.:-> v2)
+                                P.And       -> prim C.And
+                                P.Or        -> prim C.Or
+                                P.Xor       -> prim C.Xor
+                                P.Implies   -> prim C.Implies
+                                P.Eq        -> prim C.Eq
+                                P.Neq       -> prim C.Neq
+                                P.Lt        -> prim C.Lt
+                                P.Leq       -> prim C.Leq
+                                P.Gt        -> prim C.Gt
+                                P.Geq       -> prim C.Geq
+                                P.Mul       -> prim C.Mul
+                                P.Mod       -> prim C.Mod
+                                P.Div       -> prim C.Div
+                                P.Add       -> prim C.Add
+                                P.Sub       -> prim C.Sub
+                                P.Power     -> prim C.Power
+                                P.Replicate -> bad "`^`"
+                                P.Concat    -> bad "`|`"
+                   _ -> bad "binary operator"
 
-                 P.OpN op ->
-                    case op of
-                      P.AtMostOne -> prim C.AtMostOne
-                      P.Nor       -> prim C.Nor
+               P.OpN op ->
+                  case op of
+                    P.AtMostOne -> prim C.AtMostOne
+                    P.Nor       -> prim C.Nor
 
 
-                 P.ITE -> prim C.ITE
+               P.ITE -> prim C.ITE
 
-                 _ -> bad "primitive call"
+               _ -> bad "primitive call"
 
-             _ -> bad "function call"
+           _ -> bad "function call"
 
   where
   bad msg = panic "evalExpr" [ "Unexpected " ++ msg
