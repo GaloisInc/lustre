@@ -38,9 +38,9 @@ desugarNode decls mbN = evalNodeDecl enumInfo theNode
   theNode  = case msum (map matches inlined) of
                Just i  -> i
                Nothing -> panic "desugarNode"
-                            [ "Cannot find node delcaration."
+                            [ "Cannot find node declaration."
                             , case mbN of
-                                Nothing -> "*** No node has --$MAIN"
+                                Nothing -> "*** No node has --%MAIN"
                                 Just n -> "*** Name: " ++ show (pp n)
                             ]
 
