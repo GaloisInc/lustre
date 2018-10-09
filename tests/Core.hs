@@ -57,7 +57,8 @@ ex1 = toNode <$> orderedEqns
   toNode eqns =
     Node { nInputs  = [ "start" ::: TInt ]
          , nOutputs = [ "nats" ]
-         , nAsserts = []
+         , nAssuming = []
+         , nShows   = []
          , nEqns    = eqns
          }
 

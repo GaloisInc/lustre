@@ -1,6 +1,6 @@
 name:                language-lustre
 version:             0.1.0.0
-synopsis:            Tools for working with the Lustre language>
+synopsis:            Tools for working with the Lustre language.
 description:         Tools for working with the Lustre language.
 license:             ISC
 license-file:        LICENSE
