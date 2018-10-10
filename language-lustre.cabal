@@ -47,6 +47,11 @@ library
   default-language:    Haskell2010
   ghc-options:         -Wall
 
+executable lustre
+  hs-source-dirs: exe
+  main-is: Lustre.hs
+  build-depends: base, containers, pretty, language-lustre
+
 test-suite lexer
   type: exitcode-stdio-1.0
   default-language: Haskell2010

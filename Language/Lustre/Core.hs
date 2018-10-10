@@ -12,6 +12,7 @@ import Data.Graph.SCC(stronglyConnComp)
 import Text.PrettyPrint( Doc, text, (<+>)
                        , hsep, vcat, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
+import Control.Monad(msum)
 
 import Language.Lustre.AST (Literal(..))
 import Language.Lustre.Pretty
@@ -65,11 +66,8 @@ data Node     = Node { nInputs      :: [Binder]
 
 
 
-{-------------------------------------------------------------------------------
-Ordering equations.
-
-The translation from source Lustre should be producing properly ordered
-equations, so these functions are not needed in that case. -}
+--------------------------------------------------------------------------------
+-- Ordering equations
 
 usesAtom :: Atom -> Set Ident
 usesAtom atom =
@@ -243,4 +241,51 @@ instance TypeOf Expr where
                                  _ : b : _ -> typeOf env b
                                  _ -> Nothing
           _ -> Nothing
+
+type Clock = Atom
+
+baseClock :: Clock
+baseClock = Lit (Bool True)
+
+class ClockOf t where
+  clockOf :: Map Ident Clock -> t -> Maybe Clock
+
+instance ClockOf Atom where
+  clockOf clocks atom =
+    case atom of
+      Lit _ -> Just baseClock
+      Var x -> Map.lookup x clocks
+
+instance ClockOf Expr where
+  clockOf clocks expr =
+    case expr of
+      Atom a     -> atom a
+      a :-> b    -> msum [ atom a, atom b]  -- should be the saem
+      Pre a      -> atom a
+      _ `When` b -> Just b
+      Current a  -> atom =<< atom a
+      Prim _ as  -> msum (map atom as)  -- any of those should be the same
+    where
+    atom = clockOf clocks
+
+-- | Compute the clocks for all variables defined in the node.
+computeClocks :: Node -> Maybe (Map Ident Clock)
+computeClocks node = go False [] clocks0 (nEqns node)
+  where
+  -- XXX: Annotate inputs with clocks.
+  clocks0 = Map.fromList [ (x,baseClock) | x ::: _ <- nInputs node ]
+
+  -- We do this iteratively because the dependency story is a bit
+  -- convoluted due to the presence of "pre".
+  go changes todo clocks eqns =
+    case eqns of
+      [] ->
+        case todo of
+          [] -> Just clocks
+          _  -> if changes then go False [] clocks todo else Nothing
+      eqn@(x ::: _ := e) : more ->
+        case clockOf clocks e of
+          Just c  -> go True todo (Map.insert x c clocks) more
+          Nothing -> go changes (eqn : todo) clocks more
+
 

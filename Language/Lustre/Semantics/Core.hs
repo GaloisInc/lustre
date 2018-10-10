@@ -1,7 +1,11 @@
 module Language.Lustre.Semantics.Core where
 
+import Data.List(foldl')
 import Data.Map ( Map )
 import qualified Data.Map as Map
+import Data.Set ( Set )
+import qualified Data.Set as Set
+import Text.PrettyPrint(integer,double,text,Doc)
 
 import Language.Lustre.Panic
 import Language.Lustre.Core
@@ -24,8 +28,51 @@ isBool v =
     VBool b -> Just b
     _       -> Nothing
 
-type Env      = Map Ident Value
+ppValue :: Value -> Doc
+ppValue val =
+  case val of
+    VInt x  -> integer x
+    VBool x -> text (show x)
+    VReal x -> double (fromRational x)
+    VNil    -> text "nil"
 
+data State = State
+  { sValues :: Map Ident Value
+    -- ^ Values for identifiers.
+    -- If a value is missing, then its value is assumed to be 'VNil'.
+
+  , sInitialized :: Set Ident
+    -- ^ Additional state to implement @a -> b@
+    -- Contains the identifiers that have transition to the second phase.
+  }
+
+
+initNode :: Node -> (State, State -> Map Ident Value -> State)
+initNode node = (s0, stepNode node1 clocks)
+  where
+  s0     = State { sInitialized = Set.empty, sValues = Map.empty }
+  clocks = case computeClocks node of
+             Just cs -> cs
+             Nothing -> panic "initNode" [ "Failed to compute all clocks." ]
+  node1  = case orderedEqns (nEqns node) of
+             Right ok -> node { nEqns = ok }
+             Left err -> panic "initNode" [ "Failed to order equations"
+                                          , "*** Recursive: " ++ show err ]
+
+
+stepNode :: Node            {- ^ Node, with equations properly ordered -} ->
+            Map Ident Clock {- ^ The clocks for all variables -} ->
+            State           {- ^ Current state -} ->
+            Map Ident Value {- ^ Inputs -} ->
+            State           {- ^ Next state -}
+stepNode node clocks old ins = foldl' (evalEqn clocks old) new (nEqns node)
+  where
+  new = State { sInitialized = sInitialized old
+              , sValues      = ins
+              }
+
+
+-- | The meaning of a literal.
 evalLit :: Literal -> Value
 evalLit lit =
   case lit of
@@ -33,228 +80,240 @@ evalLit lit =
     Real r -> VReal r
     Bool b -> VBool b
 
-evalVar :: Env -> Ident -> Value
-evalVar env x =
-  case Map.lookup x env of
-    Just v  -> v
-    Nothing -> panic "evalAtom" [ "Undefined variable:"
-                                , "*** Name: " ++ show x ]
+-- | Lookup the value of a variable.
+evalVar :: State -> Ident -> Value
+evalVar s x = Map.findWithDefault VNil x (sValues s)
 
-
-evalAtom :: Env   {-^ Environment to for values of variables -} ->
+-- | Interpret an atom in the given state.
+evalAtom :: State {-^ Environment to for values of variables -} ->
             Atom  {-^ Evaluate this -} ->
             Value {-^ Value of the atom -}
-evalAtom env atom =
+evalAtom s atom =
   case atom of
     Lit l -> evalLit l
-    Var x -> evalVar env x
+    Var x -> evalVar s x
 
-evalExpr :: Maybe Env {-^ Current state, if transitioning -} ->
-            Env       {- ^ Next state (partial) -} ->
-            Expr      {- ^ Expression to evaluate -} ->
-            Value
-evalExpr cur next expr =
+
+evalEqn :: Map Ident Clock {- ^ Clocks for expressions -} ->
+           State           {- ^ Old state              -} ->
+           State           {- ^ New state (partial)    -} ->
+           Eqn             {- ^ Equation to evaluate   -} ->
+           State           {- ^ Updated new state      -}
+
+evalEqn clocks old new (x ::: _ := expr) =
   case expr of
-    Atom atom  -> evalAtom next atom
 
-    a :-> b    -> case cur of
-                    Nothing -> evalAtom next a
-                    Just _  -> evalAtom next b
+    Atom a -> done (evalAtom new a)
 
-    Pre atom    -> case atom of
-                     Lit l -> evalLit l
-                     Var x -> case cur of
-                                Nothing -> VNil
-                                Just env -> evalVar env x
+    a `When` b ->
+      case evalAtom new b of
+        VBool True -> done (evalAtom new a)
+        _          -> stay
 
-    a `When` b -> case evalAtom next b of
-                    VBool True -> evalAtom next a
-                    _          -> VNil
+    Current a -> done (evalAtom new a)
 
-    Current a  -> case evalAtom next a of
-                    VNil -> case cur of
-                              Nothing  -> VNil
-                              Just env -> evalAtom env a
-                    v    -> v
+    Pre a -> case evalAtom new c of
+               VBool True -> done (evalAtom old a)
+               _          -> stay
 
-    Prim op as ->
-      case op of
-        Not ->
-          case vs of
-            [ VNil ]    -> VNil
-            [ VBool b ] -> VBool (not b)
-            _           -> bad "1 bool"
+    a :-> b
+      | x `Set.member` sInitialized old -> done (evalAtom new b)
+      | VBool True <- evalAtom new c    -> initialized new'
+      | otherwise                       -> new'
+        where new' = done (evalAtom new a)
 
-        Neg ->
-          case vs of
-            [ VNil ]     -> VNil
-            [ VInt n ]   -> VInt (negate n)
-            [ VReal n ]  -> VReal (negate n)
-            _            -> bad "1 number"
+    Prim op as -> case evalAtom new c of
+                    VBool True -> done (evalPrimOp op (map (evalAtom new) as))
+                    _          -> stay
 
-        IntCast ->
-          case vs of
-            [ VNil ]     -> VNil
-            [ VReal r ]  -> VInt (truncate r)
-            _            -> bad "1 real"
+  where
+  done v        = new { sValues = Map.insert x v (sValues new) }
+  stay          = new { sValues = Map.insert x (evalVar old x) (sValues new) }
+  initialized s = s { sInitialized = Set.insert x (sInitialized s) }
 
-        RealCast ->
-          case vs of
-            [ VNil ]   -> VNil
-            [ VInt n ] -> VReal (fromInteger n)
-            _          -> bad "1 int"
+  c = case Map.lookup x clocks of
+        Just cl -> cl
+        Nothing -> panic "evalEqn" [ "Missing clock"
+                                   , "*** Name: " ++ show x ]
 
-        And ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VBool x, VBool y ]  -> VBool (x && y)
-            _                     -> bad "2 bools"
 
-        Or ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VBool x, VBool y ]  -> VBool (x || y)
-            _                     -> bad "2 bools"
+-- | Semantics of primitive operators.
+evalPrimOp :: Op -> [Value] -> Value
+evalPrimOp op vs =
+   case op of
+     Not ->
+       case vs of
+         [ VNil ]    -> VNil
+         [ VBool b ] -> VBool (not b)
+         _           -> bad "1 bool"
 
-        Xor ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VBool x, VBool y ]  -> VBool (x /= y)
-            _                     -> bad "2 bools"
+     Neg ->
+       case vs of
+         [ VNil ]     -> VNil
+         [ VInt n ]   -> VInt (negate n)
+         [ VReal n ]  -> VReal (negate n)
+         _            -> bad "1 number"
 
-        Implies ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VBool x, VBool y ]  -> VBool (not x || y)
-            _                     -> bad "2 bools"
+     IntCast ->
+       case vs of
+         [ VNil ]     -> VNil
+         [ VReal r ]  -> VInt (truncate r)
+         _            -> bad "1 real"
 
-        Eq ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VBool x, VBool y ]  -> VBool (x == y)
-            [ VInt x, VInt y ]    -> VBool (x == y)
-            [ VReal x, VReal y ]  -> VBool (x == y)
-            _                     -> bad "2 of the same type"
+     RealCast ->
+       case vs of
+         [ VNil ]   -> VNil
+         [ VInt n ] -> VReal (fromInteger n)
+         _          -> bad "1 int"
 
-        Neq ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VBool x, VBool y ]  -> VBool (x /= y)
-            [ VInt x, VInt y ]    -> VBool (x /= y)
-            [ VReal x, VReal y ]  -> VBool (x /= y)
-            _                     -> bad "2 of the same type"
+     And ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VBool x, VBool y ]  -> VBool (x && y)
+         _                     -> bad "2 bools"
 
-        Lt ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VBool (x < y)
-            [ VReal x, VReal y ]  -> VBool (x < y)
-            _                     -> bad "2 numbers"
+     Or ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VBool x, VBool y ]  -> VBool (x || y)
+         _                     -> bad "2 bools"
 
-        Leq ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VBool (x <= y)
-            [ VReal x, VReal y ]  -> VBool (x <= y)
-            _                     -> bad "2 numbers"
+     Xor ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VBool x, VBool y ]  -> VBool (x /= y)
+         _                     -> bad "2 bools"
 
-        Gt ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VBool (x > y)
-            [ VReal x, VReal y ]  -> VBool (x > y)
-            _                     -> bad "2 numbers"
+     Implies ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VBool x, VBool y ]  -> VBool (not x || y)
+         _                     -> bad "2 bools"
 
-        Geq ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VBool (x >= y)
-            [ VReal x, VReal y ]   -> VBool (x >= y)
-            _                     -> bad "2 numbers"
+     Eq ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VBool x, VBool y ]  -> VBool (x == y)
+         [ VInt x, VInt y ]    -> VBool (x == y)
+         [ VReal x, VReal y ]  -> VBool (x == y)
+         _                     -> bad "2 of the same type"
 
-        Add ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VInt  (x + y)
-            [ VReal x, VReal y ]   -> VReal (x + y)
-            _                     -> bad "2 numbers"
+     Neq ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VBool x, VBool y ]  -> VBool (x /= y)
+         [ VInt x, VInt y ]    -> VBool (x /= y)
+         [ VReal x, VReal y ]  -> VBool (x /= y)
+         _                     -> bad "2 of the same type"
 
-        Sub ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VInt  (x - y)
-            [ VReal x, VReal y ]   -> VReal (x - y)
-            _                     -> bad "2 numbers"
+     Lt ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VBool (x < y)
+         [ VReal x, VReal y ]  -> VBool (x < y)
+         _                     -> bad "2 numbers"
 
-        Mul ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VInt  (x * y)
-            [ VReal x, VReal y ]   -> VReal (x * y)
-            _                     -> bad "2 numbers"
+     Leq ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VBool (x <= y)
+         [ VReal x, VReal y ]  -> VBool (x <= y)
+         _                     -> bad "2 numbers"
 
-        Div ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VInt (quot x y)
-            [ VReal x, VReal y ]   -> VReal (x / y)
-            _                     -> bad "2 numbers"
+     Gt ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VBool (x > y)
+         [ VReal x, VReal y ]  -> VBool (x > y)
+         _                     -> bad "2 numbers"
 
-        Mod ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VInt (rem x y)
-            _                     -> bad "2 ints"
+     Geq ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VBool (x >= y)
+         [ VReal x, VReal y ]   -> VBool (x >= y)
+         _                     -> bad "2 numbers"
 
-        Power ->
-          case vs of
-            [ VNil, _ ]           -> VNil
-            [ _, VNil ]           -> VNil
-            [ VInt x, VInt y ]    -> VInt  (x ^ y)
-            [ VReal x, VInt y ]   -> VReal (x ^ y)
-            _                     -> bad "1 number and 1 int"
+     Add ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VInt  (x + y)
+         [ VReal x, VReal y ]   -> VReal (x + y)
+         _                     -> bad "2 numbers"
 
-        ITE ->
-          case vs of
-            [ VNil, _, _ ]        -> VNil
-            [ VBool b, x, y ]     -> if b then x else y
-            _                     -> bad "1 bool, and 2 of the same type"
+     Sub ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VInt  (x - y)
+         [ VReal x, VReal y ]   -> VReal (x - y)
+         _                     -> bad "2 numbers"
 
-        AtMostOne
-          | any isNil vs              -> VNil
-          | Just bs <- mapM isBool vs -> VBool $ case filter id bs of
-                                                   _ : _ : _ -> False
-                                                   _         -> True
-          | otherwise                 -> bad "all bool"
+     Mul ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VInt  (x * y)
+         [ VReal x, VReal y ]   -> VReal (x * y)
+         _                     -> bad "2 numbers"
 
-        Nor
-          | any isNil vs              -> VNil
-          | Just bs <- mapM isBool vs -> VBool (not (or bs))
-          | otherwise                 -> bad "all booleans"
+     Div ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VInt (quot x y)
+         [ VReal x, VReal y ]   -> VReal (x / y)
+         _                     -> bad "2 numbers"
 
-      where
-      vs = map (evalAtom next) as
+     Mod ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VInt (rem x y)
+         _                     -> bad "2 ints"
 
-      bad y = panic "evalExpr" [ "Type error:"
-                               , "*** Operator: " ++ show op
-                               , "*** Expected: " ++ y
-                               , "*** Got: "      ++ show vs ]
+     Power ->
+       case vs of
+         [ VNil, _ ]           -> VNil
+         [ _, VNil ]           -> VNil
+         [ VInt x, VInt y ]    -> VInt  (x ^ y)
+         [ VReal x, VInt y ]   -> VReal (x ^ y)
+         _                     -> bad "1 number and 1 int"
 
+     ITE ->
+       case vs of
+         [ VNil, _, _ ]        -> VNil
+         [ VBool b, x, y ]     -> if b then x else y -- should we check for Nil?
+         _                     -> bad "1 bool, and 2 of the same type"
+
+     AtMostOne
+       | any isNil vs              -> VNil
+       | Just bs <- mapM isBool vs -> VBool $ case filter id bs of
+                                                _ : _ : _ -> False
+                                                _         -> True
+       | otherwise                 -> bad "all bool"
+
+     Nor
+       | any isNil vs              -> VNil
+       | Just bs <- mapM isBool vs -> VBool (not (or bs))
+       | otherwise                 -> bad "all booleans"
+
+   where
+   bad y = panic "evalExpr" [ "Type error:"
+                            , "*** Operator: " ++ show op
+                            , "*** Expected: " ++ y
+                            , "*** Got: "      ++ show vs ]
 
 
 
