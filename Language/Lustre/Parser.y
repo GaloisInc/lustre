@@ -409,7 +409,7 @@ expression :: { Expression }
 
   | expression 'when' clockExpr       { $1 `When` $3        }
   | expression 'fby' expression       { toE2 $1 $2 Fby     $3 }
-  | expression '->' expression        { toE2 $1 $2 Fby     $3 }  -- XXX: other op?
+  | expression '->' expression        { toE2 $1 $2 FbyArr  $3 }
   | expression 'and' expression       { toE2 $1 $2 And     $3 }
   | expression 'or' expression        { toE2 $1 $2 Or      $3 }
   | expression 'xor' expression       { toE2 $1 $2 Xor     $3 }
@@ -817,6 +817,5 @@ parseProgramFromFileUTF8 file =
 parseProgramFromFileLatin1 :: FilePath -> IO Program
 parseProgramFromFileLatin1 file =
   parseProgramFrom (Text.pack file) (Text.decodeLatin1 <$> BS.readFile file)
-
 
 }
