@@ -306,7 +306,31 @@ evalExpr expr =
          pure (C.When a1 a2)
 
 
-    P.Merge {} -> panic "evalExpr" [ "XXX: Merge not yet implemented in Core" ]
+    P.Merge i alts ->
+      do let j = C.Var (evalIdent i)
+         as <- forM alts $ \(P.MergeCase k e) -> do p  <- evalExprAtom k
+                                                    pure (p,e)
+         case as of
+           [ (C.Lit (C.Bool b) ,e1), (_,e2) ] ->
+              do e1' <- evalExprAtom e1
+                 e2' <- evalExprAtom e2
+                 pure $ if b then C.Merge j e1' e2' else C.Merge j e2' e1'
+           _ -> go j as
+
+
+      where
+      go j as =
+        case as of
+          []  -> bad "empty merge"
+          [(_,e)] -> evalExpr e
+          (p,e) : rest ->
+             do b    <- nameExpr (C.Prim C.Eq [ p, j ])
+                more <- go j rest
+                l    <- evalExprAtom e
+                r    <- case more of
+                          C.Atom x -> pure x
+                          _        -> nameExpr more
+                pure (C.Merge b l r)
 
     P.Tuple {}  -> bad "tuple"
     P.Array {}  -> bad "array"

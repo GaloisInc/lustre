@@ -54,7 +54,11 @@ desugarNode' decls mbN = evalNodeDecl enumInfo <$> theNode
   noStatic = quickNoConst True ordered
   noStruct = quickNoStruct noStatic
   inlined  = quickInlineCalls noStruct
-  enumInfo = getEnumInfo Nothing inlined
+  enumInfo = getEnumInfo Nothing ordered
+  -- XXX: noStatic already pretty much has the enumInfo
+  -- so we can get it from there instead of recomputing.
+
+
   theNode  = msum (map matches inlined)
 
   -- if no name is specified we just pick one of the nodes that are

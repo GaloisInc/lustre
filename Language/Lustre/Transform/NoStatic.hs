@@ -199,9 +199,14 @@ evalTypeDecl env td =
       case tdef of
         IsType x -> addAlias env name (evalType env x)
 
-        IsEnum xs -> env { enumInfo = addNamed name ys (enumInfo env) }
+        IsEnum xs -> env { enumInfo = addNamed name (Map.fromList ys)
+                                                    (enumInfo env)
+                         , cEnv = update (cEnv env) }
           where
-          ys = Map.fromList [ (x, topIdentToName env x) | x <- xs ]
+          ys    = [ (x, topIdentToName env x) | x <- xs ]
+          addVal (i,n) = addNamed n (VEnum name i)
+          update cenv =
+                cenv { C.envConsts = foldr addVal (C.envConsts cenv) ys }
 
         IsStruct xs ->
           env { cEnv = update (cEnv env)

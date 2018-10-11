@@ -37,6 +37,7 @@ data Expr     = Atom Atom
               | Pre Atom
               | Atom `When` Atom
               | Current Atom
+              | Merge Atom Atom Atom
               | Prim Op [Atom]
                 deriving Show
 
@@ -83,6 +84,7 @@ usesExpr expr =
     Pre _         -> Set.empty -- refer to values at previous instance
     a1 `When` a2  -> Set.union (usesAtom a1) (usesAtom a2)
     Current a     -> usesAtom a
+    Merge a b c   -> Set.unions (map usesAtom [a,b,c])
     Prim _ as     -> Set.unions (map usesAtom as)
 
 -- | Order the equations.  Returns cycles on the left, if there are some.
@@ -133,6 +135,7 @@ ppExpr expr =
     Pre a       -> text "pre" <+> ppAtom a
     a `When` b  -> ppAtom a <+> text "when" <+> ppAtom b
     Current a   -> text "current" <+> ppAtom a
+    Merge a b c -> text "merge" <+> ppAtom a <+> ppAtom b <+> ppAtom c
     Prim f as   -> ppPrim f PP.<> ppTuple (map ppAtom as)
 
 
@@ -206,6 +209,7 @@ instance TypeOf Expr where
       Pre a       -> typeOf env a
       a `When` _  -> typeOf env a
       Current a   -> typeOf env a
+      Merge _ b _ -> typeOf env b
       Prim op as  ->
         case as of
           a : _ ->
@@ -259,12 +263,13 @@ instance ClockOf Atom where
 instance ClockOf Expr where
   clockOf clocks expr =
     case expr of
-      Atom a     -> atom a
-      a :-> b    -> msum [ atom a, atom b]  -- should be the saem
-      Pre a      -> atom a
-      _ `When` b -> Just b
-      Current a  -> atom =<< atom a
-      Prim _ as  -> msum (map atom as)  -- any of those should be the same
+      Atom a      -> atom a
+      a :-> b     -> msum [ atom a, atom b]  -- should be the saem
+      Pre a       -> atom a
+      _ `When` b  -> Just b
+      Current a   -> atom =<< atom a
+      Merge c _ _ -> atom c
+      Prim _ as   -> msum (map atom as)  -- any of those should be the same
     where
     atom = clockOf clocks
 

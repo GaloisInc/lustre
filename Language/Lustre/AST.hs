@@ -219,7 +219,7 @@ data Expression = ERange !SourceRange !Expression
                   deriving Show
 
 -- | The first expression (the "pattern") should be a constant.
--- In fact, to check clocks, it restricted to @true@, @false@, or a @Name@.
+-- In fact, to check clocks, it is restricted to @true@, @false@, or a @Name@.
 data MergeCase  = MergeCase Expression Expression
                   deriving Show
 

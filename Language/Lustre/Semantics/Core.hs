@@ -1,3 +1,4 @@
+{-# Language MultiWayIf #-}
 module Language.Lustre.Semantics.Core where
 
 import Data.List(foldl')
@@ -105,31 +106,35 @@ evalEqn clocks old new (x ::: _ := expr) =
 
     Atom a -> done (evalAtom new a)
 
-    a `When` b ->
-      case evalAtom new b of
-        VBool True -> done (evalAtom new a)
-        _          -> stay
+    a `When` _ -> guarded (done (evalAtom new a))
 
     Current a -> done (evalAtom new a)
 
-    Pre a -> case evalAtom new c of
-               VBool True -> done (evalAtom old a)
-               _          -> stay
+    Pre a -> guarded (done (evalAtom old a))
 
-    a :-> b
-      | x `Set.member` sInitialized old -> done (evalAtom new b)
-      | VBool True <- evalAtom new c    -> initialized new'
-      | otherwise                       -> new'
-        where new' = done (evalAtom new a)
+    a :-> b ->
+      guarded $ case () of
+                  _ | x `Set.member` sInitialized old -> done (evalAtom new b)
+                    | VBool True <- evalAtom new c    -> initialized new'
+                    | otherwise                       -> new'
+                      where new' = done (evalAtom new a)
 
-    Prim op as -> case evalAtom new c of
-                    VBool True -> done (evalPrimOp op (map (evalAtom new) as))
-                    _          -> stay
+    Merge a ifT ifF ->
+      done $ case evalAtom new a of
+               VBool b -> evalAtom new (if b then ifT else ifF)
+               VNil    -> VNil
+               _       -> panic "evalEqn" [ "Merge expected a bool" ]
+
+    Prim op as -> done (evalPrimOp op (map (evalAtom new) as))
 
   where
   done v        = new { sValues = Map.insert x v (sValues new) }
   stay          = new { sValues = Map.insert x (evalVar old x) (sValues new) }
   initialized s = s { sInitialized = Set.insert x (sInitialized s) }
+
+  guarded v = case evalAtom new c of
+                VBool True -> v
+                _          -> stay
 
   c = case Map.lookup x clocks of
         Just cl -> cl
