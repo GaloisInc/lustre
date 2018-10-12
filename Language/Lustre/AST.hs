@@ -225,7 +225,7 @@ data MergeCase  = MergeCase Expression Expression
 
 -- | The clock activates when the identifier has the given expression.
 -- In the surface syntax, the expression is restricted to
--- @true@, @false@, or a @Name@.
+-- @true@, @false@, or a @Name@ (e.g., for to use an enum).
 -- However, allowing arbitrary expressions is more convenient for manipulating
 -- already validated syntax (e.g., we can allow arbitrary values).
 data ClockExpr  = WhenClock SourceRange Expression Ident

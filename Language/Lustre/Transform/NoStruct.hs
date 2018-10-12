@@ -227,11 +227,11 @@ expandBinders env bs = (Map.fromList (catMaybes defs), concat newBs)
 For structured binders we also return a mapping from the original name,
 to its normal form.  For example:
 
-> x : int ^ 3
+> x : int ^ 3 when t
 
 results in
 
-> x1 : int; x2 : int; x3 : int
+> x1 : int when t; x2 : int when t; x3 : int when t
 
 and a mapping:
 
