@@ -1,10 +1,13 @@
+{-# Language OverloadedStrings #-}
 module Language.Lustre.Semantics.Value
   ( module Language.Lustre.Semantics.Value
   , Stream(..)
   ) where
 
+import Text.PrettyPrint as P
 import Language.Lustre.AST
 import Language.Lustre.Semantics.Stream
+import Language.Lustre.Pretty
 
 -- | The universe of basic values.
 -- These are the values used for a specific time instance.
@@ -78,5 +81,17 @@ typeError :: String -> String -> EvalM a
 typeError x y = crash x ("Type error, expected " ++ y)
 
 
+--------------------------------------------------------------------------------
 
+instance Pretty Value where
+  ppPrec _ val =
+    case val of
+      VInt n -> integer n
+      VBool b -> text (show b)
+      VReal r -> double (fromRational r) -- XXX
+      VNil -> "nil"
+      VEnum _ a -> pp a
+      VStruct _ fs -> braces (hsep (punctuate comma (map ppF fs)))
+        where ppF (x,y) = pp x <+> "=" <+> pp y
+      VArray vs -> brackets (hsep (punctuate comma (map pp vs)))
 
