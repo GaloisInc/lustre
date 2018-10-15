@@ -2,6 +2,7 @@
 module Language.Lustre.Transform.Desugar where
 
 import Control.Monad(msum)
+import Text.PrettyPrint(hsep,punctuate,comma)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
@@ -48,7 +49,18 @@ desugarNode' ::
   Maybe P.Name
   {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
   Maybe C.Node
-desugarNode' decls mbN = evalNodeDecl enumInfo <$> theNode
+desugarNode' decls mbN =
+  do nd <- theNode
+     let cnd = evalNodeDecl enumInfo nd
+     pure $ case C.orderedEqns (C.nEqns cnd) of
+              Right es  -> cnd { C.nEqns = es }
+              Left recs ->
+                panic "desugarNode"
+                  $ "Recursive equations in the specification:" :
+                  [ "*** Binders: " ++
+                      show (hsep (punctuate comma (map C.ppBinder gs)))
+                      | gs <- recs
+                  ]
   where
   ordered  = orderTopDecls decls
   noStatic = quickNoConst True ordered
