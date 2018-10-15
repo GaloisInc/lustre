@@ -71,33 +71,44 @@ desugarNode' decls mbN =
   -- so we can get it from there instead of recomputing.
 
 
-  theNode  = msum (map matches inlined)
-
-  -- if no name is specified we just pick one of the nodes that are
-  -- marked with @--%MAIN@
-  matches =
+  theNode =
     case mbN of
-      Nothing -> isNode checkMain
+      -- Looking for a specific node
       Just nm ->
         case nm of
           P.Qual {}  -> panic "desugarNode"
                             [ "We only support unqualifed names for now." ]
-          P.Unqual i -> isNode (checkByName i)
+          P.Unqual i -> msum (map matches inlined)
+            where
+            matches td =
+              case td of
+                P.DeclareNode nd | P.nodeName nd == i -> Just nd
+                _ -> Nothing
 
+      -- No name specified: find a node marked with --%MAIN,
+      -- or use the last node
+      Nothing -> chooseDefault Nothing inlined
+
+  chooseDefault best xs =
+    case xs of
+      []     -> best
+      d : ds -> case d of
+                  P.DeclareNode nd
+                    | checkMain nd -> Just nd
+                    | otherwise    -> chooseDefault (Just nd) ds
+                  _ -> chooseDefault best ds
+
+  -- is this node marked with main
   checkMain nd = case P.nodeDef nd of
                    Just body -> any isMain (P.nodeEqns body)
                    _ -> False
 
-  checkByName i = \nd -> P.nodeName nd == i
-
-  isMain eqn = case eqn of
-                P.IsMain -> True
-                _        -> False
+    where isMain eqn = case eqn of
+                         P.IsMain -> True
+                         _        -> False
 
 
-  isNode p = \td -> case td of
-                      P.DeclareNode nd | p nd -> Just nd
-                      _                       -> Nothing
+
 
 
 
