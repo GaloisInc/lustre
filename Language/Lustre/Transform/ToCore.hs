@@ -99,11 +99,11 @@ runProcessNode enumCs m = fst $ runId $ runStateT st m
           }
 
 data St = St
-  { stLocalTypes :: Map C.Ident C.Type
+  { stLocalTypes :: Map C.Ident C.CType
     -- ^ Types of local translated variables.
     -- These may change as we generate new euqtaions.
 
-  , stSrcLocalTypes :: Map P.Ident C.Type
+  , stSrcLocalTypes :: Map P.Ident C.CType
     -- ^ Types of local variables from the source.
     -- These shouldn't change.
 
@@ -141,22 +141,22 @@ getEnumCons :: M (Map P.Name C.Expr)
 getEnumCons = stGlobEnumCons <$> get
 
 -- | Get the collection of local types.
-getLocalTypes :: M (Map C.Ident C.Type)
+getLocalTypes :: M (Map C.Ident C.CType)
 getLocalTypes = stLocalTypes <$> get
 
 -- | Get the types of the untranslated locals.
-getSrcLocalTypes :: M (Map P.Ident C.Type)
+getSrcLocalTypes :: M (Map P.Ident C.CType)
 getSrcLocalTypes = stSrcLocalTypes <$> get
 
 -- | Record the type of a local.
-addLocal :: C.Ident -> C.Type -> M ()
+addLocal :: C.Ident -> C.CType -> M ()
 addLocal i t = sets_ $ \s -> s { stLocalTypes = Map.insert i t (stLocalTypes s)}
 
 addBinder :: C.Binder -> M ()
 addBinder (i C.::: t) = addLocal i t
 
 -- | Add a type for a declared local.
-addSrcLocal :: P.Ident -> C.Type -> M ()
+addSrcLocal :: P.Ident -> C.CType -> M ()
 addSrcLocal x t = sets_ $ \s ->
   s { stSrcLocalTypes = Map.insert x t (stSrcLocalTypes s)
     , stGlobEnumCons  = Map.delete (P.Unqual x) (stGlobEnumCons s)
@@ -210,7 +210,13 @@ addPropertyName i = sets_ $ \s -> s { stPropertyNames = i : stPropertyNames s }
 -- | Add the type of a binder to the environment.
 evalBinder :: P.Binder -> M C.Binder
 evalBinder b =
-  do let t = evalType (P.binderType b)
+  do c <- case P.binderClock b of
+            Nothing -> pure (C.Lit (C.Bool True))
+            Just (P.WhenClock _ e i) ->
+              do e1 <- evalExprAtom e
+                 let i1 = C.Var (evalIdent i)
+                 nameExpr (C.Prim C.Eq [ i1,e1 ])
+     let t = evalType (P.binderType b) `C.On` c
      addSrcLocal (P.binderDefines b) t
      pure (evalIdent (P.binderDefines b) C.::: t)
 
@@ -222,16 +228,14 @@ evalEqn eqn =
     P.IsMain -> pure []
 
     P.Property e ->
-        do e1 <- evalExpr e
-           i  <- newIdent
-           addEqn (i C.::: C.TBool C.:= e1)
+        do e1      <- evalExpr e
+           C.Var i <- nameExpr e1
            addPropertyName i
            clearEqns
 
     P.Assert e ->
-      do e1 <- evalExpr e
-         i  <- newIdent
-         addEqn (i C.::: C.TBool C.:= e1)
+      do e1      <- evalExpr e
+         C.Var i <- nameExpr e1
          addAssertName i
          clearEqns
 

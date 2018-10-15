@@ -49,12 +49,9 @@ data State = State
 
 
 initNode :: Node -> (State, State -> Map Ident Value -> State)
-initNode node = (s0, stepNode node1 clocks)
+initNode node = (s0, stepNode node1)
   where
   s0     = State { sInitialized = Set.empty, sValues = Map.empty }
-  clocks = case computeClocks node of
-             Just cs -> cs
-             Nothing -> panic "initNode" [ "Failed to compute all clocks." ]
   node1  = case orderedEqns (nEqns node) of
              Right ok -> node { nEqns = ok }
              Left err -> panic "initNode" [ "Failed to order equations"
@@ -62,11 +59,10 @@ initNode node = (s0, stepNode node1 clocks)
 
 
 stepNode :: Node            {- ^ Node, with equations properly ordered -} ->
-            Map Ident Clock {- ^ The clocks for all variables -} ->
             State           {- ^ Current state -} ->
             Map Ident Value {- ^ Inputs -} ->
             State           {- ^ Next state -}
-stepNode node clocks old ins = foldl' (evalEqn clocks old) new (nEqns node)
+stepNode node old ins = foldl' (evalEqn old) new (nEqns node)
   where
   new = State { sInitialized = sInitialized old
               , sValues      = ins
@@ -95,13 +91,12 @@ evalAtom s atom =
     Var x -> evalVar s x
 
 
-evalEqn :: Map Ident Clock {- ^ Clocks for expressions -} ->
-           State           {- ^ Old state              -} ->
+evalEqn :: State           {- ^ Old state              -} ->
            State           {- ^ New state (partial)    -} ->
            Eqn             {- ^ Equation to evaluate   -} ->
            State           {- ^ Updated new state      -}
 
-evalEqn clocks old new (x ::: _ := expr) =
+evalEqn old new (x ::: _ `On` c := expr) =
   case expr of
 
     Atom a      -> done (evalAtom new a)
@@ -142,10 +137,6 @@ evalEqn clocks old new (x ::: _ := expr) =
      VBool True -> v
      _ ->   new { sValues = Map.insert x (evalVar old x) (sValues new) }
 
-  c = case Map.lookup x clocks of
-        Just cl -> cl
-        Nothing -> panic "evalEqn" [ "Missing clock"
-                                   , "*** Name: " ++ show x ]
 
 
 -- | Semantics of primitive operators.

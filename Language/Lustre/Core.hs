@@ -1,3 +1,4 @@
+{-# Language OverloadedStrings #-}
 module Language.Lustre.Core
   (module Language.Lustre.Core, Literal(..)) where
 
@@ -12,7 +13,6 @@ import Data.Graph.SCC(stronglyConnComp)
 import Text.PrettyPrint( Doc, text, (<+>)
                        , hsep, vcat, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
-import Control.Monad(msum)
 
 import Language.Lustre.AST (Literal(..))
 import Language.Lustre.Pretty
@@ -25,7 +25,14 @@ data Ident    = Ident Text
 data Type     = TInt | TReal | TBool
                 deriving Show
 
-data Binder   = Ident ::: Type
+-- | A boolean clock.  The base clock is always @true@.
+type Clock    = Atom
+
+-- | Type on a boolean clock.
+data CType    = Type `On` Clock
+                deriving Show
+
+data Binder   = Ident ::: CType
                 deriving Show
 
 data Atom     = Lit Literal
@@ -54,6 +61,8 @@ data Eqn      = Binder := Expr
                 deriving Show
 
 infix 1 :=
+infix 2 :::
+infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
                      , nOutputs     :: [Ident]
@@ -93,8 +102,8 @@ orderedEqns eqns
   | null bad  = Right good
   | otherwise = Left bad
   where
-  graph = [ (eqn, x, Set.toList (usesExpr e))
-              | eqn <- eqns, let (x ::: _) := e = eqn ]
+  graph = [ (eqn, x, Set.toList (Set.union (usesAtom c) (usesExpr e)))
+              | eqn <- eqns, let (x ::: _ `On` c) := e = eqn ]
 
   comps = stronglyConnComp graph
 
@@ -118,8 +127,14 @@ ppType ty =
     TReal -> text "real"
     TBool -> text "bool"
 
+ppCType :: CType -> Doc
+ppCType (t `On` c) =
+  case c of
+    Lit (Bool True) -> ppType t
+    _ -> ppType t <+> "when" <+> ppAtom c
+
 ppBinder :: Binder -> Doc
-ppBinder (x ::: t) = ppIdent x <+> text ":" <+> ppType t
+ppBinder (x ::: t) = ppIdent x <+> text ":" <+> ppCType t
 
 ppAtom :: Atom -> Doc
 ppAtom atom =
@@ -165,6 +180,9 @@ instance Pretty Op where
 instance Pretty Type where
   ppPrec _ = ppType
 
+instance Pretty CType where
+  ppPrec _ = ppCType
+
 instance Pretty Binder where
   ppPrec _ = ppBinder
 
@@ -185,15 +203,16 @@ instance Pretty Node where
 -- Computing the the type of an expression.
 
 class TypeOf t where
-  typeOf :: Map Ident Type -> t -> Maybe Type
+  typeOf :: Map Ident CType -> t -> Maybe CType
 
 instance TypeOf Literal where
   typeOf _ lit =
     Just $
     case lit of
-      Int _  -> TInt
-      Real _ -> TReal
-      Bool _ -> TBool
+      Int _  -> base TInt
+      Real _ -> base TReal
+      Bool _ -> base TBool
+    where base t = t `On` Lit (Bool True)
 
 instance TypeOf Atom where
   typeOf env atom =
@@ -207,90 +226,49 @@ instance TypeOf Expr where
       Atom a      -> typeOf env a
       a :-> _     -> typeOf env a
       Pre a       -> typeOf env a
-      a `When` _  -> typeOf env a
-      Current a   -> typeOf env a
-      Merge _ b _ -> typeOf env b
+      a `When` b  -> do t `On` _ <- typeOf env a
+                        pure (t `On` b)
+      Current a   -> do t `On` c  <- typeOf env a
+                        _ `On` c1 <- typeOf env c
+                        pure (t `On` c1)
+      Merge c b _ -> do _ `On` c1 <- typeOf env c
+                        t `On` _  <- typeOf env b
+                        pure (t `On` c1)
       Prim op as  ->
         case as of
           a : _ ->
-            let t    = typeOf env a
-                bool = Just TBool
-            in case op of
-                 IntCast    -> Just TInt
-                 RealCast   -> Just TReal
+            do (t `On` c) <- typeOf env a
+               let ret x = Just (x `On` c)
+               case op of
+                 IntCast    -> ret TInt
+                 RealCast   -> ret TReal
 
-                 Not        -> bool
-                 And        -> bool
-                 Or         -> bool
-                 Xor        -> bool
-                 Implies    -> bool
-                 Eq         -> bool
-                 Neq        -> bool
-                 Lt         -> bool
-                 Leq        -> bool
-                 Gt         -> bool
-                 Geq        -> bool
-                 AtMostOne  -> bool
-                 Nor        -> bool
+                 Not        -> ret TBool
+                 And        -> ret TBool
+                 Or         -> ret TBool
+                 Xor        -> ret TBool
+                 Implies    -> ret TBool
+                 Eq         -> ret TBool
+                 Neq        -> ret TBool
+                 Lt         -> ret TBool
+                 Leq        -> ret TBool
+                 Gt         -> ret TBool
+                 Geq        -> ret TBool
+                 AtMostOne  -> ret TBool
+                 Nor        -> ret TBool
 
-                 Neg        -> t
-                 Mul        -> t
-                 Mod        -> t
-                 Div        -> t
-                 Add        -> t
-                 Sub        -> t
-                 Power      -> t
+                 Neg        -> ret t
+                 Mul        -> ret t
+                 Mod        -> ret t
+                 Div        -> ret t
+                 Add        -> ret t
+                 Sub        -> ret t
+                 Power      -> ret t
 
                  ITE        -> case as of
                                  _ : b : _ -> typeOf env b
                                  _ -> Nothing
           _ -> Nothing
 
-type Clock = Atom
-
-baseClock :: Clock
-baseClock = Lit (Bool True)
-
-class ClockOf t where
-  clockOf :: Map Ident Clock -> t -> Maybe Clock
-
-instance ClockOf Atom where
-  clockOf clocks atom =
-    case atom of
-      Lit _ -> Just baseClock
-      Var x -> Map.lookup x clocks
-
-instance ClockOf Expr where
-  clockOf clocks expr =
-    case expr of
-      Atom a      -> atom a
-      a :-> b     -> msum [ atom a, atom b]  -- should be the saem
-      Pre a       -> atom a
-      _ `When` b  -> Just b
-      Current a   -> atom =<< atom a
-      Merge c _ _ -> atom c
-      Prim _ as   -> msum (map atom as)  -- any of those should be the same
-    where
-    atom = clockOf clocks
-
--- | Compute the clocks for all variables defined in the node.
-computeClocks :: Node -> Maybe (Map Ident Clock)
-computeClocks node = go False [] clocks0 (nEqns node)
-  where
-  -- XXX: Annotate inputs with clocks.
-  clocks0 = Map.fromList [ (x,baseClock) | x ::: _ <- nInputs node ]
-
-  -- We do this iteratively because the dependency story is a bit
-  -- convoluted due to the presence of "pre".
-  go changes todo clocks eqns =
-    case eqns of
-      [] ->
-        case todo of
-          [] -> Just clocks
-          _  -> if changes then go False [] clocks todo else Nothing
-      eqn@(x ::: _ := e) : more ->
-        case clockOf clocks e of
-          Just c  -> go True todo (Map.insert x c clocks) more
-          Nothing -> go changes (eqn : todo) clocks more
 
 

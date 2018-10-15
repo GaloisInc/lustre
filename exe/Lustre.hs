@@ -43,7 +43,7 @@ runNodeIO node = do print (ppNode node)
 
   showOut s x = print (ppIdent x <+> "=" <+> ppValue (evalVar s x))
 
-  getInput b@(_ ::: t) =
+  getInput b@(_ ::: t `On` _) =
     do putStr (show (ppBinder b <+> " = "))
        hFlush stdout
        case t of
@@ -56,7 +56,7 @@ runNodeIO node = do print (ppNode node)
     do txt <- getLine
        case readMaybe txt of
          Just ok -> pure (x, con ok)
-         Nothing -> do putStrLn ("Invalid " ++ show (ppType t))
+         Nothing -> do putStrLn ("Invalid " ++ show (ppCType t))
                        getInput b
 
 
