@@ -205,6 +205,7 @@ instance Pretty Node where
 class TypeOf t where
   typeOf :: Map Ident CType -> t -> Maybe CType
 
+-- XXX: These seem to have "polymorphic clocks"
 instance TypeOf Literal where
   typeOf _ lit =
     Just $
