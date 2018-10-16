@@ -49,13 +49,14 @@ instance Fractional Expr where
 
 
 ex1 = toNode <$> orderedEqns
-        [ "nats" ::: TInt := "start" :-> "next"
+        [ "nats" ::: TInt `On` base := "start" :-> "next"
         -- , "next" ::: TInt := Call "add" [ 1, "prev" ]
-        , "prev" ::: TInt := Pre "nats"
+        , "prev" ::: TInt `On` base := Pre "nats"
         ]
   where
+  base = Lit (Bool True)
   toNode eqns =
-    Node { nInputs  = [ "start" ::: TInt ]
+    Node { nInputs  = [ "start" ::: TInt `On` base ]
          , nOutputs = [ "nats" ]
          , nAssuming = []
          , nShows   = []
