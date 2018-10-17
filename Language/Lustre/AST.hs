@@ -304,7 +304,7 @@ data Op2 = FbyArr       -- a -> a -> a
          | Gt           -- Num a => a -> a -> bool
          | Geq          -- Num a => a -> a -> bool
          | Mul | Mod | Div | Add | Sub | Power    -- Num a => a -> a -> a
-         | Replicate    -- a -> a^N
+         | Replicate    -- a -> (n:Int) -> a^n
          | Concat       -- a^M -> a^N -> a^(M+N)
            deriving (Show, Eq, Ord)
 
