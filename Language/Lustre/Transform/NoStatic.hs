@@ -917,19 +917,27 @@ nameCallSite env ni es =
   do mb <- findInstProf env ni
      case mb of
        Just prof ->
-         do let outs = nodeOutputs prof
-            ns <- replicateM (length outs) (newIdent (range ni))
-            let nameMap = Map.fromList (zip (map binderDefines outs) ns)
+         do let ins  = nodeInputs prof
+                outs = nodeOutputs prof
 
-                -- XXX: This assumes none of the clocks came from
-                -- the parameters; it is not quite clear if that's allowed or
-                -- not:  it works in stand alone examples, but it appears
-                -- that one cannot actually call functions where the result
-                -- clocks depend on the parameters.  The reason is (probably)
-                -- that in general it would be hard to reason about clock
-                -- equality.
+            ns <- replicateM (length outs) (newIdent (range ni))
+            let names = map binderDefines (ins ++ outs)
+            let nameMap = Map.fromList
+                        $ zip names (map isIdent es ++ map Just ns)
+
                 renClock (WhenClock r e i) =  -- loc?
-                  WhenClock r (evalExpr env e) (nameMap Map.! i)
+                  WhenClock r (evalExpr env e) $
+                    case Map.lookup i nameMap of
+                      Just (Just j) -> j
+                      Just Nothing ->
+                        panic "nameCallSite"
+                          [ "Output's clock depends on an input."
+                          , "The clock parameter must be an identifier."
+                          , "*** Clock: " ++ showPP i
+                          ]
+                      _ -> panic "nameCallSite"
+                            [ "Undefined clock variable."
+                            , "*** Clock: " ++ showPP i ]
 
                 toBind n b = Binder
                                { binderDefines = n
@@ -942,6 +950,13 @@ nameCallSite env ni es =
                      [one] -> one
                      notOne -> Tuple notOne
        Nothing -> pure (CallPos ni es)
+  where
+  isIdent expr =
+     case expr of
+       ERange _ e     -> isIdent e
+       Var (Unqual i) -> Just i
+       _              -> Nothing
+
 
 
 
