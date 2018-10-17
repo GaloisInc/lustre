@@ -882,7 +882,10 @@ evalDynExpr eloc env expr =
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     CallPos f es ->
-      do es' <- mapM (evalDynExpr NestedExpr env) es
+      do es' <- do args <- mapM (evalDynExpr NestedExpr env) es
+                   pure $ case args of
+                            [ e ] | Just xs <- isTuple e -> xs
+                            _ -> args
          ni  <- case f of
                   NodeInst c [] ->
                     pure $
@@ -897,6 +900,14 @@ evalDynExpr eloc env expr =
          if shouldName
             then nameCallSite env ni es'
             else pure (CallPos ni es')
+
+  where
+  isTuple e =
+    case e of
+      ERange _ e1 -> isTuple e1
+      Tuple es    -> Just es
+      _           -> Nothing
+
 
 -- | Name a call site, by adding an additional equation for the call,
 -- and replacing the call with a tuple containing the results.
