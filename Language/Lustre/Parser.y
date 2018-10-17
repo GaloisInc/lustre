@@ -454,10 +454,10 @@ expression :: { Expression }
   | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 Nothing $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
                                       { at $1 $6 (Struct $1 (Just $3) $5) }
+  | tuple                             { $1 }
 
-  | '(' ')'                           { at $1 $2 (Tuple []) }
-  | '(' expression ')'                { at $1 $3 $2 }
-  | '(' expression ',' exprList ')'   { at $1 $3 (Tuple ($2 : $4)) }
+tuple :: { Expression }
+  : '(' exprList ')'                 { at $1 $3 (tuple $2) }
 
 
 mergeCase :: { (SourceRange, MergeCase) }
@@ -790,7 +790,13 @@ opIf r     = primArg r ITE
 callPrim :: SourceRange -> PrimNode -> [Expression] -> Expression
 callPrim r p es = CallPos (NodeInst (CallPrim r p) []) es
 
+--------------------------------------------------------------------------------
 
+tuple :: [Expression] -> Expression
+tuple xs =
+  case xs of
+    [x] -> x
+    _   -> Tuple xs
 
 
 --------------------------------------------------------------------------------
