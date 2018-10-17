@@ -40,8 +40,8 @@ data CType      = CType { cType :: IType, cClock :: IClock }
 checkConstExpr :: Expression -> M IType
 checkConstExpr expr =
   case expr of
-    ERange r e -> inRange r (checkConstExpr r e)
-    Var x      -> checkConst x
+    ERange r e -> inRange r (checkConstExpr e)
+    Var x      -> lookupConst x
     Lit l      -> pure (checkLit l)
     _ `When` _ -> reportError "`when` is not a constant expression."
     Tuple {}   -> reportError "tuples cannot be used in constant expressions."
@@ -51,7 +51,7 @@ checkConstExpr expr =
                  []     -> freshType
                  a : bs -> do mapM_ (sameType a) bs
                               pure a
-         let n = Lit $ Int $ fromIntgral $ length es
+         let n = Lit $ Int $ fromIntegral $ length es
          pure (IArray n t)
 
     Struct {} -> undefined
