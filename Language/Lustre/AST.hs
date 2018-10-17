@@ -277,7 +277,7 @@ data StaticArg  = TypeArg Type
 
 
 data Literal    = Int Integer | Real Rational | Bool Bool
-                  deriving Show
+                  deriving (Show,Eq)
 
 data Field      = Field Ident Expression
                   deriving Show
