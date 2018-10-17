@@ -17,6 +17,7 @@ library
                        Language.Lustre.Parser.Lexer,
                        Language.Lustre.Parser,
                        Language.Lustre.Parser.Monad,
+                       Language.Lustre.TypeCheck,
                        Language.Lustre.Pretty,
                        Language.Lustre.Core,
                        Language.Lustre.Utils,
