@@ -2,198 +2,224 @@ module Language.Lustre.TypeCheck where
 
 import Data.Map(Map)
 import qualified Data.Map as Map
+import Control.Monad((<=<),unless)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 
--- | A clock variable stays for a fixed but unknown clock.
--- Used to handle constants, which can have whatever clock we want.
-data TVar       = TVar { tvarId     :: !Int
-                       , tvarSource :: SourceRange
-                       }
-
-instance Eq TVar where
-  x == y = tvarId x == tvarId y
-
-instance Ord TVar where
-  compare x y = compare (tvarId x) (tvarId y)
-
-
 -- | A single clock expression.
-data IClock     = ClockVar TVar
-                | BaseClock
+data IClock     = BaseClock
                 | KnownClock ClockExpr
-                | NestedClock IClock IClock  -- ^ current, clock of clock
+                | ConstExpr -- ^ Any clock we want
 
-data IType      = IInt | IBool | IReal
-                | IEnum Name
-                | IStruct Name
-                | IArray Expression IType
-                | ITuple [IType] -- XXX: Perhaps tuples should be a CType?
-                | IVar TVar
 
 -- | A type, together with its clock.
-data CType      = CType { cType :: IType, cClock :: IClock }
+data CType      = CType { cType :: Type, cClock :: IClock }
 
-
-checkConstExpr :: Expression -> M IType
-checkConstExpr expr =
+-- | Infer the type of a constant expression.
+inferConstExpr :: Expression -> M Type
+inferConstExpr expr =
   case expr of
-    ERange r e -> inRange r (checkConstExpr e)
+    ERange r e -> inRange r (inferConstExpr e)
     Var x      -> lookupConst x
-    Lit l      -> pure (checkLit l)
+    Lit l      -> pure (inferLit l)
     _ `When` _ -> reportError "`when` is not a constant expression."
     Tuple {}   -> reportError "tuples cannot be used in constant expressions."
     Array es   ->
-      do ts <- mapM checkConstExpr es
+      do ts <- mapM inferConstExpr es
          t  <- case ts of
-                 []     -> freshType
-                 a : bs -> do mapM_ (sameType a) bs
-                              pure a
+                 []     -> reportError "XXX: Empty arrays"
+                 a : bs -> typeLUBs a bs
          let n = Lit $ Int $ fromIntegral $ length es
-         pure (IArray n t)
+         pure (ArrayType t n)
 
     Struct {} -> undefined
     Select {} -> undefined
 
     WithThenElse e1 e2 e3 ->
-      do t <- checkConstExpr e1
-         sameType t IBool
-         x <- checkConstExpr e2
-         y <- checkConstExpr e3
-         sameType x y
-         pure x
+      do t <- inferConstExpr e1
+         subType t BoolType
+         x <- inferConstExpr e2
+         y <- inferConstExpr e3
+         typeLUB x y
 
-    Merge {} -> reportError "`merge` is not a constant expression."
-
+    Merge {}   -> reportError "`merge` is not a constant expression."
     CallPos {} -> reportError "constant expressions do not support calls."
 
-
-checkExpr :: Expression -> M CType
-checkExpr expr =
+-- | Infer the type of an expression.  Tuples and function calls may return
+-- multiple results, which is why we return a list of types.
+inferExpr :: Expression -> M [CType]
+inferExpr expr =
   case expr of
-    ERange r e -> inRange r (checkExpr e)
+    ERange r e -> inRange r (inferExpr e)
 
-    Var x      -> checkVar x
+    Var x      -> do t <- inferVar x
+                     pure [t]
 
-    Lit l ->
-      do let t = checkLit l
-         c <- freshClock
-         pure CType { cType = t, cClock = c }
+    Lit l      -> pure [CType { cType = inferLit l, cClock = ConstExpr }]
 
-    e `When` c            ->
-      do t1 <- checkExpr e
-         c1 <- checkClockExpr c
-         sameClock (cClock t1) c1
-         pure CType { cType  = cType t1
-                    , cClock = NestedClock (KnownClock c) c1 }
+    e `When` c ->
+      do t  <- oneType =<< inferExpr e
+         c1 <- checkClockExpr c -- `c1` is the clock of c
+         _  <- sameClock (cClock t) c1
+         pure [ CType { cType  = cType t
+                      , cClock = KnownClock c } ]
 
-    Tuple es ->
-      do ts <- mapM checkExpr es
-         c  <- case map cClock ts of
-                c : more -> do mapM_ (sameClock c) more
-                               pure c
-                [] -> freshClock
-         pure CType { cType = ITuple (map cType ts), cClock = c }
+    Tuple es -> mapM (oneType <=< inferExpr) es
 
     Array es ->
-      do ts <- mapM checkExpr es
+      do ts <- mapM (oneType <=< inferExpr) es
          t  <- case ts of
-                 t : more -> do mapM_ (sameCType t) more
-                                pure t
-                 []       -> freshCType
+                 t : more -> ctypeLUBs t more
+                 []       -> reportError "Cannot infer type of an empty array"
          let n = Lit $ Int $ fromIntegral $ length es
-         pure t { cType = IArray n (cType t) }
-
-
+         pure [ t { cType = ArrayType (cType t) n } ]
 
     Select {} -> undefined
     Struct {} -> undefined
 
     WithThenElse e1 e2 e3 ->
-      do t1 <- checkConstExpr e1
-         sameType IBool t1
-         a  <- checkExpr e2
-         b  <- checkExpr e3
-         sameCType a b
-         pure b
+      do t1 <- inferConstExpr e1
+         subType t1 BoolType
+         a  <- inferExpr e2
+         b  <- inferExpr e3
+         sameCTypes a b
 
     Merge i as ->
       do t   <- lookupIdent i
-         ats <- mapM (checkMergeCase i t) as
-         r   <- case ats of
+         ats <- mapM (inferMergeCase i t) as
+         rs  <- case ats of
                   [] -> reportError "Empty `merge`"
-                  r : more ->
-                    do mapM_ (sameType r) more
-                       pure r
-         -- XXX: Check all cases matched
-         pure CType { cType = r, cClock = cClock t }
+                  r : more -> typeLUBss r more
+         -- XXX: Check all cases matched and repeated cases
+         pure [ CType { cType = r, cClock = cClock t } | r <- rs ]
 
 
-    CallPos (NodeInst call as) es ->
-      case as of
-        []
-          | CallPrim r (Op2 Replicate) <- call ->
-            inRange r $
-            case es of
-              [e1,e2] ->
-                do t1 <- checkExpr e1
-                   t2 <- checkConstExpr e2
-                   sameType t2 IInt
-                   pure t1 { cType = IArray e2 (cType t1) }
-              _ -> reportError (showPP call ++ " expexts 2 arguments.")
+    CallPos (NodeInst call as) es
+      | not (null as) -> reportError "Unexpected static arguments."
 
-          | otherwise ->
-          do ts <- mapM checkExpr es
-             case call of
-               CallUser f -> undefined
-               CallPrim r prim -> inRange r $
-                 case prim of
+      -- Special case for @^@ because its second argument is a constant
+      -- expression, not an ordinary one.
+      | CallPrim r (Op2 Replicate) <- call ->
+        inRange r $
+        case es of
+          [e1,e2] ->
+            do t1 <- oneType =<< inferExpr e1
+               t2 <- tidyType =<< inferConstExpr e2
+               unless (isIntegral t2) $
+                  reportError "The 2nd argument of replicate must be integral."
+               pure [ t1 { cType = ArrayType (cType t1) e2 } ]
+          _ -> reportError (showPP call ++ " expexts 2 arguments.")
 
-                   Op1 op1 ->
-                     case ts of
-                       [t] -> checkOp1 op1 t
-                       _   -> reportError (showPP op1 ++ " expects 1 argument.")
+      | otherwise ->
+        do ts <- mapM (oneType <=< inferExpr) es
+           case call of
+             CallUser f -> checkCall f (zip es ts)
+             CallPrim r prim ->
+                do t <- inRange r (checkPrim prim ts)
+                   pure [t]
 
-                   Op2 op2 ->
-                      case ts of
-                        [t1,t2] -> checkOp2 op2 t1 t2
-                        _ -> reportError (showPP op2 ++ " expects 2 arguments.")
+-- | Assert that a given expression has only one type (i.e., is not a tuple)
+oneType :: [CType] -> M CType
+oneType xs =
+  case xs of
+    [x] -> pure x
+    _   -> reportError "Arity mismatch."
 
-                   ITE ->
-                     case ts of
-                       [t1,t2,t3] ->
-                          do sameType (cType t1) IBool
-                             sameClock (cClock t1) (cClock t2)
-                             sameCType t2 t3
-                             pure t2
-                       _ -> reportError "`if-then-else` expects 3 arguments."
+-- | Infer the type of a call to a user-defined node.
+checkCall :: Name -> [(Expression,CType)] -> M [CType]
+checkCall f ts =
+  do prof <- lookupNodeProfile f
+     mp   <- checkInputs Map.empty (nodeInputs prof) ts
+     mapM (checkOut mp) (nodeOutputs prof)
+  where
+  renBinderClock mp b =
+    case binderClock b of
+      Nothing -> pure BaseClock
+      Just (WhenClock r p i) ->
+        case Map.lookup i mp of
+          Just j  -> pure (KnownClock (WhenClock r p j))
+          Nothing -> reportError ("Parameter for clock " ++ showPP i ++
+                                                      "is not an identifier.")
 
-                   -- IMPORTANT: For the moment these all work with bools, so we
-                   -- just do them in one go.  This may change if we add
-                   -- other operators!
-                   OpN _ ->
-                     do c <- case map cClock ts of
-                               [] -> freshClock
-                               t : ss -> do mapM_ (sameClock t) ss
-                                            pure t
-                        mapM_ (sameType IBool . cType) ts
-                        pure CType { cType = IBool, cClock = c }
+  checkInputs mp is es =
+    case (is,es) of
+      ([],[]) -> pure mp
+      (b:bs,a:as) -> do mp1 <- checkIn mp b a
+                        checkInputs mp1 bs as
+      _ -> reportError ("Bad arity in call to " ++ showPP f)
 
-        _ -> undefined
+  checkIn mp b (e,et) =
+    do let t = binderType b
+       subType (cType et) t
+       _ <- sameClock (cClock et) =<< renBinderClock mp b
+       pure $ case isIdent e of
+                Just k  -> Map.insert (binderDefines b) k mp
+                Nothing -> mp
+
+  isIdent e =
+    case e of
+      ERange _ e1    -> isIdent e1
+      Var (Unqual i) -> Just i
+      _              -> Nothing
+
+  checkOut mp b =
+    do let t = binderType b
+       c <- renBinderClock mp b
+       pure CType { cType = t, cClock = c }
 
 
-checkMergeCase :: Ident -> CType -> MergeCase -> M IType
-checkMergeCase i it (MergeCase p e) =
-  do t <- checkConstExpr p
-     sameType t (cType it)
-     c <- checkExpr e
+-- | Infer the type of a call to a primitive node.
+checkPrim :: PrimNode -> [CType] -> M CType
+checkPrim prim ts =
+  case prim of
+
+    Iter {} -> reportError "XXX: Iter"
+
+    Op1 op1 ->
+      case ts of
+        [t] -> checkOp1 op1 t
+        _   -> reportError (showPP op1 ++ " expects 1 argument.")
+
+    Op2 op2 ->
+       case ts of
+         [t1,t2] -> checkOp2 op2 t1 t2
+         _ -> reportError (showPP op2 ++ " expects 2 arguments.")
+
+    ITE ->
+      case ts of
+        [t1,t2,t3] ->
+           do subType (cType t1) BoolType
+              c <- sameClock (cClock t1) (cClock t2)
+              t <- sameCType t2 t3
+              pure $ if isConstExpr c then t else t { cClock = c }
+        _ -> reportError "`if-then-else` expects 3 arguments."
+
+    -- IMPORTANT: For the moment these all work with bools, so we
+    -- just do them in one go.  This may change if we add
+    -- other operators!
+    OpN _ ->
+      do c <- case map cClock ts of
+                [] -> pure ConstExpr
+                t : ss -> do mapM_ (sameClock t) ss
+                             pure t
+         mapM_ (\t -> subType (cType t) BoolType) ts
+         pure CType { cType = BoolType, cClock = c }
+
+
+-- | Infer the type for a branch of a merge.
+inferMergeCase :: Ident -> CType -> MergeCase -> M [Type]
+inferMergeCase i it (MergeCase p e) =
+  do t <- inferConstExpr p
+     subType t (cType it)
+     c <- inferExpr e
      let this = KnownClock (WhenClock (range p) p i)
-     let expect = NestedClock this (cClock it)
-     sameClock expect (cClock it)
-     pure (cType c)
+     mapM_ (sameClock this . cClock) c
+     pure (map cType c)
 
+
+-- | Types of unary opertaors.
 checkOp1 :: Op1 -> CType -> M CType
 checkOp1 op t =
   case op of
@@ -204,99 +230,347 @@ checkOp1 op t =
          pure t { cClock = c }
 
     Not ->
-      do sameType (cType t) IBool
+      do subType (cType t) BoolType
          pure t
 
-    Neg ->
-      do isNumType (cType t)
-         pure t
+    Neg -> do t1 <- classArith1 (cType t)
+              pure t { cType = t1 }
 
     IntCast ->
-      do sameType (cType t) IReal
-         pure t { cType = IInt }
+      do subType (cType t) RealType
+         pure t { cType = IntType }
 
     RealCast ->
-      do sameType (cType t) IInt
-         pure t { cType = IReal }
+      do subType (cType t) IntType
+         pure t { cType = RealType }
 
+
+-- | Types of binary operators.
 checkOp2 :: Op2 -> CType -> CType -> M CType
 checkOp2 op2 x y =
-  do sameClock (cClock x) (cClock y)
+  do c <- sameClock (cClock x) (cClock y)
+     let clocked t = pure CType { cType = t, cClock = c }
+
+         tx = cType x
+         ty = cType y
+
+         bool2 = do subType tx BoolType
+                    subType ty BoolType
+                    clocked BoolType
+
      case op2 of
-       FbyArr   -> same
-       Fby      -> same
-       And      -> sameType (cType x) IBool >> same
-       Or       -> sameType (cType x) IBool >> same
-       Xor      -> sameType (cType x) IBool >> same
-       Implies  -> sameType (cType x) IBool >> same
-       Eq       -> same >> bool
-       Neq      -> same >> bool
-       Lt       -> same >> isNum x >> bool
-       Leq      -> same >> isNum x >> bool
-       Gt       -> same >> isNum x >> bool
-       Geq      -> same >> isNum x >> bool
-       Add      -> isNum x >> same
-       Sub      -> isNum x >> same
-       Mul      -> isNum x >> same
-       Div      -> isNum x >> same
-       Mod      -> isNum x >> same
-       Power    -> do isNum x
-                      sameType (cType y) IInt
-                      pure y
+       FbyArr   -> typeLUB tx ty >>= clocked
+       Fby      -> typeLUB tx ty >>= clocked
+
+       And      -> bool2
+       Or       -> bool2
+       Xor      -> bool2
+       Implies  -> bool2
+
+       Eq       -> classEq tx ty >> clocked BoolType
+       Neq      -> classEq tx ty >> clocked BoolType
+
+       Lt       -> classOrd tx ty >> clocked BoolType
+       Leq      -> classOrd tx ty >> clocked BoolType
+       Gt       -> classOrd tx ty >> clocked BoolType
+       Geq      -> classOrd tx ty >> clocked BoolType
+
+       Add      -> classArith2 tx ty >>= clocked
+       Sub      -> classArith2 tx ty >>= clocked
+       Mul      -> classArith2 tx ty >>= clocked
+       Div      -> classArith2 tx ty >>= clocked
+       Mod      -> classArith2 tx ty >>= clocked
+
+       Power    -> reportError "XXX: Exponentiation."
        Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
 
        Concat ->
-         do sameClock (cClock x) (cClock y)
-            x' <- zonkType (cType x)
-            y' <- zonkType (cType y)
-            case (x',y') of
-              (IArray n t1, IArray m t2) ->
-                do sameType t1 t2
-                   l <- addConsts n m
-                   pure CType { cType = IArray l t1, cClock = cClock x }
+         do t1 <- tidyType tx
+            t2 <- tidyType ty
+            case (t1,t2) of
+              (ArrayType elT1 n, ArrayType elT2 m) ->
+                do elT <- typeLUB elT1 elT2
+                   l   <- addConsts n m
+                   clocked (ArrayType elT l)
               _ -> reportError "`|` expects two arrays."
-  where
-  same = do sameType (cType x) (cType y)
-            pure x
 
-  bool = pure CType { cType = IBool, cClock = cClock x }
 
-  isNum a = isNumType (cType a)
 
-addConsts :: Expression -> Expression -> M Expression
-addConsts x y =
-  case (x,y) of
-    (ERange _ x', _)           -> addConsts x' y
-    (_, ERange _ y')           -> addConsts x y'
-    (Lit (Int a), Lit (Int b)) -> pure (Lit (Int (a + b)))
-    _ -> reportError "I don't know how to add the lenghts of the arrays in `|`"
-
-checkVar :: Name -> M CType
-checkVar x =
+-- | Infer the type of a variable.
+inferVar :: Name -> M CType
+inferVar x =
   case x of
     Unqual i -> do mb <- lookupIdentMaybe i
                    case mb of
                      Just c  -> pure c
-                     Nothing -> checkConst x
-    Qual {}  -> checkConst x
+                     Nothing -> inferConstVar x
+    Qual {}  -> inferConstVar x
 
-checkConst :: Name -> M CType
-checkConst x =
+-- | Infer the type for a named constant.
+inferConstVar :: Name -> M CType
+inferConstVar x =
   inRange (range x) $
   do t <- lookupConst x
-     c <- freshClock
+     pure CType { cType = t, cClock = ConstExpr }
+
+-- | Infer the type of a literal.
+inferLit :: Literal -> Type
+inferLit lit =
+     case lit of
+       Int _   -> IntType
+       Real _  -> RealType
+       Bool _  -> BoolType
+
+-- | Check a clock expression, and return its clock.
+checkClockExpr :: ClockExpr -> M IClock
+checkClockExpr (WhenClock r v i) =
+  inRange r $
+  do t  <- inferConstExpr v
+     ct <- lookupIdent i
+     subType t (cType ct)
+     pure (cClock ct)
+
+--------------------------------------------------------------------------------
+-- Comparsions of types
+
+-- | Check if two CTypes are compatible.  If one does not have a clock
+-- (e.g., it is a constnat), and the other one does, then result type
+-- is the one with the clock.
+-- (aak ctypeLUB)
+sameCType :: CType -> CType -> M CType
+sameCType t1 t2 =
+  do t <- typeLUB (cType t1) (cType t2)
+     c <- sameClock (cClock t1) (cClock t2)
      pure CType { cType = t, cClock = c }
 
-checkLit :: Literal -> IType
-checkLit lit =
-     case lit of
-       Int _   -> IInt
-       Real _  -> IReal
-       Bool _  -> IBool
+ctypeLUBs :: CType -> [CType] -> M CType
+ctypeLUBs t xs =
+  case xs of
+    [] -> pure t
+    a : as -> do b <- sameCType t a
+                 ctypeLUBs b as
 
--- | Returns the clock of the clock expression.
-checkClockExpr :: ClockExpr -> M IClock
-checkClockExpr = undefined
+
+sameCTypes :: [CType] -> [CType] -> M [CType]
+sameCTypes xs ys =
+  case (xs,ys) of
+    ([],[])     -> pure []
+    (a:as,b:bs) -> (:) <$> sameCType a b <*> sameCTypes as bs
+    _ -> reportError "Arity mismatch."
+
+
+sameType :: Type -> Type -> M ()
+sameType x y =
+  do s <- tidyType x
+     t <- tidyType y
+     case (s,t) of
+      (NamedType a,   NamedType b)   | a == b -> pure ()
+      (ArrayType a m, ArrayType b n) -> sameConsts m n >> sameType a b
+
+      (IntType,IntType)   -> pure ()
+      (RealType,RealType) -> pure ()
+      (BoolType,BoolType) -> pure ()
+      (IntSubrange a b, IntSubrange c d) ->
+        sameConsts a c >> sameConsts b d
+      _ -> reportError ("Type mismatch: " ++ showPP x ++ " and " ++ showPP y)
+
+
+sameTypes :: [Type] -> [Type] -> M ()
+sameTypes xs ys =
+  case (xs,ys) of
+    ([],[]) -> pure ()
+    (a:as,b:bs) -> sameType a b >> sameTypes as bs
+    _ -> reportError "Arity mismatch."
+
+-- Subtype is like "subset"
+subType :: Type -> Type -> M ()
+subType x y =
+  do s <- tidyType x
+     t <- tidyType y
+     case (s,t) of
+       (IntSubrange {}, IntType) -> pure ()
+       (IntSubrange a b, IntSubrange c d) -> leqConsts c a >> leqConsts b d
+       (ArrayType a m, ArrayType b n) ->
+          do sameConsts m n
+             subType a b
+       _ -> sameType s t
+
+typeLUB :: Type -> Type -> M Type
+typeLUB x y =
+  do s <- tidyType x
+     t <- tidyType y
+     case (s,t) of
+       (IntSubrange {}, IntType) -> pure IntType
+       (IntType, IntSubrange {}) -> pure IntType
+       (IntSubrange a b, IntSubrange c d) ->
+          do l <- minConsts a c
+             u <- maxConsts b d
+             pure (IntSubrange l u)
+
+       (BoolType,BoolType) -> pure x
+       (RealType,RealType) -> pure x
+       (NamedType a, NamedType b) | a == b -> pure x
+       (ArrayType a b, ArrayType c d) ->
+          do sameConsts b d
+             elT <- typeLUB a c
+             pure (ArrayType elT b)
+       _ -> reportError $ "Types " ++ showPP x ++ " and " ++ showPP y ++
+                            "are not compatible."
+
+
+typeLUBs :: Type -> [Type] -> M Type
+typeLUBs t more =
+  case more of
+    [] -> pure t
+    x : xs -> do y <- typeLUB t x
+                 typeLUBs y xs
+
+typeLUBss :: [Type] -> [[Type]] -> M [Type]
+typeLUBss xs yss =
+  case (xs,yss) of
+    (a : as, bs : bss) -> do r <- typeLUBs a bs
+                             rs <- typeLUBss as bss
+                             pure (r : rs)
+    ([],[]) -> pure []
+    _ -> reportError "Arity error"
+
+
+
+
+--------------------------------------------------------------------------------
+-- Clocks
+
+
+-- | Are these the same clock.  If so, return the one that is NOT a 'ConstExpr'
+-- (if any).
+sameClock :: IClock -> IClock -> M IClock
+sameClock x y =
+  case (x,y) of
+    (ConstExpr,_) -> pure y
+    (_,ConstExpr) -> pure x
+    (BaseClock,BaseClock) -> pure x
+    (KnownClock a, KnownClock b) -> sameKnownClock a b >> pure x
+    _ -> reportError "Clock mismatch."
+
+-- | Is this the same known clock.
+sameKnownClock :: ClockExpr -> ClockExpr -> M ()
+sameKnownClock (WhenClock _ e1_init i1) (WhenClock _ e2_init i2) =
+  do unless (i1 == i2) $ reportError "Different clocks."
+     sameConsts e1_init e2_init
+
+-- | Get the clock of a clock, or fail if we are the base clock.
+clockParent :: IClock -> M IClock
+clockParent ct =
+  case ct of
+    BaseClock -> reportError "The base clock has not parent."
+    KnownClock (WhenClock _ _ i) -> cClock <$> lookupIdent i
+    ConstExpr -> pure ConstExpr
+
+isConstExpr :: IClock -> Bool
+isConstExpr c =
+  case c of
+    ConstExpr -> True
+    _         -> False
+
+
+--------------------------------------------------------------------------------
+-- Expressions
+
+intConst :: Expression -> M Integer
+intConst x =
+  case x of
+    ERange _ y  -> intConst y
+    Lit (Int a) -> pure a
+    _ -> reportError "Constant is not a concrete integer."
+
+binConst :: (Integer -> Integer -> Integer) ->
+            Expression -> Expression -> M Expression
+binConst f e1 e2 =
+  do x <- intConst e1
+     y <- intConst e2
+     pure $ Lit $ Int $ f x y
+
+cmpConsts :: String ->
+             (Integer -> Integer -> Bool) ->
+             Expression -> Expression -> M ()
+cmpConsts op p e1 e2 =
+  do x <- intConst e1
+     y <- intConst e2
+     unless (p x y) $ reportError $ show x ++ " is not " ++ op ++ " " ++ show y
+
+addConsts :: Expression -> Expression -> M Expression
+addConsts = binConst (+)
+
+minConsts :: Expression -> Expression -> M Expression
+minConsts = binConst min
+
+maxConsts :: Expression -> Expression -> M Expression
+maxConsts = binConst max
+
+sameConsts :: Expression -> Expression -> M ()
+sameConsts = cmpConsts "equal to" (==)
+
+leqConsts :: Expression -> Expression -> M ()
+leqConsts = cmpConsts "less-than, or equal to" (<=)
+
+
+
+--------------------------------------------------------------------------------
+
+-- | Are these types comparable of equality
+classEq :: Type -> Type -> M ()
+classEq s t =
+  do _ <- typeLUB s t
+     pure ()
+
+-- | Are these types comparable for ordering
+classOrd :: Type -> Type -> M ()
+classOrd s' t' =
+  do s <- tidyType s'
+     t <- tidyType t'
+     case (s,t) of
+       (RealType,RealType) -> pure ()
+       _ | isIntegral s && isIntegral t -> pure ()
+         | otherwise -> reportError ("Cannot compare types " ++
+                                        showPP s' ++ " and " ++ showPP t')
+
+-- | Can we do unary arithemtic on this type, and if so what's the
+-- type of the answer.
+classArith1 :: Type -> M Type
+classArith1 t0 =
+  do ty <- tidyType t0
+     case ty of
+       IntType        -> pure IntType
+       RealType       -> pure RealType
+       IntSubrange {} -> pure IntType
+       _ -> reportError ("Type " ++ showPP t0 ++
+                             " does not support unary arithmetic.")
+
+
+-- | Can we do binary arithemtic on this type, and if so what's the
+-- type of the answer.
+classArith2 :: Type -> Type -> M Type
+classArith2 s t =
+  do s1 <- tidyType s
+     t1 <- tidyType t
+     case (s1,t1) of
+       (RealType,RealType) -> pure RealType
+       _ | isIntegral s1 && isIntegral t1 -> pure IntType
+         | otherwise ->
+          reportError $ "Types " ++ showPP s ++ " and " ++ showPP t ++
+                        " do not support arithmetic."
+
+-- | Is this an integer-like type.
+isIntegral :: Type -> Bool
+isIntegral ty =
+  case ty of
+    IntType -> True
+    IntSubrange {} -> True
+    _ -> False
+
+
+
+
 
 --------------------------------------------------------------------------------
 
@@ -307,135 +581,14 @@ data RO = RO
   , roUserNodes :: Map Name NodeProfile
   , roIdents    :: Map Ident (Type,ClockExpr)
   , roCurRange  :: Maybe SourceRange
+  , roStructs   :: Map Name (Map Ident Type)
   }
-
-data RW = RW
-  { rwClockSubst :: !(Map TVar IClock)
-  , rwNextVar    :: !Int
-  }
-
-sameCType :: CType -> CType -> M ()
-sameCType t1 t2 =
-  do sameType  (cType t1) (cType t2)
-     sameClock (cClock t1) (cClock t2)
-
-sameClock :: IClock -> IClock -> M ()
-sameClock x0 y0 =
-  do x <- zonkClock x0
-     y <- zonkClock y0
-     case (x,y) of
-       (ClockVar c,_) -> setClockVar c y
-       (_,ClockVar c) -> setClockVar c x
-       (BaseClock,BaseClock) -> pure ()
-       (KnownClock a, KnownClock b)
-          | sameKnownClock a b -> pure ()
-       (KnownClock {}, NestedClock {}) -> sameClock (NestedClock x BaseClock) y
-       (NestedClock {},KnownClock {})  -> sameClock (NestedClock y BaseClock) x
-       (NestedClock a b, NestedClock c d) ->
-          do sameClock a c
-             sameClock b d
-       _ -> reportError "Clock mismatch."
-
-sameKnownClock :: ClockExpr -> ClockExpr -> Bool
-sameKnownClock (WhenClock _ e1_init i1) (WhenClock _ e2_init i2) =
-  i1 == i2 && sameExpr e1_init e2_init
-  where
-  sameExpr e1 e2 =
-    case (e1,e2) of
-      (ERange _ e1', _) -> sameExpr e1' e2
-      (_, ERange _ e2') -> sameExpr e1 e2'
-      (Var x, Var y)    -> x == y  -- expand constants?
-      (Lit x, Lit y)    -> x == y
-      _                 -> False
-
-setClockVar :: TVar -> IClock -> M ()
-setClockVar x ic =
-  case ic of
-    ClockVar y | x == y -> pure ()
-    _ | occurs ic       -> reportError "Clock mistmach (occurs)"
-    _                   -> extClockSubst x ic
-  where
-  occurs c = case c of
-               ClockVar y      -> x == y
-               KnownClock _    -> False
-               BaseClock       -> False
-               NestedClock a b -> occurs a || occurs b
-
--- | Apply the current substitution to the given clock expression.
-zonkClock :: IClock -> M IClock
-zonkClock c = (`apSubstClock` c) <$> getClockSubst
-
-zonkType :: IType -> M IType
-zonkType t = (`apSubstType` t) <$> getTypeSubst
-
-apSubstClock :: Map TVar IClock -> IClock -> IClock
-apSubstClock su c =
-  case c of
-    ClockVar y      -> Map.findWithDefault c y su
-    NestedClock a b -> NestedClock (apSubstClock su a) (apSubstClock su b)
-    BaseClock       -> c
-    KnownClock {}   -> c
-
-apSubstType :: Map TVar IType -> IType -> IType
-apSubstType su t =
-  case t of
-    IVar x      -> Map.findWithDefault t x su
-    IInt        -> t
-    IBool       -> t
-    IReal       -> t
-    IEnum {}    -> t
-    IStruct {}  -> t
-    IArray n s  -> IArray n (apSubstType su s)
-    ITuple ts   -> ITuple (map (apSubstType su) ts)
-
-clockParent :: IClock -> M IClock
-clockParent ct0 =
-  do ct <- zonkClock ct0
-     case ct of
-       BaseClock    -> reportError "The base clock has not parent."
-       KnownClock _ -> pure BaseClock
-       ClockVar _   ->
-         do c <- freshClock
-            p <- freshClock
-            sameClock ct (NestedClock c p)
-            pure p
-       NestedClock _ p -> pure p
-
-sameType :: IType -> IType -> M ()
-sameType = undefined
-
-isNumType :: IType -> M ()
-isNumType = undefined
-
-
--- | Assumes the 'IClock' is zonked.
-extClockSubst :: TVar -> IClock -> M ()
-extClockSubst = undefined
-
-getClockSubst :: M (Map TVar IClock)
-getClockSubst = undefined
-
-getTypeSubst :: M (Map TVar IType)
-getTypeSubst = undefined
 
 reportError :: String -> M a
 reportError = undefined
 
 inRange :: SourceRange -> M a -> M a
 inRange = undefined
-
-freshClock :: M IClock
-freshClock = undefined
-
-freshType :: M IType
-freshType = undefined
-
-freshCType :: M CType
-freshCType =
-  do c <- freshClock
-     t <- freshType
-     pure CType { cType = t, cClock = c }
-
 
 lookupIdentMaybe :: Ident -> M (Maybe CType)
 lookupIdentMaybe = undefined
@@ -447,6 +600,37 @@ lookupIdent i =
        Just t  -> pure t
        Nothing -> reportError ("Undefined identifier: " ++ showPP i)
 
-lookupConst :: Name -> M IType
+lookupConst :: Name -> M Type
 lookupConst = undefined
+
+getTypeAliases :: M (Map Name Type)
+getTypeAliases = undefined
+
+-- | Remove outermost 'TypeRange' and type-aliases.
+tidyType :: Type -> M Type
+tidyType t =
+  case t of
+    TypeRange _ t1 -> tidyType t1
+    NamedType x    -> resolveNamed x
+    _              -> pure t
+
+resolveNamed :: Name -> M Type
+resolveNamed x =
+  do as <- getTypeAliases
+     pure (Map.findWithDefault (NamedType x) x as)
+
+lookupStruct :: Name -> M (Map Ident Type)
+lookupStruct = undefined
+
+lookupNodeProfile :: Name -> M NodeProfile
+lookupNodeProfile = undefined
+
+withLocal :: Ident -> CType -> M a -> M a
+withLocal = undefined
+
+withLocals :: [(Ident,CType)] -> M a -> M a
+withLocals xs k =
+  case xs of
+    []           -> k
+    (x,t) : more -> withLocal x t (withLocals more k)
 
