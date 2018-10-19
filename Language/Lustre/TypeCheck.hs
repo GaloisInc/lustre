@@ -1,8 +1,10 @@
+{-# Language OverloadedStrings #-}
 module Language.Lustre.TypeCheck where
 
 import Data.Map(Map)
 import qualified Data.Map as Map
-import Control.Monad((<=<),unless)
+import Control.Monad((<=<),unless,zipWithM_)
+import Text.PrettyPrint
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -13,6 +15,11 @@ data IClock     = BaseClock
                 | KnownClock ClockExpr
                 | ConstExpr -- ^ Any clock we want
 
+instance Pretty IClock where
+  ppPrec n c = case c of
+                 BaseClock    -> "base clock"
+                 KnownClock k -> ppPrec n k
+                 ConstExpr    -> "an arbitrary clock"
 
 -- | A type, together with its clock.
 data CType      = CType { cType :: Type, cClock :: IClock }
@@ -35,7 +42,10 @@ inferConstExpr expr =
          pure (ArrayType t n)
 
     Struct {} -> undefined
-    Select {} -> undefined
+
+    Select e s ->
+      do t <- inferConstExpr e
+         checkSelector t s
 
     WithThenElse e1 e2 e3 ->
       do t <- inferConstExpr e1
@@ -76,7 +86,12 @@ inferExpr expr =
          let n = Lit $ Int $ fromIntegral $ length es
          pure [ t { cType = ArrayType (cType t) n } ]
 
-    Select {} -> undefined
+    Select e s ->
+      do t  <- oneType =<< inferExpr e
+         t1 <- checkSelector (cType t) s
+         pure [ t { cType = t1 } ]
+
+
     Struct {} -> undefined
 
     WithThenElse e1 e2 e3 ->
@@ -92,7 +107,7 @@ inferExpr expr =
          rs  <- case ats of
                   [] -> reportError "Empty `merge`"
                   r : more -> typeLUBss r more
-         -- XXX: Check all cases matched and repeated cases
+
          pure [ CType { cType = r, cClock = cClock t } | r <- rs ]
 
 
@@ -110,7 +125,7 @@ inferExpr expr =
                unless (isIntegral t2) $
                   reportError "The 2nd argument of replicate must be integral."
                pure [ t1 { cType = ArrayType (cType t1) e2 } ]
-          _ -> reportError (showPP call ++ " expexts 2 arguments.")
+          _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
 
       | otherwise ->
         do ts <- mapM (oneType <=< inferExpr) es
@@ -140,7 +155,7 @@ checkCall f ts =
       Just (WhenClock r p i) ->
         case Map.lookup i mp of
           Just j  -> pure (KnownClock (WhenClock r p j))
-          Nothing -> reportError ("Parameter for clock " ++ showPP i ++
+          Nothing -> reportError $ text ("Parameter for clock " ++ showPP i ++
                                                       "is not an identifier.")
 
   checkInputs mp is es =
@@ -148,7 +163,7 @@ checkCall f ts =
       ([],[]) -> pure mp
       (b:bs,a:as) -> do mp1 <- checkIn mp b a
                         checkInputs mp1 bs as
-      _ -> reportError ("Bad arity in call to " ++ showPP f)
+      _ -> reportError $ text ("Bad arity in call to " ++ showPP f)
 
   checkIn mp b (e,et) =
     do let t = binderType b
@@ -180,12 +195,12 @@ checkPrim prim ts =
     Op1 op1 ->
       case ts of
         [t] -> checkOp1 op1 t
-        _   -> reportError (showPP op1 ++ " expects 1 argument.")
+        _   -> reportError $ text (showPP op1 ++ " expects 1 argument.")
 
     Op2 op2 ->
        case ts of
          [t1,t2] -> checkOp2 op2 t1 t2
-         _ -> reportError (showPP op2 ++ " expects 2 arguments.")
+         _ -> reportError $ text (showPP op2 ++ " expects 2 arguments.")
 
     ITE ->
       case ts of
@@ -233,7 +248,7 @@ checkOp1 op t =
       do subType (cType t) BoolType
          pure t
 
-    Neg -> do t1 <- classArith1 (cType t)
+    Neg -> do t1 <- classArith1 "-" (cType t)
               pure t { cType = t1 }
 
     IntCast ->
@@ -270,18 +285,19 @@ checkOp2 op2 x y =
        Eq       -> classEq tx ty >> clocked BoolType
        Neq      -> classEq tx ty >> clocked BoolType
 
-       Lt       -> classOrd tx ty >> clocked BoolType
-       Leq      -> classOrd tx ty >> clocked BoolType
-       Gt       -> classOrd tx ty >> clocked BoolType
-       Geq      -> classOrd tx ty >> clocked BoolType
+       Lt       -> classOrd "<"  tx ty >> clocked BoolType
+       Leq      -> classOrd "<=" tx ty >> clocked BoolType
+       Gt       -> classOrd ">"  tx ty >> clocked BoolType
+       Geq      -> classOrd ">=" tx ty >> clocked BoolType
 
-       Add      -> classArith2 tx ty >>= clocked
-       Sub      -> classArith2 tx ty >>= clocked
-       Mul      -> classArith2 tx ty >>= clocked
-       Div      -> classArith2 tx ty >>= clocked
-       Mod      -> classArith2 tx ty >>= clocked
+       Add      -> classArith2 "+"   tx ty >>= clocked
+       Sub      -> classArith2 "-"   tx ty >>= clocked
+       Mul      -> classArith2 "*"   tx ty >>= clocked
+       Div      -> classArith2 "/"   tx ty >>= clocked
+       Mod      -> classArith2 "mod" tx ty >>= clocked
 
-       Power    -> reportError "XXX: Exponentiation."
+       Power    -> notYetImplemented "Exponentiation"
+
        Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
 
        Concat ->
@@ -331,6 +347,95 @@ checkClockExpr (WhenClock r v i) =
      pure (cClock ct)
 
 --------------------------------------------------------------------------------
+
+checkSelector :: Type -> Selector Expression -> M Type
+checkSelector ty0 sel =
+  do ty <- tidyType ty0
+     case sel of
+       SelectField f ->
+         case ty of
+           NamedType a ->
+             do fs <- lookupStruct a
+                case Map.lookup f fs of
+                  Just t  -> pure t
+                  Nothing ->
+                    reportError $
+                    nestedError
+                    "Struct has no such field:"
+                      [ "Struct:" <+> pp a
+                      , "Field:" <+> pp f ]
+
+           _ -> reportError $
+                nestedError
+                  "Argument to struct selector is not a struct:"
+                  [ "Selector:" <+> pp sel
+                  , "Input:" <+> pp ty0
+                  ]
+
+       SelectElement n ->
+         case ty of
+           ArrayType t _sz ->
+             do i <- inferConstExpr n
+                subType i IntType
+                -- XXX: check that 0 <= && n < sz ?
+                pure t
+           _ -> reportError $
+                nestedError
+               "Argument to array selector is not an array:"
+                [ "Selector:" <+> pp sel
+                , "Input:" <+> pp ty0
+                ]
+
+       SelectSlice _s ->
+        notYetImplemented "array slices"
+
+
+checkLHS :: LHS Expression -> M CType
+checkLHS lhs =
+  case lhs of
+    LVar i -> lookupIdent i
+    LSelect l s ->
+      do t  <- checkLHS l
+         t1 <- checkSelector (cType t) s
+         pure t { cType = t1 }
+
+checkEquation :: Equation -> M ()
+checkEquation eqn =
+  case eqn of
+    Assert e ->
+      do ct <- oneType =<< inferExpr e
+         cType ct `subType` BoolType
+         -- does clock need to be base?
+         -- XXX: maybe make sure that it does not depend on current
+         -- values of outputs?  The caller can't really do anything about those.
+
+    Property e ->
+      do ct <- oneType =<< inferExpr e
+         cType ct `subType` BoolType
+         -- does clock need to be base?
+
+    IsMain -> pure ()
+
+    Define ls e ->
+      do lts <- mapM checkLHS ls
+         rts <- inferExpr e
+
+         let llen = length lts
+             rlen = length rts
+         unless (llen == rlen) $
+            reportError $
+            nestedError "Arity mismatch in equation definition:"
+              [ "Left-hand-side:" <+> text (show llen) <+> "patterns"
+              , "Right-hand-side:" <+> text (show rlen) <+> "values"
+              ]
+
+         zipWithM_ subType   (map cType lts)  (map cType rts)
+         zipWithM_ sameClock (map cClock lts) (map cClock rts)
+
+
+
+
+--------------------------------------------------------------------------------
 -- Comparsions of types
 
 -- | Check if two CTypes are compatible.  If one does not have a clock
@@ -349,6 +454,7 @@ ctypeLUBs t xs =
     [] -> pure t
     a : as -> do b <- sameCType t a
                  ctypeLUBs b as
+
 
 
 sameCTypes :: [CType] -> [CType] -> M [CType]
@@ -372,7 +478,7 @@ sameType x y =
       (BoolType,BoolType) -> pure ()
       (IntSubrange a b, IntSubrange c d) ->
         sameConsts a c >> sameConsts b d
-      _ -> reportError ("Type mismatch: " ++ showPP x ++ " and " ++ showPP y)
+      _ -> reportError $ text ("Type mismatch: " ++ showPP x ++ " and " ++ showPP y)
 
 
 sameTypes :: [Type] -> [Type] -> M ()
@@ -395,6 +501,7 @@ subType x y =
              subType a b
        _ -> sameType s t
 
+
 typeLUB :: Type -> Type -> M Type
 typeLUB x y =
   do s <- tidyType x
@@ -414,7 +521,8 @@ typeLUB x y =
           do sameConsts b d
              elT <- typeLUB a c
              pure (ArrayType elT b)
-       _ -> reportError $ "Types " ++ showPP x ++ " and " ++ showPP y ++
+       _ -> reportError $ text $
+                            "Types " ++ showPP x ++ " and " ++ showPP y ++
                             "are not compatible."
 
 
@@ -450,12 +558,22 @@ sameClock x y =
     (_,ConstExpr) -> pure x
     (BaseClock,BaseClock) -> pure x
     (KnownClock a, KnownClock b) -> sameKnownClock a b >> pure x
-    _ -> reportError "Clock mismatch."
+    _ -> reportError $ nestedError
+          "The given clocks are different:"
+          [ "Clock 1:" <+> pp x
+          , "Clock 2:" <+> pp y
+          ]
 
 -- | Is this the same known clock.
 sameKnownClock :: ClockExpr -> ClockExpr -> M ()
-sameKnownClock (WhenClock _ e1_init i1) (WhenClock _ e2_init i2) =
-  do unless (i1 == i2) $ reportError "Different clocks."
+sameKnownClock c1@(WhenClock _ e1_init i1) c2@(WhenClock _ e2_init i2) =
+  do unless (i1 == i2) $
+        reportError $
+        nestedError
+          "The given clocks are different:"
+          [ "Clock 1:" <+> pp c1
+          , "Clock 2:" <+> pp c2
+          ]
      sameConsts e1_init e2_init
 
 -- | Get the clock of a clock, or fail if we are the base clock.
@@ -473,6 +591,7 @@ isConstExpr c =
     _         -> False
 
 
+
 --------------------------------------------------------------------------------
 -- Expressions
 
@@ -481,7 +600,9 @@ intConst x =
   case x of
     ERange _ y  -> intConst y
     Lit (Int a) -> pure a
-    _ -> reportError "Constant is not a concrete integer."
+    _ -> reportError $ nestedError
+           "Constant expression is not a concrete integer."
+           [ "Expression:" <+> pp x ]
 
 binConst :: (Integer -> Integer -> Integer) ->
             Expression -> Expression -> M Expression
@@ -490,13 +611,13 @@ binConst f e1 e2 =
      y <- intConst e2
      pure $ Lit $ Int $ f x y
 
-cmpConsts :: String ->
+cmpConsts :: Doc ->
              (Integer -> Integer -> Bool) ->
              Expression -> Expression -> M ()
 cmpConsts op p e1 e2 =
   do x <- intConst e1
      y <- intConst e2
-     unless (p x y) $ reportError $ show x ++ " is not " ++ op ++ " " ++ show y
+     unless (p x y) $ reportError $ pp x <+> "is not" <+> op <+> pp y
 
 addConsts :: Expression -> Expression -> M Expression
 addConsts = binConst (+)
@@ -524,41 +645,53 @@ classEq s t =
      pure ()
 
 -- | Are these types comparable for ordering
-classOrd :: Type -> Type -> M ()
-classOrd s' t' =
+classOrd :: Doc -> Type -> Type -> M ()
+classOrd op s' t' =
   do s <- tidyType s'
      t <- tidyType t'
      case (s,t) of
        (RealType,RealType) -> pure ()
        _ | isIntegral s && isIntegral t -> pure ()
-         | otherwise -> reportError ("Cannot compare types " ++
-                                        showPP s' ++ " and " ++ showPP t')
+         | otherwise ->
+          reportError $ nestedError
+            "Invalid use of comparison operator:"
+            [ "Operator:" <+> op
+            , "Input 1:" <+> pp s'
+            , "Input 2:" <+> pp t'
+            ]
 
 -- | Can we do unary arithemtic on this type, and if so what's the
 -- type of the answer.
-classArith1 :: Type -> M Type
-classArith1 t0 =
+classArith1 :: Doc -> Type -> M Type
+classArith1 op t0 =
   do ty <- tidyType t0
      case ty of
        IntType        -> pure IntType
        RealType       -> pure RealType
        IntSubrange {} -> pure IntType
-       _ -> reportError ("Type " ++ showPP t0 ++
-                             " does not support unary arithmetic.")
+       _ -> reportError $ nestedError
+          "Invalid use of unary arithemtic operator:"
+          [ "Operaotr:" <+> op
+          , "Input:"    <+> pp t0
+          ]
 
 
 -- | Can we do binary arithemtic on this type, and if so what's the
 -- type of the answer.
-classArith2 :: Type -> Type -> M Type
-classArith2 s t =
+classArith2 :: Doc -> Type -> Type -> M Type
+classArith2 op s t =
   do s1 <- tidyType s
      t1 <- tidyType t
      case (s1,t1) of
        (RealType,RealType) -> pure RealType
        _ | isIntegral s1 && isIntegral t1 -> pure IntType
          | otherwise ->
-          reportError $ "Types " ++ showPP s ++ " and " ++ showPP t ++
-                        " do not support arithmetic."
+          reportError $ nestedError
+            "Invalid use of binary arithmetic operator:"
+            [ "Operator:" <+> op
+            , "Input 1:"  <+> pp s
+            , "Input 2:"  <+> pp t
+            ]
 
 -- | Is this an integer-like type.
 isIntegral :: Type -> Bool
@@ -584,8 +717,16 @@ data RO = RO
   , roStructs   :: Map Name (Map Ident Type)
   }
 
-reportError :: String -> M a
+reportError :: Doc -> M a
 reportError = undefined
+
+notYetImplemented :: Doc -> M a
+notYetImplemented f =
+  reportError $ nestedError "XXX: Feature not yet implemented:"
+                            [ "Feature:" <+> f ]
+
+nestedError :: Doc -> [Doc] -> Doc
+nestedError x ys = vcat (x : [ "***" <+> y | y <- ys ])
 
 inRange :: SourceRange -> M a -> M a
 inRange = undefined
@@ -598,7 +739,7 @@ lookupIdent i =
   do mb <- lookupIdentMaybe i
      case mb of
        Just t  -> pure t
-       Nothing -> reportError ("Undefined identifier: " ++ showPP i)
+       Nothing -> reportError ("Undefined identifier:" <+> pp i)
 
 lookupConst :: Name -> M Type
 lookupConst = undefined
