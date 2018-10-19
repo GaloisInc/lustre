@@ -87,15 +87,19 @@ desugarNode' decls mbN =
 
       -- No name specified: find a node marked with --%MAIN,
       -- or use the last node
-      Nothing -> chooseDefault Nothing inlined
+      Nothing -> do nm <- chooseDefault Nothing decls
+                    case [ x | P.DeclareNode x <- inlined
+                             , P.nodeName x == nm ] of
+                      x : _ -> Just x
+                      [] -> Nothing
 
   chooseDefault best xs =
     case xs of
       []     -> best
       d : ds -> case d of
                   P.DeclareNode nd
-                    | checkMain nd -> Just nd
-                    | otherwise    -> chooseDefault (Just nd) ds
+                    | checkMain nd -> Just (P.nodeName nd)
+                    | otherwise    -> chooseDefault (Just (P.nodeName nd)) ds
                   _ -> chooseDefault best ds
 
   -- is this node marked with main
