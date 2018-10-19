@@ -227,17 +227,8 @@ evalEqn eqn =
   case eqn of
     P.IsMain -> pure []
 
-    P.Property e ->
-        do e1      <- evalExpr e
-           C.Var i <- nameExpr e1
-           addPropertyName i
-           clearEqns
-
-    P.Assert e ->
-      do e1      <- evalExpr e
-         C.Var i <- nameExpr e1
-         addAssertName i
-         clearEqns
+    P.Property e -> evalForm "--%PROPERTY" addPropertyName e
+    P.Assert e -> evalForm "assert" addAssertName e
 
     P.Define ls e ->
       case ls of
@@ -258,6 +249,16 @@ evalEqn eqn =
                 [ "Unexpected LHS of equation"
                 , "*** Equation: " ++ showPP eqn
                 ]
+
+  where
+  evalForm :: String -> (C.Ident -> M ()) -> P.Expression -> M [ C.Eqn ]
+  evalForm x f e =
+    do e1 <- evalExprAtom e
+       case e1 of
+         C.Var i ->
+           do f i
+              clearEqns
+         C.Lit n -> panic ("Constnat in " ++ x) [ "*** Constant: " ++ show n ]
 
 
 
