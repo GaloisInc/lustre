@@ -121,9 +121,11 @@ $white+         { return [] }
 
 
 "int"               { lexeme TokKwInt }
-"floor"             { lexeme TokKwInt }   -- jkind
 "real"              { lexeme TokKwReal }
 "bool"              { lexeme TokKwBool }
+"floor"             { lexeme TokKwInt }         -- jkind
+"subrange"          { lexeme TokKwSubrange }    -- jkind
+"of"                { lexeme TokKwOf }          -- jkind
 
 "unsafe"            { lexeme TokKwUnsafe }
 "extern"            { lexeme TokKwExtern }
@@ -244,6 +246,9 @@ data Token =
   | TokHash
   | TokHat
   | TokBar
+
+  | TokKwSubrange
+  | TokKwOf
 
   | TokEOF
   | TokError

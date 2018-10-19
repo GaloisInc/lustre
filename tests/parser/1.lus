@@ -1,3 +1,5 @@
+type T = subrange [ 1, 5 ] of int;
+
 node f (x : int) returns (y : int)
 let
   y = x;

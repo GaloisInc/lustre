@@ -98,6 +98,8 @@ import Language.Lustre.Panic
   'int'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwInt } }
   'real'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwReal } }
   'bool'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwBool } }
+  'subrange'  { Lexeme { lexemeRange = $$, lexemeToken = TokKwSubrange } }
+  'of'        { Lexeme { lexemeRange = $$, lexemeToken = TokKwOf } }
 
 
   ':'         { Lexeme { lexemeRange = $$, lexemeToken = TokColon } }
@@ -285,6 +287,9 @@ builtInType :: { Type }
   : 'int'                                     { at $1 $1 IntType       }
   | 'real'                                    { at $1 $1 RealType      }
   | 'bool'                                    { at $1 $1 BoolType      }
+  | 'subrange'
+      '[' expression ',' expression ']'
+      'of' 'int'                              { at $1 $8 (IntSubrange $3 $5) }
 
 
 
