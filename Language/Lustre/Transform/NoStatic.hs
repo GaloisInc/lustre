@@ -489,7 +489,7 @@ evalEqn env eqn =
     Assert e    -> Assert <$> evalDynExpr NestedExpr env e
     Property e  -> Property <$> evalDynExpr NestedExpr env e
     Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
-    IsMain      -> pure IsMain
+    IsMain r    -> pure (IsMain r)
 
 -- | Evaluate a left-hand-side of an equation.
 evalLHS :: Env -> LHS Expression -> LHS Expression

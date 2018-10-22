@@ -11,6 +11,52 @@ import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
 
+checkEquation :: Equation -> M ()
+checkEquation eqn =
+  case eqn of
+    Assert e ->
+      do ct <- oneType =<< inferExpr e
+         cType ct `subType` BoolType
+         -- does clock need to be base?
+         -- XXX: maybe make sure that this only uses inputs
+         -- as nothing else is under the caller's control.
+
+    Property e ->
+      do ct <- oneType =<< inferExpr e
+         cType ct `subType` BoolType
+         -- does clock need to be base?
+
+    IsMain _ -> pure ()
+
+    Define ls e ->
+      do lts <- mapM checkLHS ls
+         rts <- inferExpr e
+
+         let llen = length lts
+             rlen = length rts
+         unless (llen == rlen) $
+            reportError $
+            nestedError "Arity mismatch in equation definition:"
+              [ "Left-hand-side:" <+> text (show llen) <+> "patterns"
+              , "Right-hand-side:" <+> text (show rlen) <+> "values"
+              ]
+
+         zipWithM_ subType   (map cType lts)  (map cType rts)
+         zipWithM_ sameClock (map cClock lts) (map cClock rts)
+
+
+
+checkLHS :: LHS Expression -> M CType
+checkLHS lhs =
+  case lhs of
+    LVar i -> lookupIdent i
+    LSelect l s ->
+      do t  <- checkLHS l
+         t1 <- checkSelector (cType t) s
+         pure t { cType = t1 }
+
+
+
 
 -- | Infer the type of a constant expression.
 inferConstExpr :: Expression -> M Type
@@ -24,7 +70,7 @@ inferConstExpr expr =
     Array es   ->
       do ts <- mapM inferConstExpr es
          t  <- case ts of
-                 []     -> reportError "XXX: Empty arrays"
+                 []     -> notYetImplemented "empty arrays"
                  a : bs -> typeLUBs a bs
          let n = Lit $ Int $ fromIntegral $ length es
          pure (ArrayType t n)
@@ -377,48 +423,6 @@ checkSelector ty0 sel =
        SelectSlice _s ->
         notYetImplemented "array slices"
 
-
-checkLHS :: LHS Expression -> M CType
-checkLHS lhs =
-  case lhs of
-    LVar i -> lookupIdent i
-    LSelect l s ->
-      do t  <- checkLHS l
-         t1 <- checkSelector (cType t) s
-         pure t { cType = t1 }
-
-checkEquation :: Equation -> M ()
-checkEquation eqn =
-  case eqn of
-    Assert e ->
-      do ct <- oneType =<< inferExpr e
-         cType ct `subType` BoolType
-         -- does clock need to be base?
-         -- XXX: maybe make sure that it does not depend on current
-         -- values of outputs?  The caller can't really do anything about those.
-
-    Property e ->
-      do ct <- oneType =<< inferExpr e
-         cType ct `subType` BoolType
-         -- does clock need to be base?
-
-    IsMain -> pure ()
-
-    Define ls e ->
-      do lts <- mapM checkLHS ls
-         rts <- inferExpr e
-
-         let llen = length lts
-             rlen = length rts
-         unless (llen == rlen) $
-            reportError $
-            nestedError "Arity mismatch in equation definition:"
-              [ "Left-hand-side:" <+> text (show llen) <+> "patterns"
-              , "Right-hand-side:" <+> text (show rlen) <+> "values"
-              ]
-
-         zipWithM_ subType   (map cType lts)  (map cType rts)
-         zipWithM_ sameClock (map cClock lts) (map cClock rts)
 
 
 

@@ -169,7 +169,7 @@ data LocalDecl  = LocalVar Binder
 
 data Equation   = Assert Expression       -- ^ Assuming this
                 | Property Expression     -- ^ Prove this
-                | IsMain                  -- ^ This is the main node,
+                | IsMain SourceRange      -- ^ This is the main node,
                                           -- use it if nothing specified
                 | Define [LHS Expression] Expression
                   deriving Show

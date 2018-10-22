@@ -225,7 +225,7 @@ evalBinder b =
 evalEqn :: P.Equation -> M [C.Eqn]
 evalEqn eqn =
   case eqn of
-    P.IsMain -> pure []
+    P.IsMain _ -> pure []
 
     P.Property e -> evalForm "--%PROPERTY" addPropertyName e
     P.Assert e -> evalForm "assert" addAssertName e

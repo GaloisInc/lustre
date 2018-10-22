@@ -237,7 +237,7 @@ instance Rename Equation where
     case eqn of
       Assert e    -> Assert (rename su e)
       Property e  -> Property (rename su e)
-      IsMain      -> IsMain
+      IsMain r    -> IsMain r
       Define ls e -> Define (rename su ls) (rename su e)
 
 --------------------------------------------------------------------------------

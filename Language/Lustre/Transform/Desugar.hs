@@ -108,8 +108,8 @@ desugarNode' decls mbN =
                    _ -> False
 
     where isMain eqn = case eqn of
-                         P.IsMain -> True
-                         _        -> False
+                         P.IsMain _ -> True
+                         _          -> False
 
 
 

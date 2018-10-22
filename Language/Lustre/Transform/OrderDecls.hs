@@ -253,7 +253,7 @@ instance Uses Equation where
       Assert e -> uses e
       Property e -> uses e
       Define lhs e -> uses (lhs,e)
-      IsMain -> mempty
+      IsMain _ -> mempty
 
 instance Uses e => Uses (LHS e) where
   uses lhs =

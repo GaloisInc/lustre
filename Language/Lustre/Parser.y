@@ -370,7 +370,7 @@ body :: { [Equation] }
 equation :: { Equation }
   : 'assert' expression                    { Assert $2 }
   | '--%PROPERTY' expression               { Property $2 }
-  | '--%MAIN'                              { IsMain }
+  | '--%MAIN'                              { IsMain $1 }
   | SepBy1(',',LHS) '=' expression         { Define $1 $3 }
   | '(' SepBy1(',',LHS) ')' '=' expression { Define $2 $5 }
 

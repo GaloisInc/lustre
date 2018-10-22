@@ -149,7 +149,7 @@ instance Pretty Equation where
     case eqn of
       Assert e -> "assert" <+> pp e
       Define ls e -> hsep (punctuate comma (map pp ls)) <+> "=" <+> pp e
-      IsMain -> "--%MAIN"
+      IsMain _ -> "--%MAIN"
       Property e -> "--%PROPERTY" <+> pp e
 
 instance Pretty e => Pretty (LHS e) where
