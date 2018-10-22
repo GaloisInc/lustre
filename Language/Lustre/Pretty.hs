@@ -11,6 +11,7 @@ import Numeric(showGFloat)
 import Data.Ratio(numerator,denominator)
 
 import Language.Lustre.AST
+import Language.Lustre.Parser(prettySourceRange)
 
 class Pretty t where
   ppPrec :: Int -> t -> Doc
@@ -30,6 +31,9 @@ vcatSep = vcat . intersperse " "
 
 instance Pretty Text where
   ppPrec _ = text . Text.unpack
+
+instance Pretty SourceRange where
+  ppPrec _ = text . prettySourceRange
 
 instance Pretty Ident where
   ppPrec n i = ppPrec n (identText i)

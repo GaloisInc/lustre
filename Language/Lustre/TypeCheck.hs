@@ -5,6 +5,7 @@ import Data.Map(Map)
 import qualified Data.Map as Map
 import Control.Monad((<=<),unless,zipWithM_)
 import Text.PrettyPrint
+import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -707,18 +708,31 @@ isIntegral ty =
 
 --------------------------------------------------------------------------------
 
-type M = IO
+newtype M a = M { unM :: ReaderT RO (ExceptionT Doc Id) a }
+
+instance Functor M where
+  fmap f (M m) = M (fmap f m)
+
+instance Applicative M where
+  pure a        = M (pure a)
+  M mf <*> M ma = M (mf <*> ma)
+
+instance Monad M where
+  M ma >>= k    = M (ma >>= unM . k)
+
+
 
 data RO = RO
   { roConstants :: Map Name Type
   , roUserNodes :: Map Name NodeProfile
-  , roIdents    :: Map Ident (Type,ClockExpr)
+  , roIdents    :: Map Ident (SourceRange, CType)
   , roCurRange  :: Maybe SourceRange
   , roStructs   :: Map Name (Map Ident Type)
+  , roTypeAlias :: Map Name Type
   }
 
 reportError :: Doc -> M a
-reportError = undefined
+reportError msg = M (raise msg)
 
 notYetImplemented :: Doc -> M a
 notYetImplemented f =
@@ -729,10 +743,11 @@ nestedError :: Doc -> [Doc] -> Doc
 nestedError x ys = vcat (x : [ "***" <+> y | y <- ys ])
 
 inRange :: SourceRange -> M a -> M a
-inRange = undefined
+inRange r (M a) = M (mapReader upd a)
+  where upd ro = ro { roCurRange = Just r }
 
 lookupIdentMaybe :: Ident -> M (Maybe CType)
-lookupIdentMaybe = undefined
+lookupIdentMaybe i = M (fmap snd . Map.lookup i . roIdents <$> ask)
 
 lookupIdent :: Ident -> M CType
 lookupIdent i =
@@ -742,10 +757,11 @@ lookupIdent i =
        Nothing -> reportError ("Undefined identifier:" <+> pp i)
 
 lookupConst :: Name -> M Type
-lookupConst = undefined
-
-getTypeAliases :: M (Map Name Type)
-getTypeAliases = undefined
+lookupConst c =
+  do ro <- M ask
+     case Map.lookup c (roConstants ro) of
+       Nothing -> reportError ("Undefined constant:" <+> pp c)
+       Just t  -> pure t
 
 -- | Remove outermost 'TypeRange' and type-aliases.
 tidyType :: Type -> M Type
@@ -757,17 +773,36 @@ tidyType t =
 
 resolveNamed :: Name -> M Type
 resolveNamed x =
-  do as <- getTypeAliases
-     pure (Map.findWithDefault (NamedType x) x as)
+  do ro <- M ask
+     pure (Map.findWithDefault (NamedType x) x (roTypeAlias ro))
 
 lookupStruct :: Name -> M (Map Ident Type)
-lookupStruct = undefined
+lookupStruct s =
+  do ro <- M ask
+     case Map.lookup s (roStructs ro) of
+       Just fs -> pure fs
+       Nothing -> reportError ("Undefined struct:" <+> pp s)
 
 lookupNodeProfile :: Name -> M NodeProfile
-lookupNodeProfile = undefined
+lookupNodeProfile n =
+  do ro <- M ask
+     case Map.lookup n (roUserNodes ro) of
+       Just t  -> pure t
+       Nothing -> reportError ("Undefined node:" <+> pp n)
 
 withLocal :: Ident -> CType -> M a -> M a
-withLocal = undefined
+withLocal i t (M m) =
+  do ro <- M ask
+     let is = roIdents ro
+     case Map.lookup i is of
+       Nothing -> M (local ro { roIdents = Map.insert i (range i, t) is } m)
+       Just (r,_) ->
+         reportError $ nestedError
+           "Multiple declarations for a local variable:"
+           [ "Name:" <+> pp i
+           , "Location 1:" <+> pp r
+           , "Location 2:" <+> pp (range i)
+           ]
 
 withLocals :: [(Ident,CType)] -> M a -> M a
 withLocals xs k =
