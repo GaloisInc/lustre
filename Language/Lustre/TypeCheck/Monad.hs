@@ -51,7 +51,12 @@ data RO = RO
   }
 
 reportError :: Doc -> M a
-reportError msg = M (raise msg)
+reportError msg =
+  M (do mb <- roCurRange <$> ask
+        let msg1 = case mb of
+                     Nothing -> msg
+                     Just l  -> "Error at:" <+> pp l $$ msg
+        raise msg1)
 
 notYetImplemented :: Doc -> M a
 notYetImplemented f =
