@@ -42,12 +42,14 @@ instance Monad M where
 
 
 data RO = RO
-  { roConstants :: Map Name Type
-  , roUserNodes :: Map Name NodeProfile
+  { roConstants :: Map Name (SourceRange,Type)
+  , roUserNodes :: Map Name (Safety,NodeType,NodeProfile)
   , roIdents    :: Map Ident (SourceRange, CType)
   , roCurRange  :: Maybe SourceRange
   , roStructs   :: Map Name (Map Ident Type)
   , roTypeAlias :: Map Name Type
+  , roTemporal  :: Bool
+  , roUnsafe    :: Bool
   }
 
 reportError :: Doc -> M a
@@ -85,7 +87,7 @@ lookupConst c =
   do ro <- M ask
      case Map.lookup c (roConstants ro) of
        Nothing -> reportError ("Undefined constant:" <+> pp c)
-       Just t  -> pure t
+       Just (_,t) -> pure t
 
 -- | Remove outermost 'TypeRange' and type-aliases.
 tidyType :: Type -> M Type
@@ -107,12 +109,18 @@ lookupStruct s =
        Just fs -> pure fs
        Nothing -> reportError ("Undefined struct:" <+> pp s)
 
-lookupNodeProfile :: Name -> M NodeProfile
+lookupNodeProfile :: Name -> M (Safety,NodeType,NodeProfile)
 lookupNodeProfile n =
   do ro <- M ask
      case Map.lookup n (roUserNodes ro) of
        Just t  -> pure t
        Nothing -> reportError ("Undefined node:" <+> pp n)
+
+withConst :: Name -> Type -> M a -> M a
+withConst x t (M m) =
+  do ro <- M ask
+     let cs = roConstants ro
+     M (local ro { roConstants = Map.insert x (range x,t) cs } m)
 
 withLocal :: Ident -> CType -> M a -> M a
 withLocal i t (M m) =
@@ -133,4 +141,30 @@ withLocals xs k =
   case xs of
     []           -> k
     (x,t) : more -> withLocal x t (withLocals more k)
+
+allowTemporal :: Bool -> M a -> M a
+allowTemporal b (M m) = M (mapReader upd m)
+  where upd ro = ro { roTemporal = b }
+
+checkTemporalOk :: Doc -> M ()
+checkTemporalOk msg =
+  do ok <- M (roTemporal <$> ask)
+     unless ok $
+       reportError $ nestedError
+       "Temporal operators are not allowed in a function."
+       [ "Operator:" <+> msg ]
+
+
+allowUnsafe :: Bool -> M a -> M a
+allowUnsafe b (M m) = M (mapReader upd m)
+  where upd ro = ro { roUnsafe = b }
+
+checkUnsafeOk :: Doc -> M ()
+checkUnsafeOk msg =
+  do ok <- M (roUnsafe <$> ask)
+     unless ok $ reportError $ nestedError
+       "This node does not allow calling unsafe nodes."
+       [ "Unsafe call to:" <+> msg ]
+
+
 

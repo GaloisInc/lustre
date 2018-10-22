@@ -2,7 +2,7 @@
 module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
-import Control.Monad((<=<),unless,zipWithM_)
+import Control.Monad((<=<),when,unless,zipWithM_)
 import Text.PrettyPrint
 
 import Language.Lustre.AST
@@ -10,9 +10,110 @@ import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
+{-
+data NodeDecl = NodeDecl
+  { nodeSafety       :: Safety
+  , nodeExtern       :: Bool
+  , nodeType         :: NodeType
+  , nodeName         :: Ident
+  , nodeStaticInputs :: [StaticParam]
+  , nodeProfile      :: NodeProfile
+  , nodeDef          :: Maybe NodeBody
+    -- Must be "Nothing" if "nodeExtern" is set to "True"
+  } deriving Show
+-}
+
+checkNodeDecl :: NodeDecl -> M ()
+checkNodeDecl nd =
+  inRange (range (nodeName nd)) $
+  allowTemporal (nodeType nd == Function) $
+  allowUnsafe   (nodeSafety nd == Unsafe) $
+  do unless (null (nodeStaticInputs nd)) $ notYetImplemented "static parameters"
+     when (nodeExtern nd) $
+       case nodeDef nd of
+         Just _ -> reportError $ nestedError
+                   "Extern node with a definition."
+                   ["Node:" <+> pp (nodeName nd)]
+         Nothing -> pure ()
+     let prof = nodeProfile nd
+     checkBinders (nodeInputs prof ++ nodeOutputs prof) $
+      case nodeDef nd of
+        Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
+                     "Missing node definition"
+                     ["Node:" <+> pp (nodeName nd)]
+        Just b -> checkNodeBody b
+
+
+
+checkNodeBody :: NodeBody -> M ()
+checkNodeBody nb = addLocals (nodeLocals nb)
+  where
+  -- XXX: check for duplicate constant declarations.
+  -- XXX: after checking that equations are OK individually,
+  -- we should check that the LHS define proper values
+  -- (e.g., no missing parts of structs/arrays etc)
+  -- XXX: we also need to check that all outputs were defined.
+  -- XXX: also check that that all locals have definitions
+  -- XXX: also check that there aren't any extra equations.
+  addLocals ls =
+    case ls of
+      []       -> mapM_ checkEquation (nodeEqns nb)
+      l : more -> checkLocalDecl l (addLocals more)
+
+checkLocalDecl :: LocalDecl -> M a -> M a
+checkLocalDecl ld m =
+  case ld of
+    LocalVar b   -> checkBinder b m
+    LocalConst c -> checkConstDef c m
+
+
+checkConstDef :: ConstDef -> M a -> M a
+checkConstDef c m =
+  inRange (range (constName c)) $
+  case constDef c of
+    Nothing ->
+      case constType c of
+        Nothing -> reportError $ nestedError
+                   "Constant declaration with no type or default."
+                   [ "Name:" <+> pp (constName c) ]
+        Just t -> do checkType t
+                     done t
+
+    Just e ->
+      do t1 <- inferConstExpr e
+         case constType c of
+           Nothing -> done t1
+           Just t -> do checkType t
+                        subType t1 t
+                        done t
+  where
+  done t = let nm = Unqual (constName c) -- XXX: qual?
+           in withConst nm t m
+
+checkBinder :: Binder -> M a -> M a
+checkBinder b m =
+  do c <- case binderClock b of
+            Nothing -> pure BaseClock
+            Just e  -> do _c <- checkClockExpr e
+                          pure (KnownClock e)
+     checkType (binderType b)
+     let ty = CType { cType = binderType b, cClock = c }
+     withLocal (binderDefines b) ty m
+
+checkBinders :: [Binder] -> M a -> M a
+checkBinders bs m =
+  case bs of
+    [] -> m
+    b : more -> checkBinder b (checkBinders more m)
+
+
+checkType :: Type -> M ()
+checkType = undefined
+
 
 checkEquation :: Equation -> M ()
 checkEquation eqn =
+  enterRange $
   case eqn of
     Assert e ->
       do ct <- oneType =<< inferExpr e
@@ -44,6 +145,10 @@ checkEquation eqn =
          zipWithM_ subType   (map cType lts)  (map cType rts)
          zipWithM_ sameClock (map cClock lts) (map cClock rts)
 
+  where
+  enterRange = case eqnRangeMaybe eqn of
+                 Nothing -> id
+                 Just r  -> inRange r
 
 
 checkLHS :: LHS Expression -> M CType
@@ -91,6 +196,7 @@ inferConstExpr expr =
     Merge {}   -> reportError "`merge` is not a constant expression."
     CallPos {} -> reportError "constant expressions do not support calls."
 
+
 -- | Infer the type of an expression.  Tuples and function calls may return
 -- multiple results, which is why we return a list of types.
 inferExpr :: Expression -> M [CType]
@@ -104,7 +210,8 @@ inferExpr expr =
     Lit l      -> pure [CType { cType = inferLit l, cClock = ConstExpr }]
 
     e `When` c ->
-      do t  <- oneType =<< inferExpr e
+      do checkTemporalOk "when"
+         t  <- oneType =<< inferExpr e
          c1 <- checkClockExpr c -- `c1` is the clock of c
          _  <- sameClock (cClock t) c1
          pure [ CType { cType  = cType t
@@ -179,7 +286,13 @@ oneType xs =
 -- | Infer the type of a call to a user-defined node.
 checkCall :: Name -> [(Expression,CType)] -> M [CType]
 checkCall f ts =
-  do prof <- lookupNodeProfile f
+  do (safe,ty,prof) <- lookupNodeProfile f
+     case safe of
+       Safe   -> pure ()
+       Unsafe -> checkUnsafeOk (pp f)
+     case ty of
+       Node     -> checkTemporalOk ("node" <+> pp f)
+       Function -> pure ()
      mp   <- checkInputs Map.empty (nodeInputs prof) ts
      mapM (checkOut mp) (nodeOutputs prof)
   where
@@ -272,10 +385,12 @@ inferMergeCase i it (MergeCase p e) =
 checkOp1 :: Op1 -> CType -> M CType
 checkOp1 op t =
   case op of
-    Pre -> pure t
+    Pre -> do checkTemporalOk "pre"
+              pure t
 
     Current ->
-      do c <- clockParent (cClock t)
+      do checkTemporalOk "current"
+         c <- clockParent (cClock t)
          pure t { cClock = c }
 
     Not ->
@@ -308,8 +423,8 @@ checkOp2 op2 x y =
                     clocked BoolType
 
      case op2 of
-       FbyArr   -> typeLUB tx ty >>= clocked
-       Fby      -> typeLUB tx ty >>= clocked
+       FbyArr   -> checkTemporalOk "->"  >> typeLUB tx ty >>= clocked
+       Fby      -> checkTemporalOk "fby" >> typeLUB tx ty >>= clocked
 
        And      -> bool2
        Or       -> bool2

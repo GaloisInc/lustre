@@ -8,6 +8,7 @@ module Language.Lustre.AST
   ) where
 
 import Data.Text(Text)
+import Data.Maybe(fromMaybe)
 
 import AlexTools(SourceRange(..), SourcePos(..), HasRange(..), (<->))
 
@@ -145,7 +146,7 @@ data NodeProfile = NodeProfile
 
 data Safety     = Safe        -- ^ No side effects
                 | Unsafe      -- ^ May have side effects
-                  deriving Show
+                  deriving (Show,Eq)
 
 data NodeType   = Node        -- ^ Nodes may have memory (e.g., use @pre@)
                 | Function    -- ^ Functions do not have memory
@@ -364,6 +365,19 @@ argRangeMaybe arg =
     ExprArg e    -> exprRangeMaybe e
     NodeArg {}   -> Nothing
 
+eqnRangeMaybe :: Equation -> Maybe SourceRange
+eqnRangeMaybe eqn =
+  case eqn of
+    Assert e -> exprRangeMaybe e
+    Property e -> exprRangeMaybe e
+    IsMain r -> Just r
+    Define ls e ->
+      case ls of
+        [] -> exprRangeMaybe e
+        l:_ -> Just $ case exprRangeMaybe e of
+                        Nothing -> range l
+                        Just r  -> range l <-> r
+
 -- | Note that this is a partial function: it will panic if the
 -- expression does not have an exact location.
 instance HasRange Type where
@@ -401,5 +415,24 @@ instance HasRange Callable where
 
 instance HasRange Package where
   range = packageRange
+
+instance HasRange e => HasRange (LHS e) where
+  range lhs =
+    case lhs of
+      LVar i -> range i
+      LSelect x y -> range x <-> range y
+
+
+instance HasRange e => HasRange (Selector e) where
+  range s =
+    case s of
+      SelectField f   -> range f
+      SelectElement e -> range e
+      SelectSlice a   -> range a
+
+instance HasRange e => HasRange (ArraySlice e) where
+  range a =
+    range (arrayStart a) <-> range (fromMaybe (arrayEnd a) (arrayStep a))
+
 
 
