@@ -1,12 +1,8 @@
 {-# Language OverloadedStrings #-}
-module Language.Lustre.Semantics.Value
-  ( module Language.Lustre.Semantics.Value
-  , Stream(..)
-  ) where
+module Language.Lustre.Semantics.Value where
 
 import Text.PrettyPrint as P
 import Language.Lustre.AST
-import Language.Lustre.Semantics.Stream
 import Language.Lustre.Pretty
 
 -- | The universe of basic values.
@@ -57,21 +53,9 @@ instance Eq Value where
 
 
 
--- | A reactive value represents the evolution of a basic value over time,
--- as driven by a clock.
-type ReactValue = Stream EvalM Step
-
-
 -- | The evaluation monad.
 type EvalM      = Either Error
 type Error      = String
-
--- | A "step" is either an exisitng element,
--- or an element that has been skipped by a clock.
-data Step     = Emit !Value   -- ^ An existing element.
-              | Skip !Integer -- ^ Skipped by clock at the given depth
-                              -- (0 is the current clock)
-                deriving Show
 
 -- | Crash evaluation. We'd like to avoid calls to this.
 crash :: String -> String -> EvalM a
