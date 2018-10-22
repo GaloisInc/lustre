@@ -10,7 +10,6 @@ import Language.Lustre.Pretty
 data Value    = VInt    !Integer
               | VBool   !Bool
               | VReal   !Rational
-              | VNil
               | VEnum   !Name !Ident              -- ^ Type, value
               | VStruct !Name ![(Ident,Value)]    -- ^ Type, fields
               | VArray  ![Value]
@@ -73,7 +72,6 @@ instance Pretty Value where
       VInt n -> integer n
       VBool b -> text (show b)
       VReal r -> double (fromRational r) -- XXX
-      VNil -> "nil"
       VEnum _ a -> pp a
       VStruct _ fs -> braces (hsep (punctuate comma (map ppF fs)))
         where ppF (x,y) = pp x <+> "=" <+> pp y

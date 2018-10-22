@@ -2,7 +2,7 @@ module Language.Lustre.Semantics.BuiltIn
   ( -- * Static
 
     -- * Constants
-    sInt, sReal, sBool, sNil
+    sInt, sReal, sBool
 
     -- ** Coercions
   , sReal2Int, sInt2Real
@@ -44,14 +44,10 @@ sBool x = pure (VBool x)
 sArray :: [Value] -> EvalM Value
 sArray x = pure (VArray x)
 
-sNil :: EvalM Value
-sNil = pure VNil
-
 sNot :: Value -> EvalM Value
 sNot v =
   case v of
     VBool x -> sBool (not x)
-    VNil    -> sNil
     _       -> typeError "not" "a `bool`"
 
 sNeg :: Value -> EvalM Value
@@ -59,29 +55,24 @@ sNeg v =
   case v of
     VInt x  -> sInt (negate x)
     VReal x -> sReal (negate x)
-    VNil    -> sNil
     _       -> typeError "uminus" "a `real` or a `number`"
 
 sReal2Int :: Value -> EvalM Value
 sReal2Int v =
   case v of
     VReal x -> sInt (truncate x)
-    VNil    -> sNil
     _       -> typeError "real2int" "a `real`"
 
 sInt2Real :: Value -> EvalM Value
 sInt2Real v =
   case v of
     VInt x -> sReal (fromInteger x)
-    VNil   -> sNil
     _      -> typeError "int2real" "an `int`"
 
 
 sOp2 :: (Value -> Value -> EvalM Value) -> Value -> Value -> EvalM Value
 sOp2 f u v =
   case (u,v) of
-    (VNil,_) -> sNil
-    (_,VNil) -> sNil
     _        -> f u v
 
 sBoolOp2 :: String -> (Bool -> Bool -> Bool) -> Value -> Value -> EvalM Value
@@ -178,7 +169,6 @@ sBoolRed name i j = count 0
 sITE :: Value -> Value -> Value -> EvalM Value
 sITE u v w =
   case u of
-    VNil    -> sNil
     VBool b -> pure (if b then v else w)
     _       -> typeError "ite" "a `bool`"
 
@@ -200,7 +190,6 @@ sConcat = sOp2 $ \u v ->
 sSelectField :: Ident -> Value -> EvalM Value
 sSelectField f v =
   case v of
-    VNil -> sNil
     VStruct _ fs ->
       case lookup f fs of
         Just fv -> pure fv
@@ -211,21 +200,17 @@ sSelectIndex :: Value {-^ index -} -> Value {- ^ array -} -> EvalM Value
 sSelectIndex = sOp2 $ \i v ->
   case (v,i) of
     (VArray vs, VInt iv)
-       | iv < 0      -> pure VNil
+       | iv < 0      -> outOfBounds
        | otherwise   -> case genericDrop iv vs of
-                          []    -> pure VNil
+                          []    -> outOfBounds
                           x : _ -> pure x
+       where outOfBounds = typeError "sSelectIndex" "array index out of bounds"
 
     _ -> typeError "select-element" "`(array,int)`"
 
 sSelectSlice :: ArraySlice Value -> Value -> EvalM Value
 sSelectSlice sl v =
   case (v, start, end, step) of
-    (VNil,_,_,_) -> sNil
-    (_,VNil,_,_) -> sNil
-    (_,_,VNil,_) -> sNil
-    (_,_,_,VNil) -> sNil
-
     (VArray vs, VInt f, VInt t, VInt s)
       | f >= 0 && t >= f && t < genericLength vs && s > 0 ->
             sArray [ genericIndex vs i | i <- [ f, f + s .. t ] ]
@@ -238,8 +223,6 @@ sSelectSlice sl v =
   step  = case arrayStep sl of
             Just s  -> s
             Nothing -> VInt 1
-
-
 
 
 

@@ -353,8 +353,6 @@ valToExpr env val =
 
     VArray  vs    -> Array (map (valToExpr env) vs)
 
-    VNil          -> panic "valToExpr" ["Unexpected `Nil` value."]
-
 
 -- | Evaluate a selector.  The indixes in a selector are constants.
 evalSel :: Env -> Selector Expression -> Selector Expression
