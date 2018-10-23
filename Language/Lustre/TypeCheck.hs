@@ -2,29 +2,74 @@
 module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Control.Monad((<=<),when,unless,zipWithM_)
 import Text.PrettyPrint
+import Data.List(group,sort)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
-{-
-data NodeDecl = NodeDecl
-  { nodeSafety       :: Safety
-  , nodeExtern       :: Bool
-  , nodeType         :: NodeType
-  , nodeName         :: Ident
-  , nodeStaticInputs :: [StaticParam]
-  , nodeProfile      :: NodeProfile
-  , nodeDef          :: Maybe NodeBody
-    -- Must be "Nothing" if "nodeExtern" is set to "True"
-  } deriving Show
--}
+checkTopDecl :: TopDecl -> M a -> M a
+checkTopDecl td m =
+  case td of
+    DeclareType tyd -> checkTypeDecl tyd m
+    DeclareConst cd -> checkConstDef cd m
+    DeclareNode nd -> checkNodeDecl nd m
+    DeclareNodeInst _nid -> notYetImplemented "node instances"
 
-checkNodeDecl :: NodeDecl -> M ()
-checkNodeDecl nd =
+
+checkTypeDecl :: TypeDecl -> M a -> M a
+checkTypeDecl td m =
+  case typeDef td of
+    Nothing -> done AbstractTy
+    Just dec ->
+      case dec of
+
+        IsEnum is ->
+          do mapM_ uniqueConst is
+             let n      = typeName td
+                 addE i = withConst i (NamedType (Unqual n))
+             withNamedType n (EnumTy (Set.fromList is)) (foldr addE m is)
+
+        IsStruct fs ->
+          do mapM_ checkFieldType fs
+             mapM_ checkDup $ group $ sort $ map fieldName fs
+             done (StructTy (Map.fromList [ (fieldName f, fieldType f)
+                                             | f <- fs  ]))
+
+        IsType t ->
+           do checkType t
+              t1 <- tidyType t
+              done (AliasTy t1)
+  where
+  done x = withNamedType (typeName td) x m
+
+  checkDup xs =
+    case xs of
+      [] -> pure ()
+      [_] -> pure ()
+      x : _ ->
+        reportError $ nestedError
+          "Multiple fields with the same name." $
+          [ "Struct:" <+> pp (typeName td)
+          , "Field:" <+> pp x
+          ] ++ [ "Location:" <+> pp (range f) | f <- xs ]
+
+
+checkFieldType :: FieldType -> M ()
+checkFieldType f =
+  do let t = fieldType f
+     checkType t
+     case fieldDefault f of
+       Nothing -> pure ()
+       Just e  -> do t1 <- inferConstExpr e
+                     subType t1 t
+
+checkNodeDecl :: NodeDecl -> M a -> M a
+checkNodeDecl nd k =
   inRange (range (nodeName nd)) $
   allowTemporal (nodeType nd == Function) $
   allowUnsafe   (nodeSafety nd == Unsafe) $
@@ -37,11 +82,14 @@ checkNodeDecl nd =
          Nothing -> pure ()
      let prof = nodeProfile nd
      checkBinders (nodeInputs prof ++ nodeOutputs prof) $
-      case nodeDef nd of
-        Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
-                     "Missing node definition"
-                     ["Node:" <+> pp (nodeName nd)]
-        Just b -> checkNodeBody b
+       do case nodeDef nd of
+            Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
+                         "Missing node definition"
+                         ["Node:" <+> pp (nodeName nd)]
+            Just b -> checkNodeBody b
+          withNode (nodeName nd)
+                   (nodeSafety nd, nodeType nd, nodeProfile nd)
+                   k
 
 
 
@@ -87,8 +135,7 @@ checkConstDef c m =
                         subType t1 t
                         done t
   where
-  done t = let nm = Unqual (constName c) -- XXX: qual?
-           in withConst nm t m
+  done t = withConst (constName c) t m
 
 checkBinder :: Binder -> M a -> M a
 checkBinder b m =
@@ -108,7 +155,26 @@ checkBinders bs m =
 
 
 checkType :: Type -> M ()
-checkType = undefined
+checkType ty =
+  case ty of
+    TypeRange r t -> inRange r (checkType t)
+    IntType       -> pure ()
+    BoolType      -> pure ()
+    RealType      -> pure ()
+    IntSubrange x y ->
+      do lt <- inferConstExpr x
+         subType lt IntType
+         ut <- inferConstExpr y
+         subType ut IntType
+         leqConsts x y
+    NamedType x ->
+      do _ <- resolveNamed x
+         pure ()
+    ArrayType t n ->
+      do nt <- inferConstExpr n
+         subType nt IntType
+         leqConsts (Lit (Int 0)) n
+         checkType t
 
 
 checkEquation :: Equation -> M ()
