@@ -10,6 +10,18 @@ import MonadLib
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 
+runTC :: M a -> Either Doc a
+runTC (M m) = runM m ro0
+  where
+  ro0 = RO { roConstants = Map.empty
+           , roUserNodes = Map.empty
+           , roIdents    = Map.empty
+           , roCurRange  = Nothing
+           , roTypeNames = Map.empty
+           , roTemporal  = False
+           , roUnsafe    = False
+           }
+
 
 -- | A single clock expression.
 data IClock     = BaseClock
@@ -64,7 +76,7 @@ reportError msg =
   M (do mb <- roCurRange <$> ask
         let msg1 = case mb of
                      Nothing -> msg
-                     Just l  -> "Error at:" <+> pp l $$ msg
+                     Just l  -> "Type error at:" <+> pp l $$ msg
         raise msg1)
 
 notYetImplemented :: Doc -> M a

@@ -192,14 +192,14 @@ checkEquation :: Equation -> M ()
 checkEquation eqn =
   enterRange $
   case eqn of
-    Assert e ->
+    Assert _ e ->
       do ct <- oneType =<< inferExpr e
          cType ct `subType` BoolType
          -- does clock need to be base?
          -- XXX: maybe make sure that this only uses inputs
          -- as nothing else is under the caller's control.
 
-    Property e ->
+    Property _ e ->
       do ct <- oneType =<< inferExpr e
          cType ct `subType` BoolType
          -- does clock need to be base?
