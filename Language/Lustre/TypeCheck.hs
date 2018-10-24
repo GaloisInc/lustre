@@ -12,9 +12,6 @@ import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
-import Debug.Trace
-import qualified Text.Show.Pretty as P
-
 
 quickCheckDecls :: [TopDecl] -> Either Doc ()
 quickCheckDecls = runTC . go
@@ -289,15 +286,10 @@ inferExpr expr =
     Lit l      -> pure [CType { cType = inferLit l, cClock = ConstExpr }]
 
     e `When` c ->
-      do -- traceM (P.dumpStr $ P.showNoCons ["SourceRange"] expr)
-         -- traceM (P.dumpStr $ P.showNoCons ["SourceRange"] expr)
-         checkTemporalOk "when"
+      do checkTemporalOk "when"
          t  <- oneType =<< inferExpr e
-         traceM "A"
          c1 <- checkClockExpr c -- `c1` is the clock of c
-         traceM "B"
          _  <- sameClock (cClock t) c1
-         traceM "C"
          pure [ CType { cType  = cType t
                       , cClock = KnownClock c } ]
 
