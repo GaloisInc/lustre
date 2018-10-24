@@ -90,7 +90,8 @@ let
   x  = e4 [renaming]
   y  = e5 [renaming]
   show (e6 [renaming])  -- prove that concrete values match expectations
-  show (e6[renaming] => e7 [renaming])
+  args_ok = e6[renaming] and ... others ...
+  show (args_ok => e7 [renaming])
     -- note: no polarity switching, but we assume that inputs were OK
   ...
 
@@ -288,7 +289,7 @@ inlineCallsNode env nd =
                 (newUsed, su, newLocals) = computeRenaming used ls cnd
                 paramDef b p = Define [ LVar (rename su (binderDefines b)) ] p
                 paramDefs    = zipExact paramDef (nodeInputs prof) es
-                thisEqns     = map proveAssume $ rename su (nodeEqns def)
+                thisEqns     = updateProps (rename su (nodeEqns def))
                 (otherDefs,otherEqns) = renameEqns newUsed more
             in ( newLocals ++ otherDefs
                , paramDefs ++ thisEqns ++ otherEqns
@@ -297,10 +298,21 @@ inlineCallsNode env nd =
           _ -> let (otherDefs, otherEqns) = renameEqns used more
                in (otherDefs, eqn : otherEqns)
 
-  proveAssume eqn =
-    case eqn of
-      Assert x e -> Property x e
-      _          -> eqn
+  updateProps eqns =
+    let asmps = [ e | Assert _ e <- eqns ]
+        bin r f a b = CallPos (NodeInst (CallPrim r (Op2 f)) []) [a,b]
+
+        addAsmps e1 = case asmps of
+                        [] -> e1
+                        [a] -> bin (range e1) Implies a e1
+                        as  -> bin (range e1) Implies
+                                   (foldr1 (bin (range e1) And) as)
+                                   e1
+        upd eqn = case eqn of
+                    Assert x e   -> Property x e
+                    Property x e -> Property x (addAsmps e)
+                    _            -> eqn
+    in map upd eqns
 
 inlineCalls :: Env -> [TopDecl] -> [TopDecl]
 inlineCalls env ds =
