@@ -172,6 +172,7 @@ data Equation   = Assert Expression       -- ^ Assuming this
                 | Property Expression     -- ^ Prove this
                 | IsMain SourceRange      -- ^ This is the main node,
                                           -- use it if nothing specified
+                | IVC [Ident]
                 | Define [LHS Expression] Expression
                   deriving Show
 
@@ -371,6 +372,11 @@ eqnRangeMaybe eqn =
     Assert e -> exprRangeMaybe e
     Property e -> exprRangeMaybe e
     IsMain r -> Just r
+    IVC is ->
+      case is of
+        [] -> Nothing
+        _  -> Just (range (head is) <-> range (last is))
+
     Define ls e ->
       case ls of
         [] -> exprRangeMaybe e

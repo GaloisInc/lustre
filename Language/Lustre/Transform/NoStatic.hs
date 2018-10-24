@@ -490,6 +490,7 @@ evalEqn env eqn =
     Property e  -> Property <$> evalDynExpr NestedExpr env e
     Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
     IsMain r    -> pure (IsMain r)
+    IVC is      -> pure (IVC is)
 
 -- | Evaluate a left-hand-side of an equation.
 evalLHS :: Env -> LHS Expression -> LHS Expression

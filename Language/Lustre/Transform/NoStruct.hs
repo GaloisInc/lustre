@@ -281,6 +281,7 @@ evalEqn env eqn =
     Assert e     -> [ Assert (evalExpr env e) ]
     Property e   -> [ Property (evalExpr env e) ]
     IsMain r     -> [ IsMain r ]
+    IVC is       -> [ IVC is ]
     Define lhs e
       | isCall e1 -> [ Define ls e1 ]
       | otherwise -> zipExact def ls (toMultiExpr e1)

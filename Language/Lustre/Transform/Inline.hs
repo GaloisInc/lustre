@@ -239,6 +239,7 @@ instance Rename Equation where
       Property e  -> Property (rename su e)
       IsMain r    -> IsMain r
       Define ls e -> Define (rename su ls) (rename su e)
+      IVC is      -> IVC (rename su is)
 
 --------------------------------------------------------------------------------
 

@@ -223,6 +223,7 @@ data Token =
 
   | TokPragmaProperty
   | TokPragmaMain
+  | TokPragmaIVC
 
   | TokColon
   | TokComma
@@ -282,6 +283,7 @@ specailComment =
   where
   known = Map.fromList [ ("--%PROPERTY", TokPragmaProperty)
                        , ("--%MAIN", TokPragmaMain)
+                       , ("--%IVC", TokPragmaIVC)
                        ]
 
 qualIdent :: Action s [ Lexeme Token ]

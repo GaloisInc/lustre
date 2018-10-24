@@ -195,6 +195,8 @@ checkEquation eqn =
 
     IsMain _ -> pure ()
 
+    IVC _ -> pure () -- XXX: what should we check here?
+
     Define ls e ->
       do lts <- mapM checkLHS ls
          rts <- inferExpr e

@@ -254,6 +254,7 @@ instance Uses Equation where
       Property e -> uses e
       Define lhs e -> uses (lhs,e)
       IsMain _ -> mempty
+      IVC is -> Set.fromList [ (V,Unqual i) | i <- is ]
 
 instance Uses e => Uses (LHS e) where
   uses lhs =
