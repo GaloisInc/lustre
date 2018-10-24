@@ -365,14 +365,19 @@ localDecl :: { [LocalDecl] }
   | 'const' EndBy1(';',constDef)           { map LocalConst (concat $2) }
 
 body :: { [Equation] }
-  : 'let' EndBy1(';',equation) 'tel'       { $2 }
+  -- : 'let' EndBy1(';',equation) 'tel'       { $2 }
+  : 'let' ListOf1(equation)'tel'              { $2 }
 
 equation :: { Equation }
-  : 'assert' expression                    { Assert $2 }
-  | '--%PROPERTY' expression               { Property $2 }
-  | '--%MAIN'                              { IsMain $1 }
-  | SepBy1(',',LHS) '=' expression         { Define $1 $3 }
-  | '(' SepBy1(',',LHS) ')' '=' expression { Define $2 $5 }
+  : 'assert' expression ';'                     { Assert $2 }
+  | '--%PROPERTY' expression ';'                { Property $2 }
+  | '--%MAIN' opt_semi                          { IsMain $1 }
+  | SepBy1(',',LHS) '=' expression ';'          { Define $1 $3 }
+  | '(' SepBy1(',',LHS) ')' '=' expression ';'  { Define $2 $5 }
+
+opt_semi :: { () }
+  : {- empty -}                                 { () }
+  | ';'                                         { () }
 
 LHS :: { LHS Expression }
   : ident                                   { LVar $1 }
