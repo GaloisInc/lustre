@@ -22,6 +22,7 @@ import Control.Exception(throwIO)
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Parser.Monad
 import Language.Lustre.AST
+import Language.Lustre.Pretty(showPP)
 import Language.Lustre.Panic
 }
 
@@ -370,8 +371,8 @@ body :: { [Equation] }
   : 'let' ListOf1(equation)'tel'              { $2 }
 
 equation :: { Equation }
-  : 'assert' expression ';'                     { Assert $2 }
-  | '--%PROPERTY' expression ';'                { Property $2 }
+  : 'assert' expression ';'                     { Assert (propName $1 $2) $2 }
+  | '--%PROPERTY' expression ';'                { Property (propName $1 $2) $2 }
   | '--%MAIN' opt_semi                          { IsMain $1 }
   | '--%IVC' SepBy1(',',ident) ';'              { IVC $2 }
   | SepBy1(',',LHS) '=' expression ';'          { Define $1 $3 }
@@ -809,6 +810,15 @@ tuple xs =
   case xs of
     [x] -> x
     _   -> Tuple xs
+
+--------------------------------------------------------------------------------
+
+propName :: SourceRange -> Expression -> Text
+propName rng e = case e of
+                   ERange _ e1 -> propName rng e1
+                   Var x -> Text.pack (showPP x)
+                   _     -> Text.pack (showPP rng)
+
 
 
 --------------------------------------------------------------------------------

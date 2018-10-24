@@ -89,8 +89,9 @@ let
   e1 = e3 [renaming]
   x  = e4 [renaming]
   y  = e5 [renaming]
-  show (e6 [renaming])   -- prove that concrete values match expectations
-  show (e7 [renaming])   -- note: no polarity switching
+  show (e6 [renaming])  -- prove that concrete values match expectations
+  show (e6[renaming] => e7 [renaming])
+    -- note: no polarity switching, but we assume that inputs were OK
   ...
 
 -}
@@ -235,11 +236,11 @@ instance Rename a => Rename (LHS a) where
 instance Rename Equation where
   rename su eqn =
     case eqn of
-      Assert e    -> Assert (rename su e)
-      Property e  -> Property (rename su e)
-      IsMain r    -> IsMain r
-      Define ls e -> Define (rename su ls) (rename su e)
-      IVC is      -> IVC (rename su is)
+      Assert x e    -> Assert x (rename su e)    -- XXX: change names?
+      Property x e  -> Property x (rename su e)  -- XXX: change names?
+      IsMain r      -> IsMain r
+      Define ls e   -> Define (rename su ls) (rename su e)
+      IVC is        -> IVC (rename su is)
 
 --------------------------------------------------------------------------------
 
@@ -298,8 +299,8 @@ inlineCallsNode env nd =
 
   proveAssume eqn =
     case eqn of
-      Assert e -> Property e
-      _        -> eqn
+      Assert x e -> Property x e
+      _          -> eqn
 
 inlineCalls :: Env -> [TopDecl] -> [TopDecl]
 inlineCalls env ds =

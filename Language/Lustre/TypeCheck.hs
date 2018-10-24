@@ -12,6 +12,17 @@ import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
+import Debug.Trace
+import qualified Text.Show.Pretty as P
+
+
+quickCheckDecls :: [TopDecl] -> Either Doc ()
+quickCheckDecls = runTC . go
+  where
+  go xs = case xs of
+            [] -> pure ()
+            x : more -> checkTopDecl x (go more)
+
 checkTopDecl :: TopDecl -> M a -> M a
 checkTopDecl td m =
   case td of
@@ -71,7 +82,7 @@ checkFieldType f =
 checkNodeDecl :: NodeDecl -> M a -> M a
 checkNodeDecl nd k =
   inRange (range (nodeName nd)) $
-  allowTemporal (nodeType nd == Function) $
+  allowTemporal (nodeType nd == Node) $
   allowUnsafe   (nodeSafety nd == Unsafe) $
   do unless (null (nodeStaticInputs nd)) $ notYetImplemented "static parameters"
      when (nodeExtern nd) $
@@ -278,10 +289,15 @@ inferExpr expr =
     Lit l      -> pure [CType { cType = inferLit l, cClock = ConstExpr }]
 
     e `When` c ->
-      do checkTemporalOk "when"
+      do -- traceM (P.dumpStr $ P.showNoCons ["SourceRange"] expr)
+         -- traceM (P.dumpStr $ P.showNoCons ["SourceRange"] expr)
+         checkTemporalOk "when"
          t  <- oneType =<< inferExpr e
+         traceM "A"
          c1 <- checkClockExpr c -- `c1` is the clock of c
+         traceM "B"
          _  <- sameClock (cClock t) c1
+         traceM "C"
          pure [ CType { cType  = cType t
                       , cClock = KnownClock c } ]
 
@@ -689,6 +705,7 @@ typeLUB x y =
              u <- maxConsts b d
              pure (IntSubrange l u)
 
+       (IntType,IntType)   -> pure x
        (BoolType,BoolType) -> pure x
        (RealType,RealType) -> pure x
        (NamedType a, NamedType b) | a == b -> pure x
@@ -696,9 +713,11 @@ typeLUB x y =
           do sameConsts b d
              elT <- typeLUB a c
              pure (ArrayType elT b)
-       _ -> reportError $ text $
-                            "Types " ++ showPP x ++ " and " ++ showPP y ++
-                            "are not compatible."
+       _ -> reportError $ nestedError
+            "Incompatable types:"
+            [ "Type 1:" <+> pp x
+            , "Type 2:" <+> pp y
+            ]
 
 
 typeLUBs :: Type -> [Type] -> M Type

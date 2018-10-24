@@ -250,8 +250,8 @@ instance Defines LocalDecl where
 instance Uses Equation where
   uses eqn =
     case eqn of
-      Assert e -> uses e
-      Property e -> uses e
+      Assert _ e -> uses e
+      Property _ e -> uses e
       Define lhs e -> uses (lhs,e)
       IsMain _ -> mempty
       IVC is -> Set.fromList [ (V,Unqual i) | i <- is ]

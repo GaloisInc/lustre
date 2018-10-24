@@ -228,8 +228,8 @@ evalEqn eqn =
     P.IsMain _ -> pure []
     P.IVC _    -> pure [] -- XXX: we should do something with these
 
-    P.Property e -> evalForm "--%PROPERTY" addPropertyName e
-    P.Assert e -> evalForm "assert" addAssertName e
+    P.Property _ e -> evalForm "--%PROPERTY" addPropertyName e
+    P.Assert _ e -> evalForm "assert" addAssertName e
 
     P.Define ls e ->
       case ls of

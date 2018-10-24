@@ -11,7 +11,7 @@ import Numeric(showGFloat)
 import Data.Ratio(numerator,denominator)
 
 import Language.Lustre.AST
-import Language.Lustre.Parser(prettySourceRange)
+import AlexTools(prettySourceRange)
 
 class Pretty t where
   ppPrec :: Int -> t -> Doc
@@ -147,11 +147,11 @@ instance Pretty LocalDecl where
 instance Pretty Equation where
   ppPrec _ eqn =
     case eqn of
-      Assert e -> "assert" <+> pp e
+      Assert _ e -> "assert" <+> pp e
       Define ls e -> hsep (punctuate comma (map pp ls)) <+> "=" <+> pp e
       IsMain _ -> "--%MAIN"
       IVC is   -> "--%IVC" <+> hsep (punctuate comma (map pp is))
-      Property e -> "--%PROPERTY" <+> pp e
+      Property _ e -> "--%PROPERTY" <+> pp e
 
 instance Pretty e => Pretty (LHS e) where
   ppPrec _ lhs =

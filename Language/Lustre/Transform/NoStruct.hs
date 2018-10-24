@@ -278,8 +278,8 @@ nameVariantsText t = [ variant n | n <- [ 1 :: Integer .. ] ]
 evalEqn :: Env -> Equation -> [Equation]
 evalEqn env eqn =
   case eqn of
-    Assert e     -> [ Assert (evalExpr env e) ]
-    Property e   -> [ Property (evalExpr env e) ]
+    Assert x e   -> [ Assert x (evalExpr env e) ]
+    Property x e -> [ Property x (evalExpr env e) ]
     IsMain r     -> [ IsMain r ]
     IVC is       -> [ IVC is ]
     Define lhs e

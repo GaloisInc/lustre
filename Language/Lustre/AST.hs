@@ -168,10 +168,10 @@ data LocalDecl  = LocalVar Binder
                 | LocalConst ConstDef
                   deriving Show
 
-data Equation   = Assert Expression       -- ^ Assuming this
-                | Property Expression     -- ^ Prove this
-                | IsMain SourceRange      -- ^ This is the main node,
-                                          -- use it if nothing specified
+data Equation   = Assert Text Expression    -- ^ Assuming this
+                | Property Text Expression  -- ^ Prove this
+                | IsMain SourceRange        -- ^ This is the main node,
+                                            -- use it if nothing specified
                 | IVC [Ident]
                 | Define [LHS Expression] Expression
                   deriving Show
@@ -369,8 +369,8 @@ argRangeMaybe arg =
 eqnRangeMaybe :: Equation -> Maybe SourceRange
 eqnRangeMaybe eqn =
   case eqn of
-    Assert e -> exprRangeMaybe e
-    Property e -> exprRangeMaybe e
+    Assert _ e -> exprRangeMaybe e
+    Property _ e -> exprRangeMaybe e
     IsMain r -> Just r
     IVC is ->
       case is of

@@ -486,8 +486,8 @@ evalEqn :: Env -> Equation -> M [Equation]
 evalEqn env eqn =
   collectFunEqns $
   case eqn of
-    Assert e    -> Assert <$> evalDynExpr NestedExpr env e
-    Property e  -> Property <$> evalDynExpr NestedExpr env e
+    Assert x e    -> Assert x <$> evalDynExpr NestedExpr env e
+    Property x e  -> Property x <$> evalDynExpr NestedExpr env e
     Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
     IsMain r    -> pure (IsMain r)
     IVC is      -> pure (IVC is)
