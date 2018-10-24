@@ -259,7 +259,10 @@ evalEqn eqn =
          C.Var i ->
            do f i
               clearEqns
-         C.Lit n -> panic ("Constnat in " ++ x) [ "*** Constant: " ++ show n ]
+         C.Lit n ->
+          case n of
+            C.Bool True  -> pure []
+            _ -> panic ("Constant in " ++ x) [ "*** Constant: " ++ show n ]
 
 
 
