@@ -89,8 +89,8 @@ let
   e1 = e3 [renaming]
   x  = e4 [renaming]
   y  = e5 [renaming]
-  assume (e6 [renaming])    -- note: no polarity switching
-  show (e7 [renaming])      -- note: no polarity switching
+  show (e6 [renaming])   -- prove that concrete values match expectations
+  show (e7 [renaming])   -- note: no polarity switching
   ...
 
 -}
@@ -287,7 +287,7 @@ inlineCallsNode env nd =
                 (newUsed, su, newLocals) = computeRenaming used ls cnd
                 paramDef b p = Define [ LVar (rename su (binderDefines b)) ] p
                 paramDefs    = zipExact paramDef (nodeInputs prof) es
-                thisEqns     = rename su (nodeEqns def)
+                thisEqns     = map proveAssume $ rename su (nodeEqns def)
                 (otherDefs,otherEqns) = renameEqns newUsed more
             in ( newLocals ++ otherDefs
                , paramDefs ++ thisEqns ++ otherEqns
@@ -295,6 +295,11 @@ inlineCallsNode env nd =
 
           _ -> let (otherDefs, otherEqns) = renameEqns used more
                in (otherDefs, eqn : otherEqns)
+
+  proveAssume eqn =
+    case eqn of
+      Assert e -> Property e
+      _        -> eqn
 
 inlineCalls :: Env -> [TopDecl] -> [TopDecl]
 inlineCalls env ds =
