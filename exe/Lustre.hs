@@ -8,6 +8,7 @@ import System.Environment
 import qualified Data.Map as Map
 
 import Language.Lustre.AST(Program(..))
+import Language.Lustre.TypeCheck
 import Language.Lustre.Core
 import Language.Lustre.Semantics.Core
 import Language.Lustre.Parser(parseProgramFromFileLatin1)
@@ -24,7 +25,10 @@ runFromFile :: FilePath -> IO ()
 runFromFile file =
   do a <- parseProgramFromFileLatin1 file
      case a of
-       ProgramDecls ds -> runNodeIO (desugarNode ds Nothing)
+       ProgramDecls ds ->
+         case quickCheckDecls ds of
+           Left err -> hPutStrLn stderr (show err)
+           Right _  -> runNodeIO (desugarNode ds Nothing)
        _ -> hPutStrLn stderr "We don't support packages for the moment."
 
 
