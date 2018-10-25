@@ -13,6 +13,7 @@ import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
 
+
 quickCheckDecls :: [TopDecl] -> Either Doc ()
 quickCheckDecls = runTC . go
   where
@@ -815,7 +816,17 @@ maxConsts :: Expression -> Expression -> M Expression
 maxConsts = binConst max
 
 sameConsts :: Expression -> Expression -> M ()
-sameConsts = cmpConsts "equal to" (==)
+sameConsts e1 e2 =
+  case (e1,e2) of
+    (ERange _ x,_)  -> sameConsts x e2
+    (_, ERange _ x) -> sameConsts e1 x
+    (Var x, Var y) | x == y -> pure ()
+    (Lit x, Lit y) | x == y -> pure ()
+    _ -> reportError $ nestedError
+           "Constants do not match"
+           [ "Constant 1:" <+> pp e1
+           , "Constant 2:" <+> pp e2
+           ]
 
 leqConsts :: Expression -> Expression -> M ()
 leqConsts = cmpConsts "less-than, or equal to" (<=)
