@@ -79,26 +79,29 @@ checkFieldType f =
 
 checkNodeDecl :: NodeDecl -> M a -> M a
 checkNodeDecl nd k =
-  inRange (range (nodeName nd)) $
-  allowTemporal (nodeType nd == Node) $
-  allowUnsafe   (nodeSafety nd == Unsafe) $
-  do unless (null (nodeStaticInputs nd)) $ notYetImplemented "static parameters"
-     when (nodeExtern nd) $
-       case nodeDef nd of
-         Just _ -> reportError $ nestedError
-                   "Extern node with a definition."
-                   ["Node:" <+> pp (nodeName nd)]
-         Nothing -> pure ()
-     let prof = nodeProfile nd
-     checkBinders (nodeInputs prof ++ nodeOutputs prof) $
-       do case nodeDef nd of
-            Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
-                         "Missing node definition"
-                         ["Node:" <+> pp (nodeName nd)]
-            Just b -> checkNodeBody b
-          withNode (nodeName nd)
-                   (nodeSafety nd, nodeType nd, nodeProfile nd)
-                   k
+  do (a,b) <- check
+     withNode a b k
+  where
+  check =
+    inRange (range (nodeName nd)) $
+    allowTemporal (nodeType nd == Node) $
+    allowUnsafe   (nodeSafety nd == Unsafe) $
+    do unless (null (nodeStaticInputs nd)) $
+         notYetImplemented "static parameters"
+       when (nodeExtern nd) $
+         case nodeDef nd of
+           Just _ -> reportError $ nestedError
+                     "Extern node with a definition."
+                     ["Node:" <+> pp (nodeName nd)]
+           Nothing -> pure ()
+       let prof = nodeProfile nd
+       checkBinders (nodeInputs prof ++ nodeOutputs prof) $
+         do case nodeDef nd of
+              Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
+                           "Missing node definition"
+                           ["Node:" <+> pp (nodeName nd)]
+              Just b -> checkNodeBody b
+            pure (nodeName nd, (nodeSafety nd, nodeType nd, nodeProfile nd))
 
 
 
@@ -274,6 +277,8 @@ inferConstExpr expr =
     CallPos {} -> reportError "constant expressions do not support calls."
 
 
+
+
 -- | Infer the type of an expression.  Tuples and function calls may return
 -- multiple results, which is why we return a list of types.
 inferExpr :: Expression -> M [CType]
@@ -348,9 +353,9 @@ inferExpr expr =
       | otherwise ->
         do ts <- mapM (oneType <=< inferExpr) es
            case call of
-             CallUser f -> checkCall f (zip es ts)
+             CallUser f -> inferCall f (zip es ts)
              CallPrim r prim ->
-                do t <- inRange r (checkPrim prim ts)
+                do t <- inRange r (inferPrim prim ts)
                    pure [t]
 
 -- | Assert that a given expression has only one type (i.e., is not a tuple)
@@ -360,9 +365,11 @@ oneType xs =
     [x] -> pure x
     _   -> reportError "Arity mismatch."
 
+
+
 -- | Infer the type of a call to a user-defined node.
-checkCall :: Name -> [(Expression,CType)] -> M [CType]
-checkCall f ts =
+inferCall :: Name -> [(Expression,CType)] -> M [CType]
+inferCall f ts =
   do (safe,ty,prof) <- lookupNodeProfile f
      case safe of
        Safe   -> pure ()
@@ -410,8 +417,8 @@ checkCall f ts =
 
 
 -- | Infer the type of a call to a primitive node.
-checkPrim :: PrimNode -> [CType] -> M CType
-checkPrim prim ts =
+inferPrim :: PrimNode -> [CType] -> M CType
+inferPrim prim ts =
   case prim of
 
     Iter {} -> reportError "XXX: Iter"
@@ -613,7 +620,14 @@ checkSelector ty0 sel =
                 ]
 
        SelectSlice _s ->
-        notYetImplemented "array slices"
+        case ty of
+          ArrayType _t _sz -> notYetImplemented "array slices"
+          _ -> reportError $
+               nestedError
+               "Arrgument to array slice is not an array:"
+               [ "Selector:" <+> pp sel
+               , "Input:" <+> pp ty0
+               ]
 
 
 
@@ -671,6 +685,7 @@ sameTypes xs ys =
     ([],[]) -> pure ()
     (a:as,b:bs) -> sameType a b >> sameTypes as bs
     _ -> reportError "Arity mismatch."
+
 
 -- Subtype is like "subset"
 subType :: Type -> Type -> M ()
