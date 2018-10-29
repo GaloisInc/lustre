@@ -28,7 +28,6 @@ showPP = show . pp
 vcatSep :: [Doc] -> Doc
 vcatSep = vcat . intersperse " "
 
-
 instance Pretty Text where
   ppPrec _ = text . Text.unpack
 
@@ -48,6 +47,9 @@ instance Pretty Name where
 
 instance Pretty Integer where
   ppPrec _ = integer
+
+instance Pretty Int where
+  ppPrec _ x = text (show x)
 
 instance Pretty TopDecl where
   ppPrec n td =
