@@ -4,14 +4,16 @@ module Language.Lustre.TypeCheck.Monad where
 import Data.Set(Set)
 import Data.Map(Map)
 import qualified Data.Map as Map
-import Text.PrettyPrint
+import Text.PrettyPrint as PP
 import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 
 runTC :: M a -> Either Doc a
-runTC (M m) = runM m ro0
+runTC (M m) = case runM m ro0 rw0 of
+                Left err -> Left err
+                Right (a,_) -> Right a
   where
   ro0 = RO { roConstants = Map.empty
            , roUserNodes = Map.empty
@@ -22,17 +24,28 @@ runTC (M m) = runM m ro0
            , roUnsafe    = False
            }
 
+  rw0 = RW { rwNextClockVar = 0
+           , rwClockVarSubst = Map.empty
+           }
+
 
 -- | A single clock expression.
 data IClock     = BaseClock
                 | KnownClock ClockExpr
-                | ConstExpr -- ^ Any clock we want
+                | ClockVar CVar
+
+-- | A clock variable
+newtype CVar    = CVar Int deriving (Eq,Ord)
 
 instance Pretty IClock where
   ppPrec n c = case c of
                  BaseClock    -> "base clock"
                  KnownClock k -> ppPrec n k
-                 ConstExpr    -> "an arbitrary clock"
+                 ClockVar v   -> pp v
+
+instance Pretty CVar where
+  ppPrec _ (CVar i) = "cv_" PP.<> pp i
+
 
 -- | A type, together with its clock.
 data CType      = CType { cType :: Type, cClock :: IClock }
@@ -40,7 +53,10 @@ data CType      = CType { cType :: Type, cClock :: IClock }
 
 
 
-newtype M a = M { unM :: ReaderT RO (ExceptionT Doc Id) a }
+newtype M a = M { unM :: ReaderT RO
+                        (StateT  RW
+                        (ExceptionT Doc
+                         Id)) a }
 
 instance Functor M where
   fmap f (M m) = M (fmap f m)
@@ -64,6 +80,10 @@ data RO = RO
   , roUnsafe    :: Bool
   }
 
+data RW = RW
+  { rwNextClockVar   :: !Int
+  , rwClockVarSubst  :: Map CVar IClock
+  }
 
 data NamedType = StructTy (Map Ident Type)
                | EnumTy   (Set Ident)
@@ -254,6 +274,31 @@ checkUnsafeOk msg =
      unless ok $ reportError $ nestedError
        "This node does not allow calling unsafe nodes."
        [ "Unsafe call to:" <+> msg ]
+
+newClockVar :: M IClock
+newClockVar = M $ do n <- sets $ \rw -> let next = rwNextClockVar rw
+                                        in (next, rw { rwNextClockVar = next+1})
+                     pure (ClockVar (CVar n))
+
+
+-- | Assumes that the clock is zonked
+bindClockVar :: CVar -> IClock -> M ()
+bindClockVar x c =
+  case c of
+    ClockVar y | x == y -> pure ()
+    _ -> M $ sets_ $ \rw -> rw { rwClockVarSubst = Map.insert x c
+                                                 $ rwClockVarSubst rw }
+
+
+
+zonkClock :: IClock -> M IClock
+zonkClock c =
+  case c of
+    BaseClock -> pure c
+    KnownClock {} -> pure c
+    ClockVar v -> M $ do su <- rwClockVarSubst <$> get
+                         pure (Map.findWithDefault c v su)
+
 
 
 
