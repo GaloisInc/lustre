@@ -26,6 +26,8 @@ runTC (M m) = case runM m ro0 rw0 of
 
   rw0 = RW { rwNextClockVar = 0
            , rwClockVarSubst = Map.empty
+           , rwNextTVar = 0
+           , rwTyVarSubst = Map.empty
            }
 
 
@@ -75,7 +77,7 @@ data RO = RO
   , roUserNodes :: Map Name (SourceRange,Safety,NodeType,NodeProfile)
   , roIdents    :: Map Ident (SourceRange, CType)
   , roCurRange  :: Maybe SourceRange
-  , roTypeNames :: Map Name (SourceRange,NamedType)
+  , roTypeNames :: Map Name (SourceRange,NamedType) -- no type vars here
   , roTemporal  :: Bool
   , roUnsafe    :: Bool
   }
@@ -83,6 +85,8 @@ data RO = RO
 data RW = RW
   { rwNextClockVar   :: !Int
   , rwClockVarSubst  :: Map CVar IClock
+  , rwNextTVar       :: !Int
+  , rwTyVarSubst     :: Map TVar Type
   }
 
 data NamedType = StructTy (Map Ident Type)
@@ -129,12 +133,13 @@ lookupConst c =
        Just (_,t) -> pure t
 
 
--- | Remove outermost 'TypeRange' and type-aliases.
+-- | Remove outermost 'TypeRange', type-aliases, lookup binding for type vars.
 tidyType :: Type -> M Type
 tidyType t =
   case t of
     TypeRange _ t1 -> tidyType t1
     NamedType x    -> resolveNamed x
+    TVar x         -> resolveTVar x
     _              -> pure t
 
 resolveNamed :: Name -> M Type
@@ -145,6 +150,11 @@ resolveNamed x =
        Just (_,nt) -> pure $ case nt of
                                AliasTy t -> t
                                _         -> NamedType x
+
+resolveTVar :: TVar -> M Type
+resolveTVar tv =
+  do su <- M (rwTyVarSubst <$> get)
+     pure (Map.findWithDefault (TVar tv) tv su)
 
 lookupStruct :: Name -> M (Map Ident Type)
 lookupStruct s =
@@ -299,6 +309,32 @@ zonkClock c =
     ClockVar v -> M $ do su <- rwClockVarSubst <$> get
                          pure (Map.findWithDefault c v su)
 
+
+newTVar :: M Type
+newTVar = M $ do n <- sets $ \rw -> let next = rwNextTVar rw
+                                    in (next, rw { rwNextTVar = next+1 })
+                 pure (TVar (TV n))
+
+-- | Assumes that the type is tidied.  Note that tidying is shallow,
+-- so we need to keep tidying in the occurs check
+bindTVar :: TVar -> Type -> M ()
+bindTVar x t =
+  case t of
+    TVar y | x == y -> pure ()
+    _ -> do occursCheck t
+            M $ sets_ $ \rw ->
+                         rw { rwTyVarSubst = Map.insert x t (rwTyVarSubst rw) }
+
+  where
+  occursCheck ty =
+    do t1 <- tidyType ty
+       case t1 of
+         TVar y | x == y -> reportError $ nestedError
+                            "Recursive type"
+                            [ "Variable:" <+> pp x
+                            , "Occurs in:" <+> pp t ]
+         ArrayType elT _ -> occursCheck elT
+         _ -> pure ()
 
 
 

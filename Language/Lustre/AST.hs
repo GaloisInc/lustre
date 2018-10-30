@@ -99,9 +99,11 @@ data Type =
   | ArrayType Type Expression
   | IntType | RealType | BoolType
   | IntSubrange Expression Expression  -- ^ An extension
+  | TVar TVar                          -- ^ Only during type checking
   | TypeRange SourceRange Type
     deriving Show
 
+newtype TVar = TV Int deriving (Eq,Ord,Show)
 
 data FieldType  = FieldType
   { fieldName     :: Ident
@@ -356,6 +358,7 @@ typeRangeMaybe ty =
     IntType {}      -> Nothing
     RealType {}     -> Nothing
     BoolType {}     -> Nothing
+    TVar {}         -> Nothing
     IntSubrange {}  -> Nothing
 
 argRangeMaybe :: StaticArg -> Maybe SourceRange

@@ -8,6 +8,8 @@ import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
 
 import Language.Lustre.AST
+import Language.Lustre.Pretty(showPP)
+import Language.Lustre.Panic(panic)
 
 
 orderTopDecls :: [TopDecl] -> [TopDecl]
@@ -139,6 +141,8 @@ instance Uses Type where
       IntType -> mempty
       RealType -> mempty
       BoolType -> mempty
+      TVar x -> panic "uses@Type" [ "Unexpected type variable"
+                                  , "*** Tvar: " ++ showPP x ]
       TypeRange _ t -> uses t
 
 

@@ -78,6 +78,9 @@ evalType ty =
     P.RealType       -> C.TReal
     P.BoolType       -> C.TBool
     P.TypeRange _ t  -> evalType t
+    P.TVar x         -> panic "evalType" [ "Unexpecte type variable"
+                                         , "*** Tvar: " ++ showPP x ]
+
     P.ArrayType {}   -> panic "evalType"
                          [ "Unexpected array type"
                          , "*** Type: " ++ showPP ty

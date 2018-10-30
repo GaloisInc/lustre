@@ -181,7 +181,12 @@ instance Pretty Type where
       IntSubrange e1 e2 ->
         "subrange" <+> brackets (hsep (punctuate comma (map pp [e1,e2])))
                    <+> "of" <+> "int"
+      TVar x            -> ppPrec n x
       TypeRange _ t     -> ppPrec n t
+
+instance Pretty TVar where
+  ppPrec _ (TV n) = "tv_" PP.<> int n
+
 
 instance Pretty Literal where
   ppPrec _ lit =

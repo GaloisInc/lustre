@@ -250,6 +250,8 @@ evalType env ty =
     IntType       -> IntType
     RealType      -> RealType
     BoolType      -> BoolType
+    TVar x        -> panic "evalType" [ "Unexpected type variable"
+                                      , "*** Tvar: " ++ showPP x ]
 
 
 
