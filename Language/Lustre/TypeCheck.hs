@@ -79,6 +79,7 @@ checkFieldType f =
 checkNodeDecl :: NodeDecl -> M a -> M a
 checkNodeDecl nd k =
   do (a,b) <- check
+     mapM_ (\(x,y) -> subType' False x y) =<< resetSubConstraints
      withNode a b k
   where
   check =
@@ -688,14 +689,16 @@ sameType x y =
         sameConsts a c >> sameConsts b d
       _ -> reportError $ nestedError
             "Type mismatch:"
-            [ "Values of type:" <+> pp x
-            , "Do not fit into type:" <+> pp y
+            [ "Values of type:" <+> pp s
+            , "Do not fit into type:" <+> pp t
             ]
 
+subType :: Type -> Type -> M ()
+subType = subType' True
 
 -- Subtype is like "subset"
-subType :: Type -> Type -> M ()
-subType x y =
+subType' :: Bool -> Type -> Type -> M ()
+subType' delay x y =
   do s <- tidyType x
      case s of
        IntSubrange a b ->
@@ -703,11 +706,12 @@ subType x y =
             case t of
               IntType         -> pure ()
               IntSubrange c d -> leqConsts c a >> leqConsts b d
+              TVar {}         -> later s t
               _               -> sameType s t
 
        ArrayType elT n ->
          do elT' <- newTVar
-            subType elT elT'
+            subType' True elT elT'
             sameType (ArrayType elT' n) y
 
        TVar {} ->
@@ -720,13 +724,31 @@ subType x y =
               NamedType {} -> sameType s t
               ArrayType elT sz ->
                 do elT' <- newTVar
-                   subType elT' elT
+                   subType' True elT' elT
                    sameType s (ArrayType elT' sz)
-              IntType        -> notYetImplemented "subType: Int"
-              IntSubrange {} -> notYetImplemented "subType: IntSubrange"
+              IntType        -> later s t
+              IntSubrange {} -> later s t
               TVar {} -> notYetImplemented "subType: 2 vars"
 
        _ -> sameType s y
+  where
+  later a b = if delay
+                then subConstraint a b
+                else hackDefault a b
+
+  hackDefault a b =
+    do a' <- tidyType a
+       case a' of
+         TVar v -> bindTVar v b
+         _ -> do b' <- tidyType b
+                 case b' of
+                   TVar v -> bindTVar v a'
+                   _ -> typeError a' b'
+
+  typeError a b= reportError $ nestedError
+                     "Failed to discharge subtyping constraint"
+                      [ "Values of type:" <+> pp a
+                      , "Should fit in type:" <+> pp b]
 
 
 
