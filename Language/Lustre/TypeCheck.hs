@@ -9,12 +9,13 @@ import Data.List(group,sort)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
+import Language.Lustre.Transform.OrderDecls
 import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
 
 
 quickCheckDecls :: [TopDecl] -> Either Doc ()
-quickCheckDecls = runTC . go
+quickCheckDecls = runTC . go . orderTopDecls
   where
   go xs = case xs of
             [] -> pure ()
