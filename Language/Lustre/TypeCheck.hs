@@ -838,8 +838,13 @@ classEq s0 t0 =
   do s <- tidyType s0
      case s of
        IntSubrange {} -> subType t0 IntType
+       ArrayType elT sz ->
+         do elT' <- newTVar
+            subType t0 (ArrayType elT' sz)
+            classEq elT elT'
+
        TVar {} ->
-         do t <- tidyType s0
+         do t <- tidyType t0
             case t of
               IntSubrange {} -> subType s IntType
               _              -> subType s t
