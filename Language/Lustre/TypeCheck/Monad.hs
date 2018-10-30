@@ -28,6 +28,7 @@ runTC (M m) = case runM m ro0 rw0 of
            , rwClockVarSubst = Map.empty
            , rwNextTVar = 0
            , rwTyVarSubst = Map.empty
+           , rwSubCtrs = []
            }
 
 
@@ -86,7 +87,8 @@ data RW = RW
   { rwNextClockVar   :: !Int
   , rwClockVarSubst  :: Map CVar IClock
   , rwNextTVar       :: !Int
-  , rwTyVarSubst     :: Map TVar Type
+  , rwTyVarSubst     :: Map TVar Type   -- ^ tv equals
+  , rwSubCtrs        :: [(Type,Type)]   -- ^ delayed subtyping constraints
   }
 
 data NamedType = StructTy (Map Ident Type)
@@ -186,7 +188,9 @@ lookupNodeProfile n =
   do ro <- M ask
      case Map.lookup n (roUserNodes ro) of
        Just (_,x,y,z) -> pure (x,y,z)
-       Nothing -> reportError ("Undefined node:" <+> pp n)
+       Nothing -> reportError $ nestedError
+                      ("Undefined node:" <+> pp n)
+                      ("Known nodes:" : map pp (Map.keys (roUserNodes ro)))
 
 withConst :: Ident -> Type -> M a -> M a
 withConst x t (M m) =
@@ -336,5 +340,11 @@ bindTVar x t =
          ArrayType elT _ -> occursCheck elT
          _ -> pure ()
 
+subConstraint :: Type -> Type -> M ()
+subConstraint x y =
+  M $ sets_ $ \rw -> rw { rwSubCtrs = (x,y) : rwSubCtrs rw }
 
+resetSubConstraints :: M [(Type,Type)]
+resetSubConstraints =
+  M $ sets $ \rw -> (rwSubCtrs rw, rw { rwSubCtrs = [] })
 
