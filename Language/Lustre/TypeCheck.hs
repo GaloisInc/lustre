@@ -541,17 +541,41 @@ checkOp2 op2 e1 e2 res =
 
     Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
 
-    Concat -> notYetImplemented "Concat"
-      {-
-      do t1 <- tidyType tx
-         t2 <- tidyType ty
-         case (t1,t2) of
-           (ArrayType elT1 n, ArrayType elT2 m) ->
-             do elT <- typeLUB elT1 elT2
-                l   <- addConsts n m
-                pure (ArrayType elT l)
-           _ -> reportError "`|` expects two arrays."
-      -}
+    Concat ->
+      do a0 <- newTVar
+         checkExpr1 e1 res { cType = a0 }
+         b0 <- newTVar
+         checkExpr1 e2 res { cType = b0 }
+         a <- tidyType a0
+         b <- tidyType b0
+         case a of
+           ArrayType elT1 sz1 ->
+             case b of
+               ArrayType elT2 sz2 ->
+                 do c <- newTVar
+                    elT1 `subType` c
+                    elT2 `subType` c
+                    sz <- addExprs sz1 sz2
+                    ArrayType c sz `subType` cType res
+               TVar {} -> noInfer "right"
+               _       -> typeError "right" b
+           TVar {} ->
+             case b of
+               ArrayType {} -> noInfer "left"
+               TVar {}      -> noInfer "left"
+               _            -> typeError "left" a
+           _ -> typeError "left" a
+
+
+      where
+      noInfer x = reportError ("Failed to infer the type of the" <+> x <+>
+                                                            "argument of `|`")
+
+      typeError x t = reportError $ nestedError
+                        ("Incorrect" <+> x <+> "argument to `|`")
+                        [ "Expected:" <+> "array"
+                        , "Actual type:" <+> pp t ]
+
 
   where
   bool2 = do checkExpr1 e1 res { cType = BoolType }
@@ -827,11 +851,11 @@ cmpConsts op p e1 e2 =
      y <- intConst e2
      unless (p x y) $ reportError $ pp x <+> "is not" <+> op <+> pp y
 
-addConsts :: Expression -> Expression -> M Expression
-addConsts = binConst (+)
+addExprs :: Expression -> Expression -> M Expression
+addExprs = binConst (+) -- XXX: Can make an expression instead
 
-minConsts :: Expression -> Expression -> M Expression
-minConsts = binConst min
+minExprs :: Expression -> Expression -> M Expression
+minExprs = binConst min
 
 maxConsts :: Expression -> Expression -> M Expression
 maxConsts = binConst max
