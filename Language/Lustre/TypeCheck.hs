@@ -115,6 +115,8 @@ checkNodeBody nb = addLocals (nodeLocals nb)
   -- XXX: we also need to check that all outputs were defined.
   -- XXX: also check that that all locals have definitions
   -- XXX: also check that there aren't any extra equations.
+  -- XXX: also, we should check that equations don't use values
+  -- that are not yet defined (e.g., x = x, not OK, but x = pre x is OK)
   addLocals ls =
     case ls of
       []       -> mapM_ checkEquation (nodeEqns nb)
