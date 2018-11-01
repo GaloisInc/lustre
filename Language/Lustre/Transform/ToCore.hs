@@ -123,20 +123,20 @@ data St = St
     -- Since we process things in depth-first fashion, this should be
     -- reverse to get proper definition order.
 
-  , stAssertNames :: [C.Ident]
+  , stAssertNames :: [(Text,C.Ident)]
     -- ^ The names of the equatiosn corresponding to asserts.
 
-  , stPropertyNames :: [C.Ident]
+  , stPropertyNames :: [(Text,C.Ident)]
     -- ^ The names of the equatiosn corresponding to properties.
 
   }
 
 -- | Get the collected assert names.
-getAssertNames :: M [C.Ident]
+getAssertNames :: M [(Text,C.Ident)]
 getAssertNames = stAssertNames <$> get
 
 -- | Get the collected property names.
-getPropertyNames :: M [C.Ident]
+getPropertyNames :: M [(Text,C.Ident)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
@@ -198,12 +198,13 @@ nameExpr expr =
                                    ]
 
 -- | Remember that the given identifier was used for an assert.
-addAssertName :: C.Ident -> M ()
-addAssertName i = sets_ $ \s -> s { stAssertNames = i : stAssertNames s }
+addAssertName :: Text -> C.Ident -> M ()
+addAssertName t i = sets_ $ \s -> s { stAssertNames = (t,i) : stAssertNames s }
 
 -- | Remember that the given identifier was used for a property.
-addPropertyName :: C.Ident -> M ()
-addPropertyName i = sets_ $ \s -> s { stPropertyNames = i : stPropertyNames s }
+addPropertyName :: Text -> C.Ident -> M ()
+addPropertyName t i =
+  sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 
 
 
@@ -231,8 +232,8 @@ evalEqn eqn =
     P.IsMain _ -> pure []
     P.IVC _    -> pure [] -- XXX: we should do something with these
 
-    P.Property _ e -> evalForm "--%PROPERTY" addPropertyName e
-    P.Assert _ e -> evalForm "assert" addAssertName e
+    P.Property t e -> evalForm "--%PROPERTY" (addPropertyName t) e
+    P.Assert t e -> evalForm "assert" (addAssertName t) e
 
     P.Define ls e ->
       case ls of

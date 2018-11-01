@@ -66,10 +66,11 @@ infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
                      , nOutputs     :: [Ident]
-                     , nAssuming    :: [Ident]
-                       -- ^ Assuming that these are true
-                     , nShows       :: [Ident]
+                     , nAssuming    :: [(Text,Ident)]
+                       -- ^ Assuming that these are true (Text is a label)
+                     , nShows       :: [(Text,Ident)]
                        -- ^ Need to show that these are also true
+                       -- (Text is a label)
                      , nEqns        :: [Eqn]
                      } deriving Show
 
@@ -164,8 +165,8 @@ ppNode :: Node -> Doc
 ppNode node =
   text "node" <+> ppTuple (map ppBinder (nInputs node))
   $$ nest 2 (  text "returns" <+> ppTuple (map ppIdent (nOutputs node))
-            $$ text "assumes" <+> ppTuple (map ppIdent (nAssuming node))
-            $$ text "shows" <+> ppTuple (map ppIdent (nShows node))
+            $$ text "assumes" <+> ppTuple (map (ppIdent.snd) (nAssuming node))
+            $$ text "shows" <+> ppTuple (map (ppIdent.snd) (nShows node))
             )
   $$ text "let"
   $$ nest 2 (vcat (map ppEqn (nEqns node)))
