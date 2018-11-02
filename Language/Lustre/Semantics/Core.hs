@@ -10,6 +10,7 @@ import qualified Data.Set as Set
 import Text.PrettyPrint(integer,double,text,Doc)
 
 import Language.Lustre.Panic
+import Language.Lustre.Pretty
 import Language.Lustre.Core
 
 data Value    = VInt    !Integer
@@ -37,6 +38,9 @@ ppValue val =
     VBool x -> text (show x)
     VReal x -> double (fromRational x)
     VNil    -> text "nil"
+
+instance Pretty Value where
+  ppPrec _ = ppValue
 
 data State = State
   { sValues :: Map Ident Value
