@@ -159,7 +159,8 @@ ppTuple :: [Doc] -> Doc
 ppTuple ds = parens (hsep (punctuate comma ds))
 
 ppEqn :: Eqn -> Doc
-ppEqn (x := e) = ppBinder x <+> text "=" <+> ppExpr e
+ppEqn (x ::: t := e) =
+  ppIdent x <+> "=" <+> ppExpr e <+> "//" <+> ppCType t
 
 ppNode :: Node -> Doc
 ppNode node =
