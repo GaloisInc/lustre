@@ -219,7 +219,9 @@ evalBinder b =
             Just (P.WhenClock _ e i) ->
               do e1 <- evalExprAtom e
                  let i1 = C.Var (evalIdent i)
-                 pure (C.Prim C.Eq [ i1,e1 ])
+                 case e1 of
+                   C.Lit (C.Bool True) -> pure i1
+                   _ -> pure (C.Prim C.Eq [ i1,e1 ])
      let t = evalType (P.binderType b) `C.On` c
      addSrcLocal (P.binderDefines b) t
      pure (evalIdent (P.binderDefines b) C.::: t)
