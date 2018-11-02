@@ -219,7 +219,7 @@ evalBinder b =
             Just (P.WhenClock _ e i) ->
               do e1 <- evalExprAtom e
                  let i1 = C.Var (evalIdent i)
-                 nameExpr (C.Prim C.Eq [ i1,e1 ])
+                 pure (C.Prim C.Eq [ i1,e1 ])
      let t = evalType (P.binderType b) `C.On` c
      addSrcLocal (P.binderDefines b) t
      pure (evalIdent (P.binderDefines b) C.::: t)
@@ -267,6 +267,10 @@ evalEqn eqn =
           case n of
             C.Bool True  -> pure []
             _ -> panic ("Constant in " ++ x) [ "*** Constant: " ++ show n ]
+         C.Prim {} ->
+           do C.Var i <- nameExpr (C.Atom e1)
+              f i
+              clearEqns
 
 
 
@@ -287,7 +291,7 @@ evalClockExprAtom (P.WhenClock _ e1 i) =
      let a2 = C.Var (evalIdent i)
      case a1 of
        C.Lit (C.Bool True) -> pure a2
-       _                   -> nameExpr (C.Prim C.Eq [ a1, a2 ])
+       _                   -> pure (C.Prim C.Eq [ a1, a2 ])
 
 
 -- | Translate a source to a core identifier.
@@ -337,7 +341,7 @@ evalExpr expr =
           []  -> bad "empty merge"
           [(_,e)] -> evalExpr e
           (p,e) : rest ->
-             do b    <- nameExpr (C.Prim C.Eq [ p, j ])
+             do let b = C.Prim C.Eq [ p, j ]
                 more <- go j rest
                 l    <- evalExprAtom e
                 r    <- case more of
@@ -353,7 +357,7 @@ evalExpr expr =
 
     P.CallPos ni es ->
       do as <- mapM evalExprAtom es
-         let prim x = pure (C.Prim x as)
+         let prim x = pure (C.Atom (C.Prim x as))
          case ni of
            P.NodeInst (P.CallPrim _ p) [] ->
              case p of

@@ -89,6 +89,7 @@ evalAtom s atom =
   case atom of
     Lit l -> evalLit l
     Var x -> evalVar s x
+    Prim op as -> evalPrimOp op (map (evalAtom s) as)
 
 
 evalEqn :: State           {- ^ Old state              -} ->
@@ -124,9 +125,6 @@ evalEqn old new (x ::: _ `On` c := expr) =
         VNil    -> VNil
         _       -> panic "evalEqn" [ "Merge expected a bool" ]
 
-    Prim op as ->
-      guarded $ done $
-      evalPrimOp op (map (evalAtom new) as)
 
   where
   done v        = new { sValues = Map.insert x v (sValues new) }

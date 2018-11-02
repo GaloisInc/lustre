@@ -37,6 +37,7 @@ data Binder   = Ident ::: CType
 
 data Atom     = Lit Literal
               | Var Ident
+              | Prim Op [Atom]
                 deriving Show
 
 data Expr     = Atom Atom
@@ -45,7 +46,6 @@ data Expr     = Atom Atom
               | Atom `When` Atom
               | Current Atom
               | Merge Atom Atom Atom
-              | Prim Op [Atom]
                 deriving Show
 
 data Op       = Not | Neg
@@ -83,8 +83,9 @@ data Node     = Node { nInputs      :: [Binder]
 usesAtom :: Atom -> Set Ident
 usesAtom atom =
   case atom of
-    Lit _ -> Set.empty
-    Var x -> Set.singleton x
+    Lit _     -> Set.empty
+    Var x     -> Set.singleton x
+    Prim _ as -> Set.unions (map usesAtom as)
 
 usesExpr :: Expr -> Set Ident
 usesExpr expr =
@@ -95,7 +96,6 @@ usesExpr expr =
     a1 `When` a2  -> Set.union (usesAtom a1) (usesAtom a2)
     Current a     -> usesAtom a
     Merge a b c   -> Set.unions (map usesAtom [a,b,c])
-    Prim _ as     -> Set.unions (map usesAtom as)
 
 -- | Order the equations.  Returns cycles on the left, if there are some.
 orderedEqns :: [Eqn] -> Either [ [Binder] ] [ Eqn ]
@@ -142,6 +142,7 @@ ppAtom atom =
   case atom of
     Lit l -> pp l
     Var x -> ppIdent x
+    Prim f as   -> ppPrim f PP.<> ppTuple (map ppAtom as)
 
 ppExpr :: Expr -> Doc
 ppExpr expr =
@@ -152,7 +153,6 @@ ppExpr expr =
     a `When` b  -> ppAtom a <+> text "when" <+> ppAtom b
     Current a   -> text "current" <+> ppAtom a
     Merge a b c -> text "merge" <+> ppAtom a <+> ppAtom b <+> ppAtom c
-    Prim f as   -> ppPrim f PP.<> ppTuple (map ppAtom as)
 
 
 ppTuple :: [Doc] -> Doc
@@ -221,21 +221,6 @@ instance TypeOf Atom where
     case atom of
       Var x -> Map.lookup x env
       Lit l -> typeOf env l
-
-instance TypeOf Expr where
-  typeOf env expr =
-    case expr of
-      Atom a      -> typeOf env a
-      a :-> _     -> typeOf env a
-      Pre a       -> typeOf env a
-      a `When` b  -> do t `On` _ <- typeOf env a
-                        pure (t `On` b)
-      Current a   -> do t `On` c  <- typeOf env a
-                        _ `On` c1 <- typeOf env c
-                        pure (t `On` c1)
-      Merge c b _ -> do _ `On` c1 <- typeOf env c
-                        t `On` _  <- typeOf env b
-                        pure (t `On` c1)
       Prim op as  ->
         case as of
           a : _ ->
@@ -273,4 +258,20 @@ instance TypeOf Expr where
           _ -> Nothing
 
 
+
+
+instance TypeOf Expr where
+  typeOf env expr =
+    case expr of
+      Atom a      -> typeOf env a
+      a :-> _     -> typeOf env a
+      Pre a       -> typeOf env a
+      a `When` b  -> do t `On` _ <- typeOf env a
+                        pure (t `On` b)
+      Current a   -> do t `On` c  <- typeOf env a
+                        _ `On` c1 <- typeOf env c
+                        pure (t `On` c1)
+      Merge c b _ -> do _ `On` c1 <- typeOf env c
+                        t `On` _  <- typeOf env b
+                        pure (t `On` c1)
 
