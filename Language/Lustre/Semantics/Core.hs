@@ -2,6 +2,7 @@
 module Language.Lustre.Semantics.Core where
 
 import Data.List(foldl')
+import Data.Maybe(fromMaybe)
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Set ( Set )
@@ -48,10 +49,14 @@ data State = State
   }
 
 
-initNode :: Node -> (State, State -> Map Ident Value -> State)
-initNode node = (s0, stepNode node1)
+initNode :: Node ->
+            Maybe (Map Ident Value) {- Optional inital values -} ->
+            (State, State -> Map Ident Value -> State)
+initNode node mbStart = (s0, stepNode node1)
   where
-  s0     = State { sInitialized = Set.empty, sValues = Map.empty }
+  s0     = State { sInitialized = Set.empty
+                 , sValues = fromMaybe Map.empty mbStart
+                 }
   node1  = case orderedEqns (nEqns node) of
              Right ok -> node { nEqns = ok }
              Left err -> panic "initNode" [ "Failed to order equations"

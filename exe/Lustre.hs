@@ -36,7 +36,7 @@ runNodeIO :: Node -> IO ()
 runNodeIO node = do print (ppNode node)
                     go (1::Integer) s0
   where
-  (s0,step) = initNode node
+  (s0,step) = initNode node Nothing
 
   getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 
