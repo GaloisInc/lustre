@@ -473,7 +473,7 @@ tuple :: { Expression }
   : '(' exprList ')'                 { at $1 $3 (tuple $2) }
 
 
-mergeCase :: { (SourceRange, MergeCase) }
+mergeCase :: { (SourceRange, MergeCase Expression) }
   : '(' mergePat '->' expression ')'  { ($1 <-> $5, MergeCase $2 $4) }
 
 mergePat :: { Expression }
@@ -515,7 +515,7 @@ simpExpr :: { Expression }
   | '(' simpExpr ',' SepBy1(',',simpExpr) ')' { at $1 $3 (Tuple ($2 : $4)) }
 
 
-field :: { Field }
+field :: { Field Expression }
   : ident '=' expression              { Field $1 $3 }
 
 clockExpr :: { ClockExpr }
@@ -705,7 +705,8 @@ toLit l =
     TokBool n   -> Bool n
     _           -> panic "toLit" [ "Unexcpected literal", show l ]
 
-toMerge :: SourceRange -> Ident -> [(SourceRange,MergeCase)] -> Expression
+toMerge :: SourceRange -> Ident ->
+             [(SourceRange,MergeCase Expression)] -> Expression
 toMerge r1 x opts = at r1 (last rs) (Merge x cs)
   where
   (rs,cs) = unzip opts

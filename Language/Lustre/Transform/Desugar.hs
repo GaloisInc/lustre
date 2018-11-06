@@ -3,6 +3,7 @@ module Language.Lustre.Transform.Desugar where
 
 import Control.Monad(msum)
 import Text.PrettyPrint(hsep,punctuate,comma)
+import qualified Data.Map as Map
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
@@ -51,9 +52,13 @@ desugarNode' ::
   Maybe C.Node
 desugarNode' decls mbN =
   do nd <- theNode
-     let cnd = evalNodeDecl enumInfo nd
-     pure $ case C.orderedEqns (C.nEqns cnd) of
-              Right es  -> cnd { C.nEqns = es }
+     let nm             = P.nodeName nd
+
+         _resugarStruct = Map.findWithDefault Map.empty nm gStructInfo
+         _ren           = Map.findWithDefault Map.empty nm allRens
+         (_varMp,core)  = evalNodeDecl enumInfo nd
+     pure $ case C.orderedEqns (C.nEqns core) of
+              Right es  -> core { C.nEqns = es }
               Left recs ->
                 panic "desugarNode"
                   $ "Recursive equations in the specification:" :
@@ -64,8 +69,9 @@ desugarNode' decls mbN =
   where
   ordered  = orderTopDecls decls
   noStatic = quickNoConst True ordered
-  noStruct = quickNoStruct noStatic
-  inlined  = quickInlineCalls noStruct
+  (gStructInfo,noStruct) = quickNoStruct noStatic
+  (allRens,inlined)  = quickInlineCalls noStruct
+
   enumInfo = getEnumInfo Nothing ordered
   -- XXX: noStatic already pretty much has the enumInfo
   -- so we can get it from there instead of recomputing.

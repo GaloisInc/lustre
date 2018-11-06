@@ -206,7 +206,7 @@ data Expression = ERange !SourceRange !Expression
 
                 | Array ![Expression]
                 | Select Expression (Selector Expression)
-                | Struct Name (Maybe Name) [Field]
+                | Struct Name (Maybe Name) [Field Expression]
                   -- ^ The 'Maybe' parameter corresponds to @with@
                   -- and is used for updating structs.
 
@@ -217,15 +217,15 @@ data Expression = ERange !SourceRange !Expression
                     the other (i.e., it is not done point-wise as
                     for if-then-else) -}
 
-                | Merge Ident [MergeCase]
+                | Merge Ident [MergeCase Expression]
 
                 | CallPos NodeInst [Expression]
                   deriving Show
 
 -- | The first expression (the "pattern") should be a constant.
 -- In fact, to check clocks, it is restricted to @true@, @false@, or a @Name@.
-data MergeCase  = MergeCase Expression Expression
-                  deriving Show
+data MergeCase e = MergeCase Expression e
+                    deriving Show
 
 -- | The clock activates when the identifier has the given expression.
 -- In the surface syntax, the expression is restricted to
@@ -283,8 +283,11 @@ data StaticArg  = TypeArg Type
 data Literal    = Int Integer | Real Rational | Bool Bool
                   deriving (Show,Eq)
 
-data Field      = Field Ident Expression
+data Field e    = Field Ident e
                   deriving Show
+
+instance Functor Field where
+  fmap f (Field l e) = Field l (f e)
 
 
 data Op1 = Not          -- bool -> bool
@@ -327,7 +330,7 @@ instance HasRange Name where
       Unqual i   -> range i
       Qual r _ _ -> r
 
-instance HasRange Field where
+instance HasRange e => HasRange (Field e) where
   range (Field x y) = x <-> y
 
 instance HasRange ClockExpr where

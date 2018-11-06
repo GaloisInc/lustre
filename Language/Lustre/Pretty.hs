@@ -28,6 +28,9 @@ showPP = show . pp
 vcatSep :: [Doc] -> Doc
 vcatSep = vcat . intersperse " "
 
+commaSep :: [Doc] -> Doc
+commaSep = hsep . punctuate comma
+
 instance Pretty Text where
   ppPrec _ = text . Text.unpack
 
@@ -301,10 +304,10 @@ parenIf :: Bool -> Doc -> Doc
 parenIf p d = if p then parens d else d
 
 
-instance Pretty MergeCase where
+instance Pretty e => Pretty (MergeCase e) where
   ppPrec _ (MergeCase cv e) = parens (pp cv <+> "->" <+> pp e)
 
-instance Pretty Field where
+instance Pretty e => Pretty (Field e) where
   ppPrec _ (Field x e) = pp x <+> "=" <+> pp e
 
 instance Pretty e => Pretty (Selector e) where

@@ -466,7 +466,7 @@ checkPrim prim es tys =
 
 
 -- | Infer the type for a branch of a merge.
-checkMergeCase :: Ident -> MergeCase -> Type -> [Type] -> M ()
+checkMergeCase :: Ident -> MergeCase Expression -> Type -> [Type] -> M ()
 checkMergeCase i (MergeCase p e) it ts =
   do checkConstExpr p it
      checkExpr e (map toCType ts)

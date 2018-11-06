@@ -963,7 +963,8 @@ nameCallSite env ni es =
 
 
 -- | Use a constant to select a branch in a merge.
-evalMergeConst :: ExprLoc -> Env -> Value -> [MergeCase] -> M Expression
+evalMergeConst :: ExprLoc -> Env -> Value -> [MergeCase Expression] ->
+                  M Expression
 evalMergeConst eloc env v ms =
   case ms of
     MergeCase p e : more
@@ -974,12 +975,12 @@ evalMergeConst eloc env v ms =
                                  ]
 
 -- | Evaluate a case branch of a merge construct.
-evalMergeCase :: Env -> MergeCase -> M MergeCase
+evalMergeCase :: Env -> MergeCase Expression -> M (MergeCase Expression)
 evalMergeCase env (MergeCase p e) =
   MergeCase (evalExpr env p) <$> evalDynExpr NestedExpr env e
 
 -- | Evaluate an update to a struct that is not a constant.
-evalUpdExprStruct :: Env -> Name -> Name -> [Field] -> M Expression
+evalUpdExprStruct :: Env -> Name -> Name -> [Field Expression] -> M Expression
 evalUpdExprStruct env s x fs =
   do fs' <- mapM evalField fs
      pure (Struct s (Just x) fs')
@@ -988,7 +989,7 @@ evalUpdExprStruct env s x fs =
 
 
 -- | Evaluate an update to a struct constant.
-evalUpdConstStruct :: Env -> Name -> Value -> [Field] -> M Expression
+evalUpdConstStruct :: Env -> Name -> Value -> [Field Expression] -> M Expression
 evalUpdConstStruct env s v fs =
   evalNewStructWithDefs env s fs $
   case v of
@@ -1000,7 +1001,7 @@ evalUpdConstStruct env s v fs =
 
 -- | Evaluate a dynamic expression declaring a struct literal.
 -- Missing fields are added by using the default values declared in the type.
-evalNewStruct :: Env -> Name -> [Field] -> M Expression
+evalNewStruct :: Env -> Name -> [Field Expression] -> M Expression
 evalNewStruct env s fs =
   evalNewStructWithDefs env s fs $
   case Map.lookup s (C.envStructs (cEnv env)) of
@@ -1016,7 +1017,7 @@ in the struct, and the 'Maybe' value is an optional default--if it is
 'Nothing', then the filed must be defined, otherwise the dfault is used
 in case the filed ismissing. -}
 evalNewStructWithDefs ::
-  Env -> Name -> [Field] -> [(Ident, Maybe Value)] -> M Expression
+  Env -> Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
 evalNewStructWithDefs env s fs def =
   do fieldMap <- Map.fromList <$> mapM evalField fs
      let setField (f,mbV) =

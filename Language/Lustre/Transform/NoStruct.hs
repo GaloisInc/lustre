@@ -3,7 +3,9 @@
 It should be called after constants have been eliminated, as we then
 know that shape of all data. We also assume that function calls have
 been names, see "Language.Lustre.Transform.NoStatic". -}
-module Language.Lustre.Transform.NoStruct (quickNoStruct) where
+module Language.Lustre.Transform.NoStruct
+  (quickNoStruct, StructInfo, StructData(..)
+  ) where
 
 import Data.Map(Map)
 import qualified Data.Map as Map
@@ -12,6 +14,7 @@ import qualified Data.Text as Text
 import Data.Maybe(fromMaybe, catMaybes)
 import Data.List(genericDrop,genericReplicate,mapAccumL)
 import Data.Semigroup ( (<>) )
+import Text.PrettyPrint((<+>), braces, brackets, parens)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -19,16 +22,18 @@ import Language.Lustre.Utils
 import Language.Lustre.Panic
 
 -- XXX: More flexible interface
-quickNoStruct :: [TopDecl] -> [TopDecl]
-quickNoStruct = catMaybes . snd . mapAccumL evalTopDecl emptyEnv
+quickNoStruct :: [TopDecl] -> (Map Ident StructInfo,[TopDecl])
+quickNoStruct ds = (envCollectedInfo env, catMaybes mbDs)
+  where
+  (env,mbDs) = mapAccumL evalTopDecl emptyEnv ds
 
 
 data Env = Env
-  { envStructured :: Map Ident Expression
-    -- ^ Contains the expansions for variables of strucutred types.
-    -- For example, if @x : T ^ 3@, then we shoud have a binding
-    -- @x = [ a, b, c ]@.
-    -- The expressions in the map should be in evaluated form.
+  { envStructured :: StructInfo
+    -- ^ Structure infor for the current node. See "StructInfo"
+
+  , envCollectedInfo :: Map Ident StructInfo
+    -- ^ Struct info for already processed modules.
 
   , envStructs :: Map Name [(Ident,Type)]
     -- ^ Definitions for strcut types.
@@ -39,10 +44,61 @@ data Env = Env
   }
 
 
+data StructData a = SLeaf a
+                  | SArray [StructData a]
+                  | STuple [StructData a]
+                  | SStruct Name [Field (StructData a)]
+
+instance Functor StructData where
+  fmap f st =
+    case st of
+      SLeaf a      -> SLeaf (f a)
+      SArray vs    -> SArray (fmap (fmap f) vs)
+      STuple vs    -> STuple (fmap (fmap f) vs)
+      SStruct s fs -> SStruct s (fmap (fmap (fmap f)) fs)
+
+instance Pretty a => Pretty (StructData a) where
+  ppPrec n sd =
+    case sd of
+      SLeaf a      -> ppPrec n a
+      SArray as    -> brackets (commaSep (map pp as))
+      STuple as    -> parens   (commaSep (map pp as))
+      SStruct s fs -> pp s <+> braces (commaSep (map pp fs))
+
+-- | Convert a potentially structured expression (already evaluated)
+-- into a list of expressions.
+flatStructData :: StructData a -> [a]
+flatStructData sd =
+  case sd of
+    SArray es  -> concatMap flatStructData es
+    STuple es  -> concatMap flatStructData es
+
+    -- Here we are assuming that fields are already ordered in some normal form.
+    -- Currently, this invariant should be enforced by `NoStatic`, which
+    -- places explicit struct fields in the order specified by the struct
+    -- declaration.
+    SStruct _ fs -> [ v | Field _ e <- fs, v <- flatStructData e ]
+
+    SLeaf a -> [ a ]
+
+
+
+
+{- | Contains the expansions for variables of strucutred types.
+For example, if @x : T ^ 3@, then we shoud have a binding
+@x = [ x1, x2, x2 ]@.
+The expressions in the map should be in evaluated form, which
+means that the strucutres data is at the "top" and then we have
+variables at the leaves.
+-}
+type StructInfo = Map Ident (StructData Ident)
+
+
 -- | An empty environment.
 emptyEnv :: Env
 emptyEnv = Env
   { envStructured = Map.empty
+  , envCollectedInfo = Map.empty
   , envStructs    = Map.empty
   , envCurModule  = Nothing
   }
@@ -50,19 +106,12 @@ emptyEnv = Env
 -- | Lookup a name in the structure expansion environment.
 -- Since constants are already eliminated, the only things that might
 -- be exandable are local variables, which are never qualified.
-lkpStrName :: Name -> Env -> Maybe Expression
+lkpStrName :: Name -> Env -> Maybe (StructData Ident)
 lkpStrName n env =
   case n of
     Unqual i -> Map.lookup i (envStructured env)
     Qual {}  -> Nothing
 
--- | Apply a function but only after you skip all range annotations.
--- They are applied to the result of the function.
-caseThruRange :: Expression -> (Expression -> Expression) -> Expression
-caseThruRange expr f =
-  case expr of
-    ERange r e -> ERange r (caseThruRange e f)
-    _          -> f expr
 
 --------------------------------------------------------------------------------
 -- Evaluation of Top Level Declarations
@@ -74,7 +123,10 @@ evalTopDecl env td =
     DeclareConst cd     -> panic "evalTopDecl"
                               [ "Unexpecetd constant declaration."
                               , "*** Declaration: " ++ showPP cd ]
-    DeclareNode nd      -> (env, Just (DeclareNode (evalNode env nd)))
+    DeclareNode nd      -> (newEnv, Just (DeclareNode node))
+      where (info,node) = evalNode env nd
+            newEnv = env { envCollectedInfo = Map.insert (nodeName nd) info
+                                              (envCollectedInfo env) }
     DeclareNodeInst nid -> panic "evalTopDecl"
                              [ "Node instance declarations should be expanded."
                              , "*** Node instance: " ++ showPP nid
@@ -101,7 +153,7 @@ doAddStructDef env i fs = env { envStructs = Map.insert (Unqual i) def
 
 
 -- | Evaluate a node, expanding structured data.
-evalNode :: Env -> NodeDecl -> NodeDecl
+evalNode :: Env -> NodeDecl -> (StructInfo, NodeDecl)
 evalNode env nd
   | null (nodeStaticInputs nd) =
     let prof = nodeProfile nd
@@ -111,13 +163,19 @@ evalNode env nd
         newProf = NodeProfile { nodeInputs = inBs
                               , nodeOutputs = outBs
                               }
-        newEnv = env { envStructured = Map.unions [ inMap
-                                                  , outMap
-                                                  , envStructured env
-                                                  ] }
-      in nd { nodeProfile = newProf
-            , nodeDef     = evalNodeBody newEnv <$> nodeDef nd
-            }
+        info1 = Map.unions [ inMap, outMap, envStructured env ]
+        newEnv = env { envStructured = info1 }
+        (newInfo,newDef) = case nodeDef nd of
+                             Nothing -> (info1, Nothing)
+                             Just body ->
+                               let (info, body1) = evalNodeBody newEnv body
+                               in (info, Just body1)
+
+      in ( newInfo
+         , nd { nodeProfile = newProf
+              , nodeDef     = newDef
+              }
+         )
 
   | otherwise = panic "evalNode"
                   [ "Unexpected parameterized node."
@@ -128,14 +186,17 @@ evalNode env nd
 
 -- | Evaluate a node's definition.  Expands the local variables,
 -- and rewrites the equations.
-evalNodeBody :: Env -> NodeBody -> NodeBody
+evalNodeBody :: Env -> NodeBody -> (StructInfo, NodeBody)
 evalNodeBody env body =
-  NodeBody { nodeLocals = map LocalVar locBs
-           , nodeEqns = concatMap (evalEqn newEnv) (nodeEqns body)
-           }
+  ( newStructInfo
+  , NodeBody { nodeLocals = map LocalVar locBs
+             , nodeEqns = concatMap (evalEqn newEnv) (nodeEqns body)
+             }
+  )
   where
   (locMap, locBs) = expandBinders env [ b | LocalVar b <- nodeLocals body ]
-  newEnv = env { envStructured = Map.union locMap (envStructured env) }
+  newEnv          = env { envStructured = newStructInfo }
+  newStructInfo   = Map.union locMap (envStructured env)
 
 
 
@@ -161,7 +222,10 @@ expandType env ty =
 
 -- | Given a type, and epxressions for the leaves of a structured value,
 -- rebuild the actual value.
-toNormE :: Env -> Type -> [Expression] -> Expression
+-- For example: if @S = { x : int; y : int^3 }@
+-- And we are given the leaves: @[e1,e2,e3,e4]@
+-- then, the result will be: @{ x = e1, y = [e2,e3,e4] }@
+toNormE :: Env -> Type -> [a] -> StructData a
 toNormE env t0 es0 =
   case go es0 t0 of
     ([], e) -> e
@@ -180,34 +244,15 @@ toNormE env t0 es0 =
      NamedType s | Just fs <- Map.lookup s (envStructs env) ->
 
       let (es', outEs) = goMany es (map snd fs)
-      in (es', Struct s Nothing [ Field l e | ((l,_) ,e) <- zip fs outEs ])
+      in (es', SStruct s [ Field l e | ((l,_) ,e) <- zip fs outEs ])
 
      ArrayType t e ->
        let (es', outEs) = goMany es (genericReplicate (exprToInteger e) t)
-       in (es', Array outEs)
+       in (es', SArray outEs)
 
      _ -> case es of
-            e : more -> (more, e)
+            e : more -> (more, SLeaf e)
             [] -> panic "toNormE" ["Not enogh expressions"]
-
--- | Convert a potentially structured expression (already evaluated)
--- into a list of expressions.
-toMultiExpr :: Expression -> [Expression]
-toMultiExpr expr =
-  case expr of
-    ERange r e    -> case toMultiExpr e of
-                       [e1] -> [ ERange r e1 ]
-                       es   -> es
-    Array es      -> concatMap toMultiExpr es
-    Tuple es      -> concatMap toMultiExpr es
-
-    -- Here we are assuming that fields are already in some normal form.
-    -- Currently, this invariant should be enforced by `NoStatic`, which
-    -- places explicit struct fields in the order specified by the struct
-    -- declaration.
-    Struct _ _ fs -> [ v | Field _ e <- fs, v <- toMultiExpr e ]
-
-    _             -> [ expr ]
 
 
 
@@ -217,7 +262,8 @@ toMultiExpr expr =
 -- | Expand multiple binders.  For details, have a look at 'expandBinder'.
 -- The binders are all evaluated in the same environemnt (i.e., they should
 -- not affect each other).
-expandBinders :: Env -> [Binder] -> (Map Ident Expression, [Binder])
+expandBinders ::
+  Env -> [Binder] -> (Map Ident (StructData Ident), [Binder])
 expandBinders env bs = (Map.fromList (catMaybes defs), concat newBs)
   where
   (defs,newBs) = unzip (map (expandBinder env) bs)
@@ -237,10 +283,10 @@ and a mapping:
 
 > x = [ x1, x2, x3 ]
 -}
-expandBinder :: Env -> Binder -> (Maybe (Ident,Expression), [Binder])
+expandBinder :: Env -> Binder -> (Maybe (Ident,StructData Ident), [Binder])
 expandBinder env b =
   case expandType env (binderType b) of
-    (False,_) -> (Nothing, [b])
+    (False,_)  -> (Nothing, [b])
     (True, ts) -> (Just (binderDefines b, expr), bs)
       where
       toBinder x t = Binder { binderDefines = x
@@ -250,8 +296,7 @@ expandBinder env b =
 
       bs = zipWith toBinder (nameVariants (binderDefines b)) ts
 
-      expr = toNormE env (binderType b)
-                [ Var (Unqual (binderDefines i)) | i <- bs ]
+      expr = toNormE env (binderType b) (map binderDefines bs)
 
 {- | Given a base name, generate a bunch of different names.
 Assuming that the original name is unique, the variants should
@@ -278,16 +323,20 @@ nameVariantsText t = [ variant n | n <- [ 1 :: Integer .. ] ]
 evalEqn :: Env -> Equation -> [Equation]
 evalEqn env eqn =
   case eqn of
-    Assert x e   -> [ Assert x (evalExpr env e) ]
-    Property x e -> [ Property x (evalExpr env e) ]
+    Assert x e   -> case evalExpr env e of
+                      SLeaf b -> [ Assert x b ]
+                      _ -> panic "evalEqn" ["Assert expects a bool"]
+    Property x e -> case evalExpr env e of
+                      SLeaf b -> [ Property x b ]
+                      _       -> panic "evalEqn" ["PROPERTY expects a bool"]
     IsMain r     -> [ IsMain r ]
     IVC is       -> [ IVC is ]
     Define lhs e
-      | isCall e1 -> [ Define ls e1 ]
-      | otherwise -> zipExact def ls (toMultiExpr e1)
+      | [e1] <- es, isCall e1 -> [ Define ls e1 ]
+      | otherwise -> zipExact def ls es
       where
       def l a = Define [l] a
-      e1 = evalExpr env e
+      es = flatStructData (evalExpr env e)
       ls = concatMap (expandLHS env) lhs
       isCall ex = case ex of
                     ERange _ ex1 -> isCall ex1
@@ -298,7 +347,7 @@ evalEqn env eqn =
 -- | Convert a possible complex LHS, to a simple (i.e., identifier) LHS
 -- on primitive types.
 expandLHS :: Env -> LHS Expression -> [ LHS Expression ]
-expandLHS env lhs = map exprIdLhs (toMultiExpr (evalExpr env (lhsToExpr lhs)))
+expandLHS env lhs = map exprIdLhs (flatStructData (evalExpr env (lhsToExpr lhs)))
   where
   exprIdLhs e =
     case e of
@@ -325,26 +374,16 @@ The parameters should be already evaluated.
 Note that clock expressions (e.g., `c` above) are small,
 so it is OK to duplicate them. -}
 
-evalWhen :: Expression -> ClockExpr -> Expression
-evalWhen e ce =
-  caseThruRange e $ \ev ->
-    case ev of
-      Tuple xs -> Tuple [ x `evalWhen` ce | x <- xs ]
-      Array xs -> Array [ x `evalWhen` ce | x <- xs ]
-
-      Struct s mb fs ->
-        case mb of
-          Nothing -> Struct s Nothing
-                       [ Field l (f `evalWhen` ce) | Field l f <- fs ]
-
-          Just _  -> panic "evalWhen" [ "Unexpected struct update"
-                                      , "*** Expression: " ++ showPP e
-                                      ]
-      e1' -> e1' `When` ce
+evalWhen :: StructData Expression -> ClockExpr -> StructData Expression
+evalWhen ev ce =
+  case ev of
+    STuple xs    -> STuple [ x `evalWhen` ce | x <- xs ]
+    SArray xs    -> SArray [ x `evalWhen` ce | x <- xs ]
+    SStruct s fs -> SStruct s [ Field l (f `evalWhen` ce) | Field l f <- fs ]
+    SLeaf e1'    -> SLeaf (e1' `When` ce)
 
 
 {- | Move a @merege@ to the leaves of structured data.
-The branches of the case should have been evaluated already.
 
 @ merge c (A -> [1,2]; B -> [3,4])  -->
 becomes
@@ -354,14 +393,26 @@ becomes
 Again here we assume that patterns are simple things, as they should be
 -}
 
-evalMerge :: Ident -> [MergeCase] -> Expression
+evalMerge :: Ident -> [MergeCase (StructData Expression)] ->
+              StructData Expression
 evalMerge i as =
   case as of
     [] -> panic "evalMerge" [ "Empty merge case" ]
     opts@(MergeCase _ o : _) ->
       case getShape o of
-        Nothing -> Merge i opts
-        Just sh -> rebuildShape sh mk [ e | MergeCase _ e <- opts ]
+        Left _ -> SLeaf (Merge i (map fromLeaf opts))
+          where
+          fromLeaf a = case a of
+                        MergeCase p sh ->
+                          case sh of
+                            SLeaf e -> MergeCase p e
+                            _ -> panic "Type error in merge branch"
+                                          [ "Branch: " ++ showPP p
+                                          , "Expected: non-structured"
+                                          , "Got: structured" ]
+
+
+        Right sh -> rebuildShape sh mk [ e | MergeCase _ e <- opts ]
           where
           mk es' = evalMerge i
                      [ MergeCase p e | (MergeCase p _, e) <- zip opts es' ]
@@ -370,31 +421,41 @@ evalMerge i as =
 -- | Lift a binary operator to the leaves of structured data.
 -- Assumes that the arguments have the same types, and hence the same shapes.
 evalBin :: (Expression -> Expression -> Expression) ->
-           Expression -> Expression -> Expression
+           StructData Expression ->
+           StructData Expression ->
+           StructData Expression
 evalBin f e1 e2 =
-  case getShape e1 of
-    Just sh -> rebuildShape sh (\ ~[x,y] -> evalBin f x y) [e1,e2]
-    Nothing -> f e1 e2
+  case (getShape e1,getShape e2) of
+    (Left a, Left b) -> SLeaf (f a b)
+    (Right sh1, Right sh2)
+      | sh1 == sh2 -> rebuildShape sh1 (\ ~[x,y] -> evalBin f x y) [e1,e2]
+      | otherwise -> panic "Type error in binary operator"
+                       [ "Shape 1:" ++ showPP sh1
+                       , "Shape 2:" ++ showPP sh2
+                       ]
+    _ -> panic "Type error in binary operator (structured vs. not)" []
 
 
 
 
 -- | Evaluate a struct update
-evalStructUpdate :: Env -> Name {- type -} -> Name -> [Field] -> Expression
+evalStructUpdate ::
+  Env -> Name {- type -} -> Name -> [Field Expression] -> StructData Expression
 evalStructUpdate env s x es =
   case lkpStrName x env of
-    Just e ->
-      caseThruRange e $ \ev ->
-        case ev of
-          Struct s' Nothing fs | s == s' ->
-            Struct s Nothing
-              [ Field l (Map.findWithDefault v l fldMap) | Field l v <- fs ]
+    Just ev ->
+      case ev of
+        SStruct s' fs | s == s' ->
+          SStruct s
+            [ Field l (Map.findWithDefault (toExpr v) l fldMap)
+                                                      | Field l v <- fs ]
+          where toExpr = fmap (Var . Unqual)
 
 
-          _ -> panic "evalExpr" [ "Unexpected value to update:"
-                                , "*** Expected: a struct"
-                                , "*** Expression: " ++ showPP e
-                                ]
+        _ -> panic "evalExpr" [ "Unexpected value to update:"
+                              , "*** Expected: a struct"
+                              , "*** Expression: " ++ showPP ev
+                              ]
     Nothing -> panic "evalExpr"
                     [ "Missing structure expression for:"
                     , "*** Name: " ++ showPP x
@@ -404,7 +465,8 @@ evalStructUpdate env s x es =
   fldMap = Map.fromList [ (l, evalExpr env v) | Field l v <- es ]
 
 -- | Select an item from an array.
-selectFromArray :: [Expression] -> Selector Integer -> Expression
+selectFromArray ::
+  Pretty a => [StructData a] -> Selector Integer -> StructData a
 selectFromArray vs s =
   case s of
 
@@ -412,7 +474,7 @@ selectFromArray vs s =
       panic "evalExpr"
         [ "Attempt to select a field from an array."
         , "*** Field: " ++ showPP f
-        , "*** ArrayL " ++ showPP (Array vs)
+        , "*** Array: " ++ showPP (SArray vs)
         ]
 
     SelectElement i -> getIx i
@@ -421,7 +483,7 @@ selectFromArray vs s =
       let step  = fromMaybe 1 (arrayStep sl)
           start = arrayStart sl
           ixes  = [ start, start + step .. arrayEnd sl ]
-      in Array (map getIx ixes)
+      in SArray (map getIx ixes)
 
   where
   getIx i = case genericDrop i vs of
@@ -429,11 +491,11 @@ selectFromArray vs s =
               _ -> panic "selectFromArray"
                      [ "Selector out of bounds:"
                      , "*** Index: " ++ show i
-                     , "*** Array: " ++ showPP (Array vs)
+                     , "*** Array length: " ++ show (length vs)
                      ]
 
 -- | Select an item from a struct.
-selectFromStruct :: Name -> [Field] -> Selector Integer -> Expression
+selectFromStruct :: Pretty a => Name -> [Field a] -> Selector Integer -> a
 selectFromStruct ty fs s =
     case s of
 
@@ -443,13 +505,15 @@ selectFromStruct ty fs s =
           _ -> panic "selectFromStruct"
                  [ "Undefined field in selection:"
                  , "*** Field: " ++ showPP i
-                 , "*** Struct: " ++ showPP (Struct ty Nothing fs)
+                 , "*** Struct: " ++ showPP ty
+                 , "*** Fields: " ++ show (commaSep (map pp fs))
                  ]
 
       _ -> panic "selectFromStruct"
              [ "Type error in selector."
              , "*** Selector: " ++ showPP s
-             , "*** Struct: " ++ showPP (Struct ty Nothing fs)
+             , "*** Struct: " ++ showPP ty
+                 , "*** Fields: " ++ show (commaSep (map pp fs))
              ]
 
 
@@ -457,43 +521,39 @@ selectFromStruct ty fs s =
 
 
 -- | Normalize an expression, lifting out structured data to the top.
-evalExpr :: Env -> Expression -> Expression
+evalExpr :: Env -> Expression -> StructData Expression
 evalExpr env expr =
   case expr of
 
-    ERange r e -> ERange r (evalExpr env e)
+    ERange _ e -> evalExpr env e
 
     Var x -> case lkpStrName x env of
-               Nothing -> expr
-               Just e  -> e
+               Nothing -> SLeaf expr
+               Just e  -> fmap (Var . Unqual) e
 
-    Lit _ -> expr
+    Lit _ -> SLeaf expr
 
     -- The clock expression are syntactically restricted to not
     -- contain structured data so we don't need to evaluate them.
     e1 `When` ce -> evalWhen (evalExpr env e1) ce
 
-    Tuple es -> Tuple (map (evalExpr env) es)
+    Tuple es -> STuple (map (evalExpr env) es)
 
-    Array es -> Array (map (evalExpr env) es)
+    Array es -> SArray (map (evalExpr env) es)
 
     Struct s mb es ->
       case mb of
-        Nothing -> Struct s Nothing
-                      [ Field l (evalExpr env e) | Field l e <- es ]
-
-        Just x -> evalStructUpdate env s x es
+        Nothing -> SStruct s [ Field l (evalExpr env e) | Field l e <- es ]
+        Just x  -> evalStructUpdate env s x es
 
     Select e sel ->
-
-      caseThruRange (evalExpr env e) $ \ev ->
-        case ev of
-          Array vs              -> selectFromArray vs s
-          Struct ty Nothing fs  -> selectFromStruct ty fs s
-          _                     -> panic "selectFromStruct"
-                                     [ "Selection from a non structured type:"
-                                     , "*** Expression: " ++ showPP ev
-                                     ]
+        case evalExpr env e of
+          SArray vs      -> selectFromArray vs s
+          SStruct ty fs  -> selectFromStruct ty fs s
+          ev             -> panic "selectFromStruct"
+                              [ "Unexpected selection:"
+                              , "*** StructData: " ++ showPP ev
+                              ]
       where s = evalSelect sel
 
 
@@ -511,18 +571,18 @@ evalExpr env expr =
 
         -- [x1,x2] | [y1,y2]  ~~> [ x1,x2,y1,y2 ]
         (NodeInst (CallPrim _ (Op2 Concat)) [], [e1,e2]) ->
-          Array (asArray e1 ++ asArray e2)
+          SArray (asArray e1 ++ asArray e2)
           where asArray x = case x of
-                              ERange _ y -> asArray y
-                              Array xs   -> xs
+                              SArray xs   -> xs
                               _ -> panic "asArray"
                                     [ "Not an array:"
                                     , "*** Expression: " ++ showPP x ]
 
         -- XXX: This duplicates stuff, perhaps bad
         -- x ^ 2  ~~>  [x,x]
-        (NodeInst (CallPrim _ (Op2 Replicate)) [], [e1,e2]) ->
-          Array (genericReplicate (exprToInteger e2) e1)
+        (NodeInst (CallPrim _ (Op2 Replicate)) [], [e1,_]) ->
+          SArray (genericReplicate (exprToInteger (es !! 1)) e1)
+          -- NOTE: The second argument is a constant.
 
         -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
         (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2]) ->
@@ -536,24 +596,29 @@ evalExpr env expr =
 
         -- [x1, x2] = [y1,y2]  ~~~>  (x1 = x2) && (y1 = y2)
         (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2]) ->
-          liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2
+          SLeaf $ liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2
 
         -- [x1, x2] <> [y1,y2]  ~~~>  (x1 <> x2) || (y1 <> y2)
         (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2]) ->
-          liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2
+          SLeaf $ liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2
 
         -- f([x1,x2])  ~~~>  f(x1,x2)
-        (_, evs) -> CallPos f [ v | e <- evs, v <- toMultiExpr e ]
+        (_, evs) -> SLeaf (mkCall f evs)
 
   where
-  ite r e1 e2 e3 = CallPos (NodeInst (CallPrim r ITE) []) [e1,e2,e3]
+  mkCall f as = CallPos f [ v | e <- as, v <- flatStructData e ]
+
+  ite r e1 e2 e3 =
+    case e1 of
+      SLeaf b -> CallPos (NodeInst (CallPrim r ITE) []) [b,e2,e3]
+      _ -> panic "evalExpr" [ "ITE expects a boolean" ]
   bin r op e1 e2 = CallPos (NodeInst (CallPrim r (Op2 op)) []) [e1,e2]
 
   fTrue = Lit (Bool True)
   fFalse = Lit (Bool False)
 
   liftFoldBin f cons nil e1 e2 =
-    fold cons nil (zipWith f (toMultiExpr e1) (toMultiExpr e2))
+    fold cons nil (zipWith f (flatStructData e1) (flatStructData e2))
 
   fold cons nil xs =
     case xs of
@@ -564,18 +629,25 @@ evalExpr env expr =
 --------------------------------------------------------------------------------
 
 data Shape = ArrayShape Int | StructShape Name [Ident] | TupleShape Int
+              deriving Eq
+
+instance Pretty Shape where
+  ppPrec _ sh =
+    case sh of
+      ArrayShape n -> "array" <+> pp n
+      StructShape n fs -> pp n <+> braces (commaSep (map pp fs))
+      TupleShape n -> "tuple" <+> pp n
+
 
 rebuildShape :: Shape ->
-                ([Expression] -> Expression) ->
-                [ Expression ] ->
-                Expression
+                ([StructData Expression] -> StructData Expression) ->
+                [ StructData Expression ] -> StructData Expression
 rebuildShape sh mk es =
   case sh of
 
-    ArrayShape n -> Array [ mk (map (getN i) es) | i <- take n [ 0 .. ] ]
-      where getN i e = caseThruRange e $ \v ->
-                       case v of
-                         Array vs ->
+    ArrayShape n -> SArray [ mk (map (getN i) es) | i <- take n [ 0 .. ] ]
+      where getN i v = case v of
+                         SArray vs ->
                            case drop i vs of
                              el : _ -> el
                              [] -> panic "rebuildShape"
@@ -587,10 +659,9 @@ rebuildShape sh mk es =
                                 , "*** Got: " ++ showPP v ]
 
 
-    TupleShape n -> Tuple [ mk (map (getN i) es) | i <- take n [ 0 .. ] ]
-      where getN i e = caseThruRange e $ \v ->
-                       case v of
-                         Tuple vs ->
+    TupleShape n -> STuple [ mk (map (getN i) es) | i <- take n [ 0 .. ] ]
+      where getN i v = case v of
+                         STuple vs ->
                            case drop i vs of
                              el : _ -> el
                              [] -> panic "rebuildShape"
@@ -601,11 +672,10 @@ rebuildShape sh mk es =
                                 , "*** Expected: a tuple"
                                 , "*** Got: " ++ showPP v ]
 
-    StructShape s is -> Struct s Nothing [ Field i (mk (map (getN i) es))
+    StructShape s is -> SStruct s [ Field i (mk (map (getN i) es))
                                                             | i <- is ]
-      where getN i e = caseThruRange e $ \v ->
-                       case v of
-                         Struct s' Nothing vs | s == s' ->
+      where getN i v = case v of
+                         SStruct s' vs | s == s' ->
                            case [ fv | Field l fv <- vs, l == i ] of
                              el : _ -> el
                              [] -> panic "rebuildShape"
@@ -621,15 +691,14 @@ rebuildShape sh mk es =
 
 
 
--- | Get the shape of an expressio.
-getShape :: Expression -> Maybe Shape
+-- | Get the outermost shape of an expressio
+getShape :: StructData a -> Either a Shape
 getShape expr =
   case expr of
-    ERange _ e -> getShape e
-    Array vs   -> Just (ArrayShape (length vs))
-    Struct s Nothing fs -> Just (StructShape s [ l | Field l _ <- fs ])
-    Tuple vs -> Just (TupleShape (length vs))
-    _ -> Nothing
+    SArray vs     -> Right (ArrayShape (length vs))
+    SStruct s fs  -> Right (StructShape s [ l | Field l _ <- fs ])
+    STuple vs     -> Right (TupleShape (length vs))
+    SLeaf a       -> Left a
 
 
 -- | Convert a literal expression to integer, or panic.

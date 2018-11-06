@@ -129,7 +129,7 @@ instance Defines TypeDef where
 instance Uses FieldType where
   uses t = uses (fieldType t, fieldDefault t)
 
-instance Uses Field where
+instance Uses e => Uses (Field e) where
   uses (Field _ e) = uses e
 
 instance Uses Type where
@@ -219,7 +219,7 @@ instance Uses Expression where
       Merge x es -> aVal (Unqual x) <> uses es
       CallPos f es -> uses (f,es)
 
-instance Uses MergeCase where
+instance Uses e => Uses (MergeCase e) where
   uses (MergeCase c v) = uses (c,v)
 
 instance Uses ClockExpr where

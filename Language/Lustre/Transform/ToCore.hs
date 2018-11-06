@@ -38,7 +38,7 @@ getEnumInfo mbCur tds = foldr addDefs Map.empty enums
 
 
 -- | Translate a node to core form, given information about enumerations.
-evalNodeDecl :: Map P.Name C.Expr -> P.NodeDecl -> C.Node
+evalNodeDecl :: Map P.Name C.Expr -> P.NodeDecl -> (Map P.Ident C.Ident, C.Node)
 evalNodeDecl enumCs nd
   | null (P.nodeStaticInputs nd)
   , Just def <- P.nodeDef nd =
@@ -53,12 +53,14 @@ evalNodeDecl enumCs nd
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
          props <- getPropertyNames
-         pure C.Node { C.nInputs   = ins
+         varMp <- getVarMap
+         pure (varMp
+              , C.Node { C.nInputs   = ins
                      , C.nOutputs  = [ i | i C.::: _ <- outs ]
                      , C.nAssuming = asts
                      , C.nShows    = props
                      , C.nEqns     = concat eqnss
-                     }
+                     })
 
   | otherwise = panic "evalNodeDecl"
                 [ "Unexpected node declaration"
@@ -99,12 +101,13 @@ runProcessNode enumCs m = fst $ runId $ runStateT st m
           , stEqns = []
           , stAssertNames = []
           , stPropertyNames = []
+          , stVarMap = Map.empty
           }
 
 data St = St
   { stLocalTypes :: Map C.Ident C.CType
     -- ^ Types of local translated variables.
-    -- These may change as we generate new euqtaions.
+    -- These may change as we generate new equations.
 
   , stSrcLocalTypes :: Map P.Ident C.CType
     -- ^ Types of local variables from the source.
@@ -124,11 +127,15 @@ data St = St
     -- reverse to get proper definition order.
 
   , stAssertNames :: [(Text,C.Ident)]
-    -- ^ The names of the equatiosn corresponding to asserts.
+    -- ^ The names of the equations corresponding to asserts.
 
   , stPropertyNames :: [(Text,C.Ident)]
     -- ^ The names of the equatiosn corresponding to properties.
 
+
+  , stVarMap :: Map P.Ident C.Ident
+    {- ^ Remembers what names we used for values in the core.
+    This is so that when we can parse traces into their original names. -}
   }
 
 -- | Get the collected assert names.
@@ -206,8 +213,13 @@ addPropertyName :: Text -> C.Ident -> M ()
 addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 
+-- | Remember that a source variable got mapped to the given core variable.
+rememberMapping :: P.Ident -> C.Ident -> M ()
+rememberMapping x y =
+  sets_ $ \s -> s { stVarMap = Map.insert x y (stVarMap s) }
 
-
+getVarMap :: M (Map P.Ident C.Ident)
+getVarMap = stVarMap <$> get
 
 --------------------------------------------------------------------------------
 
@@ -224,7 +236,10 @@ evalBinder b =
                    _ -> pure (C.Prim C.Eq [ i1,e1 ])
      let t = evalType (P.binderType b) `C.On` c
      addSrcLocal (P.binderDefines b) t
-     pure (evalIdent (P.binderDefines b) C.::: t)
+     let x = P.binderDefines b
+         i = evalIdent x
+     rememberMapping x i
+     pure (i C.::: t)
 
 -- | Translate an equation.
 -- Invariant: 'stEqns' should be empty before and after this executes.
