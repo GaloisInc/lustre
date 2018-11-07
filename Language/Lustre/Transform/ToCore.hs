@@ -174,10 +174,16 @@ addSrcLocal x t = sets_ $ \s ->
 
 -- | Generate a fresh identifier.
 newIdent :: M C.Ident
-newIdent = sets $ \s ->
+newIdent = newIdentFrom "__core_"
+
+-- | Generate a fresh name with the given stemp
+newIdentFrom :: Text -> M C.Ident
+newIdentFrom stem = sets $ \s ->
   let x = stNameSeed s
-      i = C.Ident ("__core_" <> Text.pack (show x))
+      i = C.Ident (stem <> Text.pack (show x))
   in (i, s { stNameSeed = 1 + stNameSeed s })
+
+
 
 -- | Remember an equation.
 addEqn :: C.Eqn -> M ()
@@ -196,13 +202,26 @@ nameExpr expr =
   do tys <- getLocalTypes
      case C.typeOf tys expr of
        Just t ->
-          do i <- newIdent
+          do i <- newIdentFrom stem
              addEqn (i C.::: t C.:= expr)
              pure (C.Var i)
        Nothing -> panic "nameExpr" [ "Failed to compute the type of:"
                                    , "*** Expression: " ++ showPP expr
                                    , "*** Types: " ++ show tys
                                    ]
+  where
+  stem = case expr of
+           C.Atom a -> case a of
+                         C.Prim op _ -> Text.pack (show op)
+                         _ -> panic "nameExpr" [ "Naming a simple atom?"
+                                               , "*** Atom:" ++ showPP a ]
+           C.Pre a -> case a of
+                         C.Var (C.Ident x) -> "_pre_" <> x <> "_"
+                         _ -> "_pre_"
+           _ C.:->      _ -> "_arr_"
+           C.When {}    -> "_when_"
+           C.Current {} -> "_current_"
+           C.Merge {}   -> "_merge_"
 
 -- | Remember that the given identifier was used for an assert.
 addAssertName :: Text -> C.Ident -> M ()
