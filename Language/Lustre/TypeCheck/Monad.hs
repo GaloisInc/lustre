@@ -4,6 +4,7 @@ module Language.Lustre.TypeCheck.Monad where
 import Data.Set(Set)
 import Data.Map(Map)
 import qualified Data.Map as Map
+import Data.Maybe(listToMaybe)
 import Text.PrettyPrint as PP
 import MonadLib
 
@@ -18,7 +19,7 @@ runTC (M m) = case runM m ro0 rw0 of
   ro0 = RO { roConstants = Map.empty
            , roUserNodes = Map.empty
            , roIdents    = Map.empty
-           , roCurRange  = Nothing
+           , roCurRange  = []
            , roTypeNames = Map.empty
            , roTemporal  = False
            , roUnsafe    = False
@@ -28,9 +29,14 @@ runTC (M m) = case runM m ro0 rw0 of
            , rwClockVarSubst = Map.empty
            , rwNextTVar = 0
            , rwTyVarSubst = Map.empty
-           , rwSubCtrs = []
+           , rwCtrs = []
            }
 
+data Constraint = Subtype Type Type
+                | Arith1 Doc Type Type      -- op ^ in, out
+                | Arith2 Doc Type Type Type -- ^ op, in1, in2, out
+                | CmpEq Doc Type Type       -- ^ op in1, in2
+                | CmpOrd Doc Type Type      -- ^ op, in1, in2
 
 -- | A single clock expression.
 data IClock     = BaseClock
@@ -77,7 +83,7 @@ data RO = RO
   { roConstants :: Map Name (SourceRange,Type)
   , roUserNodes :: Map Name (SourceRange,Safety,NodeType,NodeProfile)
   , roIdents    :: Map Ident (SourceRange, CType)
-  , roCurRange  :: Maybe SourceRange
+  , roCurRange  :: [SourceRange]
   , roTypeNames :: Map Name (SourceRange,NamedType) -- no type vars here
   , roTemporal  :: Bool
   , roUnsafe    :: Bool
@@ -88,7 +94,8 @@ data RW = RW
   , rwClockVarSubst  :: Map CVar IClock
   , rwNextTVar       :: !Int
   , rwTyVarSubst     :: Map TVar Type   -- ^ tv equals
-  , rwSubCtrs        :: [(Type,Type)]   -- ^ delayed subtyping constraints
+  , rwCtrs           :: [(Maybe SourceRange, Constraint)]
+                        -- ^ delayed constraints
   }
 
 data NamedType = StructTy (Map Ident Type)
@@ -99,10 +106,10 @@ data NamedType = StructTy (Map Ident Type)
 
 reportError :: Doc -> M a
 reportError msg =
-  M (do mb <- roCurRange <$> ask
-        let msg1 = case mb of
-                     Nothing -> msg
-                     Just l  -> "Type error at:" <+> pp l $$ msg
+  M (do rs <- roCurRange <$> ask
+        let msg1 = case rs of
+                     [] -> msg
+                     l : _  -> "Type error at:" <+> pp l $$ msg
         raise msg1)
 
 notYetImplemented :: Doc -> M a
@@ -115,7 +122,23 @@ nestedError x ys = vcat (x : [ "***" <+> y | y <- ys ])
 
 inRange :: SourceRange -> M a -> M a
 inRange r (M a) = M (mapReader upd a)
-  where upd ro = ro { roCurRange = Just r }
+  where upd ro = ro { roCurRange = r : roCurRange ro }
+
+inRangeSet :: SourceRange -> M a -> M a
+inRangeSet r (M a) = M (mapReader upd a)
+  where upd ro = ro { roCurRange = [r] }
+
+inRangeSetMaybe :: Maybe SourceRange -> M a -> M a
+inRangeSetMaybe mb m = case mb of
+                         Nothing -> m
+                         Just r -> inRangeSet r m
+
+inRangeMaybe :: Maybe SourceRange -> M a -> M a
+inRangeMaybe mb m = case mb of
+                      Nothing -> m
+                      Just r  -> inRange r m
+
+
 
 lookupIdentMaybe :: Ident -> M (Maybe CType)
 lookupIdentMaybe i = M (fmap snd . Map.lookup i . roIdents <$> ask)
@@ -143,6 +166,15 @@ tidyType t =
     NamedType x    -> resolveNamed x
     TVar x         -> resolveTVar x
     _              -> pure t
+
+tidyConstraint :: Constraint -> M Constraint
+tidyConstraint ctr =
+  case ctr of
+    Subtype a b     -> Subtype  <$> tidyType a <*> tidyType b
+    Arith1 x a b    -> Arith1 x <$> tidyType a <*> tidyType b
+    Arith2 x a b c  -> Arith2 x <$> tidyType a <*> tidyType b <*> tidyType c
+    CmpEq x a b     -> CmpEq x  <$> tidyType a <*> tidyType b
+    CmpOrd x a b    -> CmpOrd x <$> tidyType a <*> tidyType b
 
 resolveNamed :: Name -> M Type
 resolveNamed x =
@@ -340,11 +372,12 @@ bindTVar x t =
          ArrayType elT _ -> occursCheck elT
          _ -> pure ()
 
-subConstraint :: Type -> Type -> M ()
-subConstraint x y =
-  M $ sets_ $ \rw -> rw { rwSubCtrs = (x,y) : rwSubCtrs rw }
+addConstraint :: Constraint -> M ()
+addConstraint c =
+  do r <- listToMaybe . roCurRange <$> M ask
+     M $ sets_ $ \rw -> rw { rwCtrs = (r, c) : rwCtrs rw }
 
-resetSubConstraints :: M [(Type,Type)]
-resetSubConstraints =
-  M $ sets $ \rw -> (rwSubCtrs rw, rw { rwSubCtrs = [] })
+
+resetConstraints :: M [(Maybe SourceRange, Constraint)]
+resetConstraints = M $ sets $ \rw -> (rwCtrs rw, rw { rwCtrs = [] })
 

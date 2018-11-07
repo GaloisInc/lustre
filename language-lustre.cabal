@@ -22,6 +22,7 @@ library
                        Language.Lustre.Utils,
 
                        Language.Lustre.TypeCheck,
+                       Language.Lustre.TypeCheck.Constraint,
                        Language.Lustre.TypeCheck.Monad,
 
                        Language.Lustre.Transform.OrderDecls,

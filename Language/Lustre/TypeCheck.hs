@@ -12,6 +12,8 @@ import Language.Lustre.Pretty
 import Language.Lustre.Transform.OrderDecls
 import Language.Lustre.Panic
 import Language.Lustre.TypeCheck.Monad
+import Language.Lustre.TypeCheck.Constraint
+
 
 
 quickCheckDecls :: [TopDecl] -> Either Doc ()
@@ -79,7 +81,6 @@ checkFieldType f =
 checkNodeDecl :: NodeDecl -> M a -> M a
 checkNodeDecl nd k =
   do (a,b) <- check
-     mapM_ (\(x,y) -> subType' False x y) =<< resetSubConstraints
      withNode a b k
   where
   check =
@@ -95,14 +96,15 @@ checkNodeDecl nd k =
                      ["Node:" <+> pp (nodeName nd)]
            Nothing -> pure ()
        let prof = nodeProfile nd
-       checkBinders (nodeInputs prof ++ nodeOutputs prof) $
+       res <- checkBinders (nodeInputs prof ++ nodeOutputs prof) $
          do case nodeDef nd of
               Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
                            "Missing node definition"
                            ["Node:" <+> pp (nodeName nd)]
               Just b -> checkNodeBody b
             pure (nodeName nd, (nodeSafety nd, nodeType nd, nodeProfile nd))
-
+       solveConstraints
+       pure res
 
 
 checkNodeBody :: NodeBody -> M ()
@@ -131,25 +133,28 @@ checkLocalDecl ld m =
 
 checkConstDef :: ConstDef -> M a -> M a
 checkConstDef c m =
-  inRange (range (constName c)) $
-  case constDef c of
-    Nothing ->
-      case constType c of
-        Nothing -> reportError $ nestedError
-                   "Constant declaration with no type or default."
-                   [ "Name:" <+> pp (constName c) ]
-        Just t -> do checkType t
-                     done t
-
-    Just e ->
-      do t <- case constType c of
-                Nothing -> newTVar
-                Just t  -> do checkType t
-                              pure t
-         checkConstExpr e t
-         done t
+  do t <- checkDef
+     withConst (constName c) t m
   where
-  done t = withConst (constName c) t m
+  checkDef =
+    inRange (range (constName c)) $
+    case constDef c of
+      Nothing ->
+        case constType c of
+          Nothing -> reportError $ nestedError
+                     "Constant declaration with no type or default."
+                     [ "Name:" <+> pp (constName c) ]
+          Just t -> do checkType t
+                       pure t
+
+      Just e ->
+        do t <- case constType c of
+                  Nothing -> newTVar
+                  Just t  -> do checkType t
+                                pure t
+           checkConstExpr e t
+           pure t
+
 
 checkBinder :: Binder -> M a -> M a
 checkBinder b m =
@@ -234,14 +239,14 @@ checkConstExpr expr ty =
   case expr of
     ERange r e -> inRange r (checkConstExpr e ty)
     Var x      -> checkConstVar x ty
-    Lit l      -> subType (inferLit l) ty
+    Lit l      -> ensure (Subtype (inferLit l) ty)
     _ `When` _ -> reportError "`when` is not a constant expression."
     Tuple {}   -> reportError "tuples cannot be used in constant expressions."
     Array es   ->
       do elT <- newTVar
          mapM_ (`checkConstExpr` elT) es
          let n = Lit $ Int $ fromIntegral $ length es
-         subType (ArrayType elT n) ty
+         ensure (Subtype (ArrayType elT n) ty)
 
     Struct {} -> undefined
 
@@ -249,7 +254,7 @@ checkConstExpr expr ty =
       do t <- newTVar
          checkConstExpr e t
          t1 <- inferSelector s t
-         subType t1 ty
+         ensure (Subtype t1 ty)
 
     WithThenElse e1 e2 e3 ->
       do checkConstExpr e1 BoolType
@@ -277,7 +282,7 @@ checkExpr expr tys =
 
     Lit l      -> do ty <- one tys
                      let lt = inferLit l
-                     subType lt (cType ty)
+                     ensure (Subtype lt (cType ty))
 
     e `When` c ->
       do checkTemporalOk "when"
@@ -298,7 +303,7 @@ checkExpr expr tys =
       do ty  <- one tys
          elT <- newTVar
          let n = Lit $ Int $ fromIntegral $ length es
-         subType (ArrayType elT n) (cType ty)
+         ensure (Subtype (ArrayType elT n) (cType ty))
          let elCT = ty { cType = elT }
          mapM_ (`checkExpr1` elCT) es
 
@@ -308,7 +313,7 @@ checkExpr expr tys =
          recT <- newTVar
          checkExpr1 e ty { cType = recT }
          t1 <- inferSelector s recT
-         subType t1 (cType ty)
+         ensure (Subtype t1 (cType ty))
 
     Struct {} -> undefined
 
@@ -338,7 +343,7 @@ checkExpr expr tys =
                checkConstExpr e2 IntType
                elT <- newTVar
                checkExpr e1 [ty { cType = elT }]
-               subType (ArrayType elT e2) (cType ty)
+               ensure (Subtype (ArrayType elT e2) (cType ty))
           _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
 
       | otherwise ->
@@ -461,7 +466,7 @@ checkPrim prim es tys =
       do ty <- one tys
          let bool = ty { cType = BoolType }
          mapM_ (`checkExpr1` bool) es
-         subType BoolType (cType ty)
+         ensure (Subtype BoolType (cType ty))
 
 
 
@@ -491,19 +496,19 @@ checkOp1 op e ty =
 
     Not ->
       do checkExpr1 e ty { cType = BoolType }
-         subType BoolType (cType ty)
+         ensure (Subtype BoolType (cType ty))
 
     Neg -> do t <- newTVar
               checkExpr1 e ty { cType = t }
-              classArith1 "-" t (cType ty)
+              ensure (Arith1 "-" t (cType ty))
 
     IntCast ->
       do checkExpr1 e ty { cType = IntType }
-         subType RealType (cType ty)
+         ensure (Subtype RealType (cType ty))
 
     RealCast ->
       do checkExpr1 e ty { cType = RealType }
-         subType IntType (cType ty)
+         ensure (Subtype IntType (cType ty))
 
 
 -- | Types of binary operators.
@@ -523,13 +528,13 @@ checkOp2 op2 e1 e2 res =
     Xor      -> bool2
     Implies  -> bool2
 
-    Eq       -> rel classEq
-    Neq      -> rel classEq
+    Eq       -> rel (CmpEq "=")
+    Neq      -> rel (CmpEq "<>")
 
-    Lt       -> rel (classOrd "<")
-    Leq      -> rel (classOrd "<=")
-    Gt       -> rel (classOrd ">")
-    Geq      -> rel (classOrd ">=")
+    Lt       -> rel (CmpOrd "<")
+    Leq      -> rel (CmpOrd "<=")
+    Gt       -> rel (CmpOrd ">")
+    Geq      -> rel (CmpOrd ">=")
 
     Add      -> arith "+"
     Sub      -> arith "-"
@@ -553,10 +558,10 @@ checkOp2 op2 e1 e2 res =
              case b of
                ArrayType elT2 sz2 ->
                  do c <- newTVar
-                    elT1 `subType` c
-                    elT2 `subType` c
+                    ensure (Subtype elT1 c)
+                    ensure (Subtype elT2 c)
                     sz <- addExprs sz1 sz2
-                    ArrayType c sz `subType` cType res
+                    ensure (Subtype (ArrayType c sz) (cType res))
                TVar {} -> noInfer "right"
                _       -> typeError "right" b
            TVar {} ->
@@ -589,13 +594,13 @@ checkOp2 op2 e1 e2 res =
               pure (t1,t2)
 
   rel f = do (t1,t2) <- infer2
-             () <- f t1 t2
+             () <- ensure (f t1 t2)
              retBool
 
-  retBool = subType BoolType (cType res)
+  retBool = ensure (Subtype BoolType (cType res))
 
   arith x = do (t1,t2) <- infer2
-               classArith2 x t1 t2 (cType res)
+               ensure (Arith2 x t1 t2 (cType res))
 
 
 
@@ -613,7 +618,7 @@ checkVar x ty =
 checkConstVar :: Name -> Type -> M ()
 checkConstVar x ty = inRange (range x) $
                      do t1 <- lookupConst x
-                        t1 `subType` ty
+                        ensure (Subtype t1 ty)
 
 -- | Infer the type of a literal.
 inferLit :: Literal -> Type
@@ -695,86 +700,11 @@ inferSelector sel ty0 =
 
 subCType :: CType -> CType -> M ()
 subCType x y =
-  do subType   (cType x) (cType y)
+  do ensure (Subtype (cType x) (cType y))
      sameClock (cClock x) (cClock y)
 
-sameType :: Type -> Type -> M ()
-sameType x y =
-  do s <- tidyType x
-     t <- tidyType y
-     case (s,t) of
-      (TVar v, _) -> bindTVar v t
-      (_,TVar v)  -> bindTVar v s
-      (NamedType a,   NamedType b)   | a == b -> pure ()
-      (ArrayType a m, ArrayType b n) -> sameConsts m n >> sameType a b
 
-      (IntType,IntType)   -> pure ()
-      (RealType,RealType) -> pure ()
-      (BoolType,BoolType) -> pure ()
-      (IntSubrange a b, IntSubrange c d) ->
-        sameConsts a c >> sameConsts b d
-      _ -> reportError $ nestedError
-            "Type mismatch:"
-            [ "Values of type:" <+> pp s
-            , "Do not fit into type:" <+> pp t
-            ]
 
-subType :: Type -> Type -> M ()
-subType = subType' True
-
--- Subtype is like "subset"
-subType' :: Bool -> Type -> Type -> M ()
-subType' delay x y =
-  do s <- tidyType x
-     case s of
-       IntSubrange a b ->
-         do t <- tidyType y
-            case t of
-              IntType         -> pure ()
-              IntSubrange c d -> leqConsts c a >> leqConsts b d
-              TVar {}         -> later s t
-              _               -> sameType s t
-
-       ArrayType elT n ->
-         do elT' <- newTVar
-            subType' True elT elT'
-            sameType (ArrayType elT' n) y
-
-       TVar {} ->
-         do t <- tidyType y
-            case t of
-              TypeRange {} -> panic "subType"
-                                      ["`tidyType` returned `TypeRange`"]
-              RealType     -> sameType s t
-              BoolType     -> sameType s t
-              NamedType {} -> sameType s t
-              ArrayType elT sz ->
-                do elT' <- newTVar
-                   subType' True elT' elT
-                   sameType s (ArrayType elT' sz)
-              IntType        -> later s t
-              IntSubrange {} -> later s t
-              TVar {} -> notYetImplemented "subType: 2 vars"
-
-       _ -> sameType s y
-  where
-  later a b = if delay
-                then subConstraint a b
-                else hackDefault a b
-
-  hackDefault a b =
-    do a' <- tidyType a
-       case a' of
-         TVar v -> bindTVar v b
-         _ -> do b' <- tidyType b
-                 case b' of
-                   TVar v -> bindTVar v a'
-                   _ -> typeError a' b'
-
-  typeError a b= reportError $ nestedError
-                     "Failed to discharge subtyping constraint"
-                      [ "Values of type:" <+> pp a
-                      , "Should fit in type:" <+> pp b]
 
 
 
@@ -827,29 +757,12 @@ clockParent ct0 =
 --------------------------------------------------------------------------------
 -- Expressions
 
-intConst :: Expression -> M Integer
-intConst x =
-  case x of
-    ERange _ y  -> intConst y
-    Lit (Int a) -> pure a
-    _ -> reportError $ nestedError
-           "Constant expression is not a concrete integer."
-           [ "Expression:" <+> pp x ]
-
 binConst :: (Integer -> Integer -> Integer) ->
             Expression -> Expression -> M Expression
 binConst f e1 e2 =
   do x <- intConst e1
      y <- intConst e2
      pure $ Lit $ Int $ f x y
-
-cmpConsts :: Doc ->
-             (Integer -> Integer -> Bool) ->
-             Expression -> Expression -> M ()
-cmpConsts op p e1 e2 =
-  do x <- intConst e1
-     y <- intConst e2
-     unless (p x y) $ reportError $ pp x <+> "is not" <+> op <+> pp y
 
 addExprs :: Expression -> Expression -> M Expression
 addExprs = binConst (+) -- XXX: Can make an expression instead
@@ -860,132 +773,7 @@ minExprs = binConst min
 maxConsts :: Expression -> Expression -> M Expression
 maxConsts = binConst max
 
-sameConsts :: Expression -> Expression -> M ()
-sameConsts e1 e2 =
-  case (e1,e2) of
-    (ERange _ x,_)  -> sameConsts x e2
-    (_, ERange _ x) -> sameConsts e1 x
-    (Var x, Var y) | x == y -> pure ()
-    (Lit x, Lit y) | x == y -> pure ()
-    _ -> reportError $ nestedError
-           "Constants do not match"
-           [ "Constant 1:" <+> pp e1
-           , "Constant 2:" <+> pp e2
-           ]
 
-leqConsts :: Expression -> Expression -> M ()
-leqConsts = cmpConsts "less-than, or equal to" (<=)
-
-
-
---------------------------------------------------------------------------------
-
--- | Are these types comparable of equality
-classEq :: Type -> Type -> M ()
-classEq s0 t0 =
-  do s <- tidyType s0
-     case s of
-       IntSubrange {} -> subType t0 IntType
-       ArrayType elT sz ->
-         do elT' <- newTVar
-            subType t0 (ArrayType elT' sz)
-            classEq elT elT'
-
-       TVar {} ->
-         do t <- tidyType t0
-            case t of
-              IntSubrange {} -> subType s IntType
-              _              -> subType s t
-       _ -> subType t0 s
-
-
-
--- | Are these types comparable for ordering
-classOrd :: Doc -> Type -> Type -> M ()
-classOrd op s' t' =
-  do s <- tidyType s'
-     case s of
-       IntType        -> subType t' IntType
-       IntSubrange {} -> subType t' IntType
-       RealType       -> subType t' RealType
-       TVar {} ->
-         do t <- tidyType t'
-            case t of
-              IntType        -> subType s IntType
-              IntSubrange {} -> subType s IntType
-              RealType       -> subType s RealType
-              TVar {} -> notYetImplemented "Very polymorhic Eq comparison"
-              _ -> typeError
-       _ -> typeError
-  where
-  typeError = reportError $ nestedError
-                "Invalid use of comparison operator:"
-                [ "Operator:" <+> op
-                , "Input 1:" <+> pp s'
-                , "Input 2:" <+> pp t'
-                ]
-
-
-
-classArith1 :: Doc -> Type -> Type -> M ()
-classArith1 op s0 t0 =
-  do t <- tidyType t0
-     case t of
-       IntType  -> subType s0 IntType
-       RealType -> subType s0 RealType
-       TVar {} ->
-         do s <- tidyType s0
-            case s of
-              IntType         -> subType IntType t0
-              IntSubrange {}  -> subType IntType t0
-              RealType        -> subType RealType t0
-              TVar {} -> notYetImplemented $
-                          "Very polymorhic unary arithmetic:" <+> op
-              _ -> typeError
-       _ -> typeError
-  where
-  typeError = reportError $ nestedError
-              "Invalid use of unary arithmetic operator."
-              [ "Operator:" <+> op
-              , "Input:"    <+> pp s0
-              , "Result:"   <+> pp t0 ]
-
-
--- | Can we do binary arithemtic on this type, and if so what's the
--- type of the answer.
-classArith2 :: Doc -> Type -> Type -> Type -> M ()
-classArith2 op s0 t0 r0 =
-  do r <- tidyType r0
-     case r of
-       IntType  -> subType s0 IntType  >> subType t0 IntType
-       RealType -> subType s0 RealType >> subType t0 RealType
-       TVar {}  ->
-         do s <- tidyType s0
-            case s of
-              IntType  -> subType t0 IntType  >> subType IntType r
-              IntSubrange {} -> subType t0 IntType >> subType IntType r
-              RealType -> subType t0 RealType >> subType RealType r
-              TVar {} ->
-                do t <- tidyType t0
-                   case t of
-                     IntType  -> subType s0 IntType  >> subType IntType r
-                     IntSubrange {} -> subType t0 IntType >> subType IntType r
-                     RealType -> subType s0 RealType >> subType RealType r
-                     TVar {} -> notYetImplemented
-                                   $ "Very polymorphic bin op:" <+> op
-                     _ -> typeError
-              _ -> typeError
-       _ -> typeError
-
-  where
-  typeError =
-    reportError $ nestedError
-      "Invalid use of binary arithmetic operator:"
-      [ "Operator:" <+> op
-      , "Input 1:"  <+> pp s0
-      , "Input 2:"  <+> pp t0
-      , "Result:"   <+> pp r0
-      ]
 
 
 
