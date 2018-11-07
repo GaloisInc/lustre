@@ -488,9 +488,9 @@ evalEqn :: Env -> Equation -> M [Equation]
 evalEqn env eqn =
   collectFunEqns $
   case eqn of
-    Assert x e    -> Assert x <$> evalDynExpr NestedExpr env e
-    Property x e  -> Property x <$> evalDynExpr NestedExpr env e
-    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
+    Assert x e    -> Assert x <$> evalDynExpr [0] env e
+    Property x e  -> Property x <$> evalDynExpr [0] env e
+    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr [] env e
     IsMain r    -> pure (IsMain r)
     IVC is      -> pure (IVC is)
 
@@ -834,27 +834,26 @@ addStaticParam p a env
 --------------------------------------------------------------------------------
 -- Evaluation of expressions
 
--- | Is this a top-level or a nested expression.
--- This is used to decide if we should lift-out function calls.
-data ExprLoc  = TopExpr       -- ^ Directly on the RHS of an equation.
-              | NestedExpr    -- ^ A sub-expression of another expression.
+
+-- | A path through the expression tree
+type ExprLoc = [Int]
 
 -- | Rewrite an expression that is not neccessarily constant.
 evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
 evalDynExpr eloc env expr =
   case expr of
-    ERange r e      -> ERange r <$> evalDynExpr eloc env e
+    ERange r e      -> ERange r <$> evalDynExpr (0:eloc) env e
     Var x           -> pure $ case Map.lookup x (C.envConsts (cEnv env)) of
                                 Just v  -> valToExpr env v
                                 Nothing -> expr
     Lit _           -> pure expr
 
 
-    e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
+    e1 `When` e2    -> do e1' <- evalDynExpr (0:eloc) env e1
                           pure (e1' `When` evalClockExpr env e2)
-    Tuple es        -> Tuple <$> mapM (evalDynExpr NestedExpr env) es
-    Array es        -> Array <$> mapM (evalDynExpr NestedExpr env) es
-    Select e s      -> do e' <- evalDynExpr NestedExpr env e
+    Tuple es -> Tuple <$> zipWithM (\n -> evalDynExpr (n:eloc) env) [0..] es
+    Array es -> Array <$> zipWithM (\n -> evalDynExpr (n:eloc) env) [0..] es
+    Select e s      -> do e' <- evalDynExpr (0:eloc) env e
                           pure (Select e' (evalSel env s))
 
 
@@ -862,16 +861,17 @@ evalDynExpr eloc env expr =
     -- in the declaration.
     Struct s mb fs  ->
       case mb of
-        Nothing -> evalNewStruct env s fs
+        Nothing -> evalNewStruct eloc env s fs
         Just x  ->
           case Map.lookup x (C.envConsts (cEnv env)) of
-            Nothing -> evalUpdExprStruct env s x fs
-            Just v  -> evalUpdConstStruct env s v fs
+            Nothing -> evalUpdExprStruct eloc env s x fs
+            Just v  -> evalUpdConstStruct eloc env s v fs
 
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
-        VBool b -> evalDynExpr eloc env (if b then e2 else e3)
+        VBool b -> if b then evalDynExpr (0:eloc) env e2
+                        else evalDynExpr (1:eloc) env e3
         v       -> panic "evalDynExpr"
                       [ "Decision in `with-then-else` is not a `bool`"
                       , "*** Value: " ++ showPP (valToExpr env v)
@@ -880,10 +880,10 @@ evalDynExpr eloc env expr =
     Merge i ms ->
       case Map.lookup (Unqual i) (C.envConsts (cEnv env)) of
         Just v  -> evalMergeConst eloc env v ms
-        Nothing -> Merge i <$> mapM (evalMergeCase env) ms
+        Nothing -> Merge i <$> zipWithM (evalMergeCase eloc env) [0..] ms
 
     CallPos f es ->
-      do es' <- do args <- mapM (evalDynExpr NestedExpr env) es
+      do es' <- do args <- zipWithM (\n -> evalDynExpr (n:eloc) env) [0..] es
                    pure $ case args of
                             [ e ] | Just xs <- isTuple e -> xs
                             _ -> args
@@ -896,8 +896,8 @@ evalDynExpr eloc env expr =
                       _ -> NodeInst c []
                   _ -> nameInstance env f
          let shouldName = case eloc of
-                            TopExpr -> False
-                            NestedExpr -> nameCallSites env
+                            [] -> False
+                            _  -> nameCallSites env
          if shouldName
             then nameCallSite env ni es'
             else pure (CallPos ni es')
@@ -975,23 +975,26 @@ evalMergeConst eloc env v ms =
                                  ]
 
 -- | Evaluate a case branch of a merge construct.
-evalMergeCase :: Env -> MergeCase Expression -> M (MergeCase Expression)
-evalMergeCase env (MergeCase p e) =
-  MergeCase (evalExpr env p) <$> evalDynExpr NestedExpr env e
+evalMergeCase ::
+  ExprLoc -> Env -> Int -> MergeCase Expression -> M (MergeCase Expression)
+evalMergeCase eloc env n (MergeCase p e) =
+  MergeCase (evalExpr env p) <$> evalDynExpr (n:eloc) env e
 
 -- | Evaluate an update to a struct that is not a constant.
-evalUpdExprStruct :: Env -> Name -> Name -> [Field Expression] -> M Expression
-evalUpdExprStruct env s x fs =
-  do fs' <- mapM evalField fs
+evalUpdExprStruct ::
+  ExprLoc -> Env -> Name -> Name -> [Field Expression] -> M Expression
+evalUpdExprStruct eloc env s x fs =
+  do fs' <- zipWithM evalField [0..] fs
      pure (Struct s (Just x) fs')
   where
-  evalField (Field l e) = Field l <$> evalDynExpr NestedExpr env e
+  evalField n (Field l e) = Field l <$> evalDynExpr (n:eloc) env e
 
 
 -- | Evaluate an update to a struct constant.
-evalUpdConstStruct :: Env -> Name -> Value -> [Field Expression] -> M Expression
-evalUpdConstStruct env s v fs =
-  evalNewStructWithDefs env s fs $
+evalUpdConstStruct ::
+  ExprLoc -> Env -> Name -> Value -> [Field Expression] -> M Expression
+evalUpdConstStruct eloc env s v fs =
+  evalNewStructWithDefs eloc env s fs $
   case v of
     VStruct _ fvs -> [ (l, Just fv) | (l,fv) <- fvs ]
     _ -> panic "evalUpdConstStruct"
@@ -1001,9 +1004,9 @@ evalUpdConstStruct env s v fs =
 
 -- | Evaluate a dynamic expression declaring a struct literal.
 -- Missing fields are added by using the default values declared in the type.
-evalNewStruct :: Env -> Name -> [Field Expression] -> M Expression
-evalNewStruct env s fs =
-  evalNewStructWithDefs env s fs $
+evalNewStruct :: ExprLoc -> Env -> Name -> [Field Expression] -> M Expression
+evalNewStruct eloc env s fs =
+  evalNewStructWithDefs eloc env s fs $
   case Map.lookup s (C.envStructs (cEnv env)) of
     Just def  -> def
     Nothing   -> panic "evalNewStruct" [ "Undefined struct type:"
@@ -1014,27 +1017,30 @@ evalNewStruct env s fs =
 {- | Evaluate a dynamic expression declaring a struct literal, using
 the given list of fields.  The list if fields should contain all fields
 in the struct, and the 'Maybe' value is an optional default--if it is
-'Nothing', then the filed must be defined, otherwise the dfault is used
+'Nothing', then the filed must be defined, otherwise the default is used
 in case the filed ismissing. -}
 evalNewStructWithDefs ::
-  Env -> Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
-evalNewStructWithDefs env s fs def =
-  do fieldMap <- Map.fromList <$> mapM evalField fs
-     let setField (f,mbV) =
-           Field f $
-           case Map.lookup f fieldMap of
-             Just e -> e
-             Nothing ->
-               case mbV of
-                 Just v  -> valToExpr env v
-                 Nothing  -> panic "evalNewStructWithDefs"
-                                                 [ "Missing field in struct:"
-                                                 , "*** Name: " ++ showPP f
-                                                 ]
-     pure (Struct s Nothing (map setField def))
+  ExprLoc -> Env ->
+  Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
+evalNewStructWithDefs eloc env s fs def =
+  do fld <- Map.fromList <$> zipWithM evalField [0..] fs
+     pure (Struct s Nothing (map (setField fld) def))
   where
-  evalField (Field l e) = do e' <- evalDynExpr NestedExpr env e
-                             return (l,e')
+  evalField n (Field l e) =
+    do e1 <- evalDynExpr (n : eloc) env e
+       return (l,e1)
+
+  setField fld (f,mbV) =
+    Field f $
+    case Map.lookup f fld of
+      Just e -> e
+      Nothing ->
+        case mbV of
+          Just v   -> valToExpr env v
+          Nothing  -> panic "evalNewStructWithDefs"
+                            [ "Missing field in struct:"
+                            , "*** Name: " ++ showPP f
+                            ]
 
 
 

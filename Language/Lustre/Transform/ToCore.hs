@@ -23,7 +23,6 @@ getEnumInfo mbCur tds = foldr addDefs Map.empty enums
   enums = [ is | P.DeclareType
                  P.TypeDecl { P.typeDef = Just (P.IsEnum is) } <- tds ]
 
-
   addDefs is m = foldr addDef m (zipWith mkDef is [ 0 .. ])
 
   mkDef i n = (i, C.Atom (C.Lit (C.Int n)))
@@ -36,8 +35,9 @@ getEnumInfo mbCur tds = foldr addDefs Map.empty enums
      Just m -> Map.insert (P.Qual (P.identRange i) m (P.identText i)) x
 
 
-
 -- | Translate a node to core form, given information about enumerations.
+-- We also return a mapping from original name to core names for translating
+-- models back.
 evalNodeDecl :: Map P.Name C.Expr -> P.NodeDecl -> (Map P.Ident C.Ident, C.Node)
 evalNodeDecl enumCs nd
   | null (P.nodeStaticInputs nd)
