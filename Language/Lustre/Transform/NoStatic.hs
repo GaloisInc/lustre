@@ -488,9 +488,9 @@ evalEqn :: Env -> Equation -> M [Equation]
 evalEqn env eqn =
   collectFunEqns $
   case eqn of
-    Assert x e    -> Assert x <$> evalDynExpr [0] env e
-    Property x e  -> Property x <$> evalDynExpr [0] env e
-    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr [] env e
+    Assert x e    -> Assert x <$> evalDynExpr NestedExpr env e
+    Property x e  -> Property x <$> evalDynExpr NestedExpr env e
+    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
     IsMain r    -> pure (IsMain r)
     IVC is      -> pure (IVC is)
 
@@ -835,25 +835,26 @@ addStaticParam p a env
 -- Evaluation of expressions
 
 
--- | A path through the expression tree
-type ExprLoc = [Int]
+-- | Keep track if we are at the top or nested, to determine
+-- when we should name call sites.
+data ExprLoc = TopExpr | NestedExpr
 
 -- | Rewrite an expression that is not neccessarily constant.
 evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
 evalDynExpr eloc env expr =
   case expr of
-    ERange r e      -> ERange r <$> evalDynExpr (0:eloc) env e
+    ERange r e      -> ERange r <$> evalDynExpr eloc env e
     Var x           -> pure $ case Map.lookup x (C.envConsts (cEnv env)) of
                                 Just v  -> valToExpr env v
                                 Nothing -> expr
     Lit _           -> pure expr
 
 
-    e1 `When` e2    -> do e1' <- evalDynExpr (0:eloc) env e1
+    e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
                           pure (e1' `When` evalClockExpr env e2)
-    Tuple es -> Tuple <$> zipWithM (\n -> evalDynExpr (n:eloc) env) [0..] es
-    Array es -> Array <$> zipWithM (\n -> evalDynExpr (n:eloc) env) [0..] es
-    Select e s      -> do e' <- evalDynExpr (0:eloc) env e
+    Tuple es -> Tuple <$> mapM (evalDynExpr NestedExpr env) es
+    Array es -> Array <$> mapM (evalDynExpr NestedExpr env) es
+    Select e s      -> do e' <- evalDynExpr NestedExpr env e
                           pure (Select e' (evalSel env s))
 
 
@@ -861,17 +862,17 @@ evalDynExpr eloc env expr =
     -- in the declaration.
     Struct s mb fs  ->
       case mb of
-        Nothing -> evalNewStruct eloc env s fs
+        Nothing -> evalNewStruct env s fs
         Just x  ->
           case Map.lookup x (C.envConsts (cEnv env)) of
-            Nothing -> evalUpdExprStruct eloc env s x fs
-            Just v  -> evalUpdConstStruct eloc env s v fs
+            Nothing -> evalUpdExprStruct env s x fs
+            Just v  -> evalUpdConstStruct env s v fs
 
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
-        VBool b -> if b then evalDynExpr (0:eloc) env e2
-                        else evalDynExpr (1:eloc) env e3
+        VBool b -> if b then evalDynExpr eloc env e2
+                        else evalDynExpr eloc env e3
         v       -> panic "evalDynExpr"
                       [ "Decision in `with-then-else` is not a `bool`"
                       , "*** Value: " ++ showPP (valToExpr env v)
@@ -879,11 +880,11 @@ evalDynExpr eloc env expr =
 
     Merge i ms ->
       case Map.lookup (Unqual i) (C.envConsts (cEnv env)) of
-        Just v  -> evalMergeConst eloc env v ms
-        Nothing -> Merge i <$> zipWithM (evalMergeCase eloc env) [0..] ms
+        Just v  -> evalMergeConst env v ms
+        Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     CallPos f es ->
-      do es' <- do args <- zipWithM (\n -> evalDynExpr (n:eloc) env) [0..] es
+      do es' <- do args <- mapM (evalDynExpr NestedExpr env) es
                    pure $ case args of
                             [ e ] | Just xs <- isTuple e -> xs
                             _ -> args
@@ -896,8 +897,8 @@ evalDynExpr eloc env expr =
                       _ -> NodeInst c []
                   _ -> nameInstance env f
          let shouldName = case eloc of
-                            [] -> False
-                            _  -> nameCallSites env
+                            TopExpr    -> False
+                            NestedExpr -> nameCallSites env
          if shouldName
             then nameCallSite env ni es'
             else pure (CallPos ni es')
@@ -963,38 +964,34 @@ nameCallSite env ni es =
 
 
 -- | Use a constant to select a branch in a merge.
-evalMergeConst :: ExprLoc -> Env -> Value -> [MergeCase Expression] ->
-                  M Expression
-evalMergeConst eloc env v ms =
+evalMergeConst :: Env -> Value -> [MergeCase Expression] -> M Expression
+evalMergeConst env v ms =
   case ms of
     MergeCase p e : more
-      | evalExprToVal env p == v -> evalDynExpr eloc env e
-      | otherwise                -> evalMergeConst eloc env v more
+      | evalExprToVal env p == v -> evalDynExpr NestedExpr env e
+      | otherwise                -> evalMergeConst env v more
     [] -> panic "evalMergeConst" [ "None of the branches of a merge matched:"
                                  , "*** Value: " ++ showPP (valToExpr env v)
                                  ]
 
 -- | Evaluate a case branch of a merge construct.
-evalMergeCase ::
-  ExprLoc -> Env -> Int -> MergeCase Expression -> M (MergeCase Expression)
-evalMergeCase eloc env n (MergeCase p e) =
-  MergeCase (evalExpr env p) <$> evalDynExpr (n:eloc) env e
+evalMergeCase :: Env -> MergeCase Expression -> M (MergeCase Expression)
+evalMergeCase env (MergeCase p e) =
+  MergeCase (evalExpr env p) <$> evalDynExpr NestedExpr env e
 
 -- | Evaluate an update to a struct that is not a constant.
-evalUpdExprStruct ::
-  ExprLoc -> Env -> Name -> Name -> [Field Expression] -> M Expression
-evalUpdExprStruct eloc env s x fs =
-  do fs' <- zipWithM evalField [0..] fs
+evalUpdExprStruct :: Env -> Name -> Name -> [Field Expression] -> M Expression
+evalUpdExprStruct env s x fs =
+  do fs' <- mapM evalField fs
      pure (Struct s (Just x) fs')
   where
-  evalField n (Field l e) = Field l <$> evalDynExpr (n:eloc) env e
+  evalField (Field l e) = Field l <$> evalDynExpr NestedExpr env e
 
 
 -- | Evaluate an update to a struct constant.
-evalUpdConstStruct ::
-  ExprLoc -> Env -> Name -> Value -> [Field Expression] -> M Expression
-evalUpdConstStruct eloc env s v fs =
-  evalNewStructWithDefs eloc env s fs $
+evalUpdConstStruct :: Env -> Name -> Value -> [Field Expression] -> M Expression
+evalUpdConstStruct env s v fs =
+  evalNewStructWithDefs env s fs $
   case v of
     VStruct _ fvs -> [ (l, Just fv) | (l,fv) <- fvs ]
     _ -> panic "evalUpdConstStruct"
@@ -1004,9 +1001,9 @@ evalUpdConstStruct eloc env s v fs =
 
 -- | Evaluate a dynamic expression declaring a struct literal.
 -- Missing fields are added by using the default values declared in the type.
-evalNewStruct :: ExprLoc -> Env -> Name -> [Field Expression] -> M Expression
-evalNewStruct eloc env s fs =
-  evalNewStructWithDefs eloc env s fs $
+evalNewStruct :: Env -> Name -> [Field Expression] -> M Expression
+evalNewStruct env s fs =
+  evalNewStructWithDefs env s fs $
   case Map.lookup s (C.envStructs (cEnv env)) of
     Just def  -> def
     Nothing   -> panic "evalNewStruct" [ "Undefined struct type:"
@@ -1020,14 +1017,13 @@ in the struct, and the 'Maybe' value is an optional default--if it is
 'Nothing', then the filed must be defined, otherwise the default is used
 in case the filed ismissing. -}
 evalNewStructWithDefs ::
-  ExprLoc -> Env ->
-  Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
-evalNewStructWithDefs eloc env s fs def =
-  do fld <- Map.fromList <$> zipWithM evalField [0..] fs
+  Env -> Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
+evalNewStructWithDefs env s fs def =
+  do fld <- Map.fromList <$> mapM evalField fs
      pure (Struct s Nothing (map (setField fld) def))
   where
-  evalField n (Field l e) =
-    do e1 <- evalDynExpr (n : eloc) env e
+  evalField (Field l e) =
+    do e1 <- evalDynExpr NestedExpr env e
        return (l,e1)
 
   setField fld (f,mbV) =
