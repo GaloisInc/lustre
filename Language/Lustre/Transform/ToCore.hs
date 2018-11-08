@@ -172,10 +172,6 @@ addSrcLocal x t = sets_ $ \s ->
     , stGlobEnumCons  = Map.delete (P.Unqual x) (stGlobEnumCons s)
     }
 
--- | Generate a fresh identifier.
-newIdent :: M C.Ident
-newIdent = newIdentFrom "__core_"
-
 -- | Generate a fresh name with the given stemp
 newIdentFrom :: Text -> M C.Ident
 newIdentFrom stem = sets $ \s ->
