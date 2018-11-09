@@ -28,7 +28,7 @@ runFromFile file =
        ProgramDecls ds ->
          case quickCheckDecls ds of
            Left err -> hPutStrLn stderr (show err)
-           Right _  -> runNodeIO (desugarNode ds Nothing)
+           Right _  -> runNodeIO (snd $ desugarNode ds Nothing)
        _ -> hPutStrLn stderr "We don't support packages for the moment."
 
 
