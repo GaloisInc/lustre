@@ -3,15 +3,15 @@ module Language.Lustre.Transform.Desugar where
 
 import Control.Monad(msum)
 import Text.PrettyPrint(hsep,punctuate,comma)
-import qualified Data.Map as Map
+import Data.Map (Map)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Pretty(pp)
 
 import Language.Lustre.Transform.OrderDecls(orderTopDecls)
-import Language.Lustre.Transform.NoStatic(quickNoConst)
-import Language.Lustre.Transform.NoStruct(quickNoStruct)
+import Language.Lustre.Transform.NoStatic(quickNoConst,CallSiteId)
+import Language.Lustre.Transform.NoStruct(quickNoStruct,StructData(..))
 import Language.Lustre.Transform.Inline(quickInlineCalls)
 import Language.Lustre.Transform.ToCore(evalNodeDecl, getEnumInfo)
 
@@ -31,7 +31,7 @@ desugarNode ::
   [P.TopDecl] ->
   Maybe P.Name
   {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
-  C.Node
+  (ModelInfo, C.Node)
 desugarNode decls mbN =
   case desugarNode' decls mbN of
     Just n -> n
@@ -49,27 +49,29 @@ desugarNode' ::
   [P.TopDecl] ->
   Maybe P.Name
   {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
-  Maybe C.Node
+  Maybe (ModelInfo, C.Node)
 desugarNode' decls mbN =
   do nd <- theNode
-     let nm             = P.nodeName nd
-
-         _resugarStruct = Map.findWithDefault Map.empty nm gStructInfo
-         _ren           = Map.findWithDefault Map.empty nm allRens
-         (_varMp,core)  = evalNodeDecl enumInfo nd
-     pure $ case C.orderedEqns (C.nEqns core) of
-              Right es  -> core { C.nEqns = es }
-              Left recs ->
-                panic "desugarNode"
-                  $ "Recursive equations in the specification:" :
-                  [ "*** Binders: " ++
-                      show (hsep (punctuate comma (map C.ppBinder gs)))
-                      | gs <- recs
-                  ]
+     let (varMp,core)  = evalNodeDecl enumInfo nd
+         info          = ModelInfo { infoCallSites       = simpCSInfo
+                                   , infoExpandedStructs = gStructInfo
+                                   , infoInlining        = allRens
+                                   , infoCore            = varMp
+                                   }
+         cnd = case C.orderedEqns (C.nEqns core) of
+                 Right es  -> core { C.nEqns = es }
+                 Left recs ->
+                   panic "desugarNode"
+                     $ "Recursive equations in the specification:" :
+                     [ "*** Binders: " ++
+                         show (hsep (punctuate comma (map C.ppBinder gs)))
+                         | gs <- recs
+                     ]
+     pure (info, cnd)
   where
   ordered  = orderTopDecls decls
-  noStatic = quickNoConst True ordered
-  (gStructInfo,noStruct) = quickNoStruct noStatic
+  (csInfo, noStatic) = quickNoConst True ordered
+  (gStructInfo,simpCSInfo,noStruct) = quickNoStruct (csInfo,noStatic)
   (allRens,inlined)  = quickInlineCalls noStruct
 
   enumInfo = getEnumInfo Nothing ordered
@@ -117,8 +119,13 @@ desugarNode' decls mbN =
                          P.IsMain _ -> True
                          _          -> False
 
+--------------------------------------------------------------------------------
 
-
-
+data ModelInfo = ModelInfo
+  { infoCallSites       :: Map P.Ident (Map CallSiteId [P.Ident])
+  , infoExpandedStructs :: Map P.Ident (Map P.Ident (StructData P.Ident))
+  , infoInlining        :: Map P.Ident (Map [P.Ident] (Map P.Ident P.Ident))
+  , infoCore            :: Map P.Ident C.Ident
+  }
 
 

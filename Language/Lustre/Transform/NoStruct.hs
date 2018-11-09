@@ -18,14 +18,21 @@ import Text.PrettyPrint((<+>), braces, brackets, parens)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
+import Language.Lustre.Transform.NoStatic(CallSiteMap,CallSiteId)
 import Language.Lustre.Utils
 import Language.Lustre.Panic
 
+type SimpleCallSiteMap = Map Ident (Map CallSiteId [Ident])
+
 -- XXX: More flexible interface
-quickNoStruct :: [TopDecl] -> (Map Ident StructInfo,[TopDecl])
-quickNoStruct ds = (envCollectedInfo env, catMaybes mbDs)
+quickNoStruct :: (CallSiteMap,[TopDecl]) ->
+                 (Map Ident StructInfo, SimpleCallSiteMap, [TopDecl])
+quickNoStruct (csIn,ds) = ( envCollectedInfo env
+                          , envSimpleCallSiteMap env
+                          , catMaybes mbDs
+                          )
   where
-  (env,mbDs) = mapAccumL evalTopDecl emptyEnv ds
+  (env,mbDs) = mapAccumL evalTopDecl emptyEnv { envCallSiteMap = csIn } ds
 
 
 data Env = Env
@@ -33,7 +40,15 @@ data Env = Env
     -- ^ Structure infor for the current node. See "StructInfo"
 
   , envCollectedInfo :: Map Ident StructInfo
-    -- ^ Struct info for already processed modules.
+    -- ^ Struct info for already processed nodes.
+
+  , envCallSiteMap :: CallSiteMap
+    -- ^ These call sites need to be simlified;
+    -- the result is in "envSimpleCallSiteMap"
+
+  , envSimpleCallSiteMap :: SimpleCallSiteMap
+    -- ^ Call site info for already processed nodes.
+
 
   , envStructs :: Map Name [(Ident,Type)]
     -- ^ Definitions for strcut types.
@@ -99,6 +114,8 @@ emptyEnv :: Env
 emptyEnv = Env
   { envStructured = Map.empty
   , envCollectedInfo = Map.empty
+  , envCallSiteMap = Map.empty
+  , envSimpleCallSiteMap = Map.empty
   , envStructs    = Map.empty
   , envCurModule  = Nothing
   }
@@ -124,9 +141,14 @@ evalTopDecl env td =
                               [ "Unexpecetd constant declaration."
                               , "*** Declaration: " ++ showPP cd ]
     DeclareNode nd      -> (newEnv, Just (DeclareNode node))
-      where (info,node) = evalNode env nd
-            newEnv = env { envCollectedInfo = Map.insert (nodeName nd) info
-                                              (envCollectedInfo env) }
+      where (info,simp,node) = evalNode env nd
+            nm          = nodeName nd
+            newEnv = env { envCollectedInfo =
+                                      Map.insert nm info (envCollectedInfo env)
+                         , envCallSiteMap = Map.delete nm (envCallSiteMap env)
+                         , envSimpleCallSiteMap =
+                                  Map.insert nm simp (envSimpleCallSiteMap env)
+                         }
     DeclareNodeInst nid -> panic "evalTopDecl"
                              [ "Node instance declarations should be expanded."
                              , "*** Node instance: " ++ showPP nid
@@ -153,7 +175,7 @@ doAddStructDef env i fs = env { envStructs = Map.insert (Unqual i) def
 
 
 -- | Evaluate a node, expanding structured data.
-evalNode :: Env -> NodeDecl -> (StructInfo, NodeDecl)
+evalNode :: Env -> NodeDecl -> (StructInfo, Map CallSiteId [Ident], NodeDecl)
 evalNode env nd
   | null (nodeStaticInputs nd) =
     let prof = nodeProfile nd
@@ -165,13 +187,17 @@ evalNode env nd
                               }
         info1 = Map.unions [ inMap, outMap, envStructured env ]
         newEnv = env { envStructured = info1 }
-        (newInfo,newDef) = case nodeDef nd of
-                             Nothing -> (info1, Nothing)
-                             Just body ->
-                               let (info, body1) = evalNodeBody newEnv body
-                               in (info, Just body1)
+        (newInfo,simp,newDef) =
+          case nodeDef nd of
+            Nothing -> (info1, Map.empty, Nothing)
+            Just body ->
+              let todoCS = Map.findWithDefault Map.empty (nodeName nd)
+                                                         (envCallSiteMap env)
+                  (info, si, body1) = evalNodeBody newEnv todoCS body
+              in (info, si, Just body1)
 
       in ( newInfo
+         , simp
          , nd { nodeProfile = newProf
               , nodeDef     = newDef
               }
@@ -186,15 +212,18 @@ evalNode env nd
 
 -- | Evaluate a node's definition.  Expands the local variables,
 -- and rewrites the equations.
-evalNodeBody :: Env -> NodeBody -> (StructInfo, NodeBody)
-evalNodeBody env body =
+evalNodeBody :: Env -> Map a [LHS Expression] -> NodeBody ->
+                  (StructInfo, Map a [Ident], NodeBody)
+evalNodeBody env csTodo body =
   ( newStructInfo
+  , simpCS
   , NodeBody { nodeLocals = map LocalVar locBs
              , nodeEqns = concatMap (evalEqn newEnv) (nodeEqns body)
              }
   )
   where
   (locMap, locBs) = expandBinders env [ b | LocalVar b <- nodeLocals body ]
+  simpCS          = fmap (concatMap (expandLHS' newEnv)) csTodo
   newEnv          = env { envStructured = newStructInfo }
   newStructInfo   = Map.union locMap (envStructured env)
 
@@ -343,16 +372,19 @@ evalEqn env eqn =
                     CallPos {}   -> True
                     _            -> False
 
+expandLHS :: Env -> LHS Expression -> [ LHS a ]
+expandLHS env lhs = [ LVar i | i <- expandLHS' env lhs ]
 
 -- | Convert a possible complex LHS, to a simple (i.e., identifier) LHS
 -- on primitive types.
-expandLHS :: Env -> LHS Expression -> [ LHS Expression ]
-expandLHS env lhs = map exprIdLhs (flatStructData (evalExpr env (lhsToExpr lhs)))
+expandLHS' :: Env -> LHS Expression -> [ Ident ]
+expandLHS' env lhs =
+  map exprIdLhs (flatStructData (evalExpr env (lhsToExpr lhs)))
   where
   exprIdLhs e =
     case e of
       ERange _ e1    -> exprIdLhs e1
-      Var (Unqual i) -> LVar i
+      Var (Unqual i) -> i
       _ -> panic "expandLHS" [ "LHS is not an identifier"
                              , "*** Expression: " ++ showPP e ]
 

@@ -29,7 +29,11 @@ NOTE: We do NOT name calls to primitives that return a single result
 (e.g., +, #, |, or ITE)
 -}
 
-module Language.Lustre.Transform.NoStatic (quickNoConst) where
+module Language.Lustre.Transform.NoStatic
+  ( quickNoConst
+  , CallSiteMap
+  , CallSiteId, idFromRange
+  ) where
 
 import Data.Text(Text)
 import qualified Data.Text as Text
@@ -47,9 +51,12 @@ import Language.Lustre.Panic(panic)
 import Language.Lustre.Pretty
 
 
+type CallSiteMap = Map Ident (Map CallSiteId [LHS Expression])
+
 -- XXX
-quickNoConst :: Bool -> [TopDecl] -> [TopDecl]
-quickNoConst expand ds = reverse (readyDecls env)
+quickNoConst ::
+  Bool -> [TopDecl] -> ( CallSiteMap, [TopDecl])
+quickNoConst expand ds = (envCallSiteMap env, reverse (readyDecls env))
   where
   env = evalTopDecls emptyEnv { expandNodeInsts = expand
                               , nameCallSites   = True } ds
@@ -65,9 +72,18 @@ evalTopDecl env td =
     DeclareNodeInst nid -> evalNodeInstDecl env nid
 
 -- | Evaluate multiple top-level declarations from the same modeule.
-evalTopDecls :: Env -> [TopDecl] -> Env
+evalTopDecls :: Env -> [TopDecl ] -> Env
 evalTopDecls = foldl' evalTopDecl
 
+
+data CallSiteId = CallSiteId Int Int
+                  deriving (Eq,Ord,Show)
+
+-- | This ignores files, so it only makes sense for ranges in the same file.
+idFromRange :: SourceRange -> CallSiteId
+idFromRange r = CallSiteId (pos sourceFrom) (pos (sourceTo))
+  where
+  pos f = sourceIndex (f r)
 
 
 --------------------------------------------------------------------------------
@@ -104,7 +120,7 @@ data Env = Env
     -- We also use this field when we are instantiating a node parameterized
     -- by a type:  the type parameters go in this map, temporarily.
 
-  , nodeTemplates :: Map Name TopDecl
+  , nodeTemplates :: Map Name (TopDecl )
     -- ^ Nodes with static parameters, used when we expand definitions.
 
   , readyDecls    :: [TopDecl]
@@ -133,6 +149,13 @@ data Env = Env
   , envNameInstSeed :: !Int
     -- ^ For generating names for function instantiations (not-expanded)
 
+  , envCurRange :: Maybe SourceRange
+    -- ^ Wherreabouts are we
+
+  , envCallSiteMap :: Map Ident (Map CallSiteId [LHS Expression])
+    {- ^ For each node, maps a range in the source to a call site.
+    The call site is identified by the variables storing the results
+    of the call. -}
   }
 
 
@@ -150,6 +173,8 @@ emptyEnv = Env { cEnv = C.emptyEnv
                , expandNodeInsts = False
                , nameCallSites = False
                , envNameInstSeed = 0
+               , envCurRange = Nothing
+               , envCallSiteMap = Map.empty
                }
 
 -- | Compute the name for a top-level identifyiner, qualifying with the
@@ -386,7 +411,7 @@ evalClockExpr env (WhenClock r e i) = WhenClock r (evalExpr env e) i
 {- | Evaluate a node declaration.
 Nodes with static parameters are added to the template map, while "normal"
 nodes are evaluated and added to the declaration list. -}
-evalNodeDecl :: Env -> NodeDecl -> Env
+evalNodeDecl :: Env -> NodeDecl  -> Env
 evalNodeDecl env nd =
   case nodeStaticInputs nd of
     [] -> evalNode env nd []
@@ -400,7 +425,7 @@ evalNodeDecl env nd =
 
 -- | Evaluate and instantiate a node with the given static parameters.
 -- We assume that the arguments have been evaluated already.
-evalNode :: Env -> NodeDecl -> [StaticArg] -> Env
+evalNode :: Env -> NodeDecl  -> [StaticArg] -> Env
 evalNode env nd args =
 
   case nodeDef nd of
@@ -422,12 +447,15 @@ evalNode env nd args =
       env4      = env3 { envNameInstSeed = -77 }
       -- Shouldn't be used, sanity;
 
-      (eqs,newLs,insts,newS) = runNameStatic
+      (eqs,newLs,insts,info,newS) = runNameStatic
                            (curModule env4)
                            (envNameInstSeed env)
                            (concat <$> mapM (evalEqn env4) (nodeEqns body))
 
-      envRet1 = env { envNameInstSeed = newS }
+      envRet1 = env { envNameInstSeed = newS
+                    , envCallSiteMap = Map.insert (nodeName nd) info
+                                                  (envCallSiteMap env4)
+                    }
       envRet2 = addEvaluatedNodeInsts envRet1 insts
 
 
@@ -490,9 +518,10 @@ evalEqn env eqn =
   case eqn of
     Assert x e    -> Assert x <$> evalDynExpr NestedExpr env e
     Property x e  -> Property x <$> evalDynExpr NestedExpr env e
-    Define ls e -> Define (map (evalLHS env) ls) <$> evalDynExpr TopExpr env e
-    IsMain r    -> pure (IsMain r)
-    IVC is      -> pure (IVC is)
+    Define ls e   -> let lhs = map (evalLHS env) ls
+                     in Define lhs <$> evalDynExpr (TopExpr lhs) env e
+    IsMain r      -> pure (IsMain r)
+    IVC is        -> pure (IVC is)
 
 -- | Evaluate a left-hand-side of an equation.
 evalLHS :: Env -> LHS Expression -> LHS Expression
@@ -536,12 +565,14 @@ evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
       _  -> do bs <- mapM (evalStaticArg env1) as
                pure (NodeInst f bs)
 
-  (newDef,[],insts,newS) = runNameStatic
-                            (curModule env1)
-                            (envNameInstSeed env)
-                            (nameNodeInstDef (nodeInstDef nid))
+  (newDef,[],insts,info,newS) = runNameStatic
+                                (curModule env1)
+                                (envNameInstSeed env)
+                                (nameNodeInstDef (nodeInstDef nid))
 
-  envRet1 = env { envNameInstSeed = newS }
+  envRet1 = env { envNameInstSeed = newS
+                , envCallSiteMap = Map.insert (nodeInstName nid) info
+                                              (envCallSiteMap env) }
   envRet2 = addEvaluatedNodeInsts envRet1 insts
 
   -- Note that we leave the name as is because this is the right thing
@@ -837,7 +868,7 @@ addStaticParam p a env
 
 -- | Keep track if we are at the top or nested, to determine
 -- when we should name call sites.
-data ExprLoc = TopExpr | NestedExpr
+data ExprLoc = TopExpr [LHS Expression] | NestedExpr
 
 -- | Rewrite an expression that is not neccessarily constant.
 evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
@@ -896,9 +927,11 @@ evalDynExpr eloc env expr =
                         | Just ni <- Map.lookup i (nodeArgs env) -> ni
                       _ -> NodeInst c []
                   _ -> nameInstance env f
-         let shouldName = case eloc of
-                            TopExpr    -> False
-                            NestedExpr -> nameCallSites env
+
+         shouldName <- case eloc of
+                         TopExpr ls -> do recordCallSite env ls
+                                          pure False
+                         NestedExpr -> pure (nameCallSites env)
          if shouldName
             then nameCallSite env ni es'
             else pure (CallPos ni es')
@@ -1071,18 +1104,21 @@ runNameStatic ::
   Maybe Text {- ^ Qualify generated names with this -} ->
   Int        {- ^ Start generating names using this seed -} ->
   M a        {- ^ This is what we want to do -} ->
-  (a, [Binder], [ NodeInstDecl ], Int)
-  -- ^ result, new locals, new instances, new name seed
+  (a, [Binder], [ NodeInstDecl ], Map CallSiteId [LHS Expression], Int)
+  -- ^ result, new locals, new instances, call site info, new name seed
 runNameStatic qual seed m
   | seed < 0   = panic "runNameStatic"
                     [ "Incorrect use of `envNameInstSeed`"
                     , "*** Negative seed: " ++ show seed
                     ]
-  | otherwise  = (a, newLocals rw1, reverse (instances rw1), nameSeed rw1)
+  | otherwise  = (a, newLocals rw1, reverse (instances rw1)
+                 , csInfo rw1
+                 , nameSeed rw1)
   where
   (a,rw1) = runId $ runStateT rw $ runReaderT ro m
   ro      = RO { qualify = qual }
-  rw      = RW { nameSeed = seed, instances = [], funEqns = [], newLocals = [] }
+  rw      = RW { nameSeed = seed, instances = [], funEqns = [], newLocals = []
+               , csInfo = Map.empty }
 
 newtype RO = RO
   { qualify :: Maybe Text             -- ^ Qualify references to generated names
@@ -1093,7 +1129,16 @@ data RW = RW
   , instances   :: [ NodeInstDecl ]   -- ^ Generated declarations
   , newLocals   :: [ Binder ]         -- ^ New locals to declare for 'funEqns'
   , funEqns     :: [ Equation ]       -- ^ Generated named function call sites
+  , csInfo      :: Map CallSiteId [LHS Expression]
+    -- ^ Identified call sites
   }
+
+recordCallSite :: Env -> [LHS Expression] -> M ()
+recordCallSite env xs =
+  case envCurRange env of
+    Nothing -> pure ()
+    Just r  -> sets_ $ \s ->
+                        s { csInfo = Map.insert (idFromRange r) xs (csInfo s) }
 
 
 {- | Name the given instantiation.
