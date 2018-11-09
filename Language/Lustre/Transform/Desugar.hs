@@ -4,6 +4,9 @@ module Language.Lustre.Transform.Desugar where
 import Control.Monad(msum)
 import Text.PrettyPrint(hsep,punctuate,comma)
 import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.Set as Set
+
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
@@ -53,10 +56,10 @@ desugarNode' ::
 desugarNode' decls mbN =
   do nd <- theNode
      let (varMp,core)  = evalNodeDecl enumInfo nd
-         info          = ModelInfo { infoCallSites       = simpCSInfo
-                                   , infoExpandedStructs = gStructInfo
-                                   , infoInlining        = allRens
-                                   , infoCore            = varMp
+         info          = ModelInfo { infoNodes = mfiMap simpCSInfo
+                                                        gStructInfo
+                                                        allRens
+                                   , infoCore = varMp
                                    }
          cnd = case C.orderedEqns (C.nEqns core) of
                  Right es  -> core { C.nEqns = es }
@@ -121,11 +124,54 @@ desugarNode' decls mbN =
 
 --------------------------------------------------------------------------------
 
+-- | Information for mapping traces back to source Lustre
 data ModelInfo = ModelInfo
-  { infoCallSites       :: Map P.Ident (Map CallSiteId [P.Ident])
-  , infoExpandedStructs :: Map P.Ident (Map P.Ident (StructData P.Ident))
-  , infoInlining        :: Map P.Ident (Map [P.Ident] (Map P.Ident P.Ident))
-  , infoCore            :: Map P.Ident C.Ident
+  { infoNodes :: Map P.Ident ModelFunInfo
+  , infoCore  :: Map P.Ident C.Ident
   }
+
+mfiMap ::
+  Map P.Ident (Map CallSiteId [P.Ident]) ->
+  Map P.Ident (Map P.Ident (StructData P.Ident)) ->
+  Map P.Ident (Map [P.Ident] (Map P.Ident P.Ident)) ->
+  Map P.Ident ModelFunInfo
+mfiMap csi sdi ii = Map.fromList
+                  $ map build
+                  $ Set.toList
+                  $ Set.unions
+                    [ Map.keysSet csi
+                    , Map.keysSet sdi
+                    , Map.keysSet ii ]
+  where
+  build k = (k, ModelFunInfo { mfiCallSites = lkpMap k csi
+                             , mfiStructs   = lkpMap k sdi
+                             , mfiInlined   = lkpMap k ii
+                             })
+
+
+
+-- | Look up a map, returning an empty one, if no entry.
+lkpMap :: Ord a => a -> Map a (Map b c) -> Map b c
+lkpMap = Map.findWithDefault Map.empty
+
+-- | Collected information about a translated node.
+-- Mostly stuff we need to map from Core models, back to original source.
+data ModelFunInfo = ModelFunInfo
+  { mfiCallSites :: Map CallSiteId [P.Ident]
+    {- ^ Identifies call sites, and keeps the identifiers containg the
+        results of the call -}
+  , mfiStructs :: Map P.Ident (StructData P.Ident)
+    {- ^ Identifiers of strucutred types (e.g., structs, arrays) are
+         "exploded" into multiple variables.  This mapping remembers how
+         we did that: the key is an identify of a strucutred type, and
+         the entry in the map is the value for it -}
+  , mfiInlined :: Map [P.Ident] (Map P.Ident P.Ident)
+    {- ^ Information about renamings that happened when we inlined things.
+         For each call site (identified by its return values),
+         we have a map from the original names in the function, to the
+         new names used in the inlined version. -}
+  }
+
+
 
 
