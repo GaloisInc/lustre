@@ -375,8 +375,7 @@ valToExpr env val =
                         , "*** Value: " ++ showPP x ]
         Nothing -> panic "valToExpr" [ "Unknown enum `" ++ showPP e ++ "`." ]
 
-    VStruct s fs  -> Struct s Nothing
-                       [ Field x (valToExpr env v) | (x,v) <- fs ]
+    VStruct s fs  -> Struct s Nothing (fmap (fmap (valToExpr env)) fs)
 
     VArray  vs    -> Array (map (valToExpr env) vs)
 
@@ -955,6 +954,8 @@ nameCallSite env ni es =
          do let ins  = nodeInputs prof
                 outs = nodeOutputs prof
 
+            -- XXX: we could try to use names derived from the outpus
+            -- for more readable Sally code.
             ns <- replicateM (length outs) (newIdent (range ni))
             let names = map binderDefines (ins ++ outs)
             let nameMap = Map.fromList
@@ -980,7 +981,9 @@ nameCallSite env ni es =
                                , binderClock   = renClock <$> binderClock b
                                }
                 binds = zipWith toBind ns outs
-            addFunEqn binds (Define (map LVar ns) (CallPos ni es))
+            let lhs = map LVar ns
+            recordCallSite env lhs
+            addFunEqn binds (Define lhs (CallPos ni es))
             pure $ case map (Var . Unqual) ns of
                      [one] -> one
                      notOne -> Tuple notOne
@@ -1026,7 +1029,7 @@ evalUpdConstStruct :: Env -> Name -> Value -> [Field Expression] -> M Expression
 evalUpdConstStruct env s v fs =
   evalNewStructWithDefs env s fs $
   case v of
-    VStruct _ fvs -> [ (l, Just fv) | (l,fv) <- fvs ]
+    VStruct _ fvs -> [ (l, Just fv) | Field l fv <- fvs ]
     _ -> panic "evalUpdConstStruct"
                 [ "Not a struct value:"
                 , "*** Value: " ++ showPP (valToExpr env v)

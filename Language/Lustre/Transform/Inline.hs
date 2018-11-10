@@ -251,7 +251,7 @@ instance Rename Equation where
 -- | Inline the "normal" calls in a node declaration.
 -- We assume that the calls in the definition have been already inlined,
 -- so we don't continue inlining recursively.
-inlineCallsNode :: Env -> NodeDecl -> (Map [Ident] Renaming, NodeDecl)
+inlineCallsNode :: Env -> NodeDecl -> (Map [Ident] (Name,Renaming), NodeDecl)
 inlineCallsNode env nd =
   case nodeDef nd of
     Nothing -> (Map.empty,nd)
@@ -298,7 +298,7 @@ inlineCallsNode env nd =
                 (otherDefs,otherEqns,rens) = renameEqns newUsed more
             in ( newLocals ++ otherDefs
                , paramDefs ++ thisEqns ++ otherEqns
-               , Map.insert key su rens
+               , Map.insert key (f,su) rens
                )
 
           _ -> let (otherDefs, otherEqns, rens) = renameEqns used more
@@ -346,6 +346,6 @@ addNodeDecl nd env = env { envNodes = Map.insert (Unqual i) nd
 -- Resugar
 
 -- | Maps (node name, call_site as list of ident, name in call, to local name)
-type AllRenamings = Map Ident (Map [Ident] Renaming)
+type AllRenamings = Map Ident (Map [Ident] (Name,Renaming))
 
 

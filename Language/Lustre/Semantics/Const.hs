@@ -80,7 +80,7 @@ evalConst env expr =
                  where
                  newField (f,mb) =
                    case msum [ Map.lookup f fs, mb ] of
-                     Just v  -> pure (f,v)
+                     Just v  -> pure (Field f v)
                      Nothing -> bad ("Missing field `" ++ show f ++ "`.")
 
                -- Update a struct value
@@ -91,8 +91,8 @@ evalConst env expr =
                        VStruct s' fs1
                           | s == s' ->
                             pure $ VStruct s'
-                                     [ (i,v1)
-                                     | (i,v) <- fs1
+                                     [ Field i v1
+                                     | Field i v <- fs1
                                      , let v1 = Map.findWithDefault v i fs
                                      ]
 
@@ -104,8 +104,8 @@ evalConst env expr =
         _ -> bad ("Undefined struct type `" ++ show x ++ "`.")
 
         where
-        evalField (Field f e) = do v <- evalConst env e
-                                   pure (f,v)
+        evalField (Field f v) = do v1 <- evalConst env v
+                                   pure (f,v1)
 
     Select e sel ->
       do s <- evalSel env sel

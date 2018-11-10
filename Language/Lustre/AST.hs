@@ -289,6 +289,12 @@ data Field e    = Field Ident e
 instance Functor Field where
   fmap f (Field l e) = Field l (f e)
 
+instance Foldable Field where
+  foldMap f (Field _ e) = f e
+
+instance Traversable Field where
+  traverse f (Field l e) = Field l <$> f e
+
 
 data Op1 = Not          -- bool -> bool
          | Neg          -- Num a => a -> a

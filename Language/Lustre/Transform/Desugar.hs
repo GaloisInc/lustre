@@ -3,6 +3,7 @@ module Language.Lustre.Transform.Desugar where
 
 import Control.Monad(msum)
 import Text.PrettyPrint(hsep,punctuate,comma)
+import Data.List(foldl')
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -56,11 +57,12 @@ desugarNode' ::
 desugarNode' decls mbN =
   do nd <- theNode
      let (varMp,core)  = evalNodeDecl enumInfo nd
-         info          = ModelInfo { infoNodes = mfiMap simpCSInfo
-                                                        gStructInfo
-                                                        allRens
-                                   , infoCore = varMp
-                                   }
+         info = ModelInfo
+                  { infoNodes = mfiMap simpCSInfo gStructInfo allRens
+                  , infoCore  = varMp
+                  , infoSource = nodeSourceMap ordered
+                  , infoTop = P.nodeName nd
+                  }
          cnd = case C.orderedEqns (C.nEqns core) of
                  Right es  -> core { C.nEqns = es }
                  Left recs ->
@@ -126,14 +128,23 @@ desugarNode' decls mbN =
 
 -- | Information for mapping traces back to source Lustre
 data ModelInfo = ModelInfo
-  { infoNodes :: Map P.Ident ModelFunInfo
-  , infoCore  :: Map P.Ident C.Ident
+  { infoNodes   :: Map P.Ident ModelFunInfo
+    -- ^ Translation information for nodes.
+
+  , infoSource  :: Map P.Ident P.NodeDecl
+    -- ^ Source for each node
+
+  , infoCore    :: Map P.Ident C.Ident
+    -- ^ Mapping between identifiers in top-level node
+
+  , infoTop     :: P.Ident
+    -- ^ Name for top module
   }
 
 mfiMap ::
   Map P.Ident (Map CallSiteId [P.Ident]) ->
   Map P.Ident (Map P.Ident (StructData P.Ident)) ->
-  Map P.Ident (Map [P.Ident] (Map P.Ident P.Ident)) ->
+  Map P.Ident (Map [P.Ident] (P.Name, Map P.Ident P.Ident)) ->
   Map P.Ident ModelFunInfo
 mfiMap csi sdi ii = Map.fromList
                   $ map build
@@ -165,13 +176,35 @@ data ModelFunInfo = ModelFunInfo
          "exploded" into multiple variables.  This mapping remembers how
          we did that: the key is an identify of a strucutred type, and
          the entry in the map is the value for it -}
-  , mfiInlined :: Map [P.Ident] (Map P.Ident P.Ident)
-    {- ^ Information about renamings that happened when we inlined things.
+  , mfiInlined :: Map [P.Ident] (P.Name, Map P.Ident P.Ident)
+    {- ^ Information about what we called, and how things got renamed
+         when we inlined things.
          For each call site (identified by its return values),
          we have a map from the original names in the function, to the
          new names used in the inlined version. -}
   }
 
 
+--------------------------------------------------------------------------------
+
+-- | Compute a mapping from node names, to the actual source that implements
+-- them.  This is an issue as Lustre supports things like: @f = g<<3>>@,
+-- which means that @f@ is the node @g@ with a specific static argument.
+-- So the code for @f@ is really @g@ (or, rather, whatever implmentes @g@).
+-- XXX: Does not support qualified names for now.
+nodeSourceMap :: [P.TopDecl] -> Map P.Ident P.NodeDecl
+nodeSourceMap = foldl' add Map.empty
+  where
+  add mp tde =
+    case tde of
+      P.DeclareNode nd -> Map.insert (P.nodeName nd) nd mp
+      P.DeclareNodeInst nid ->
+        case P.nodeInstDef nid of
+          P.NodeInst (P.CallUser (P.Unqual x)) _
+            | Just nd <- Map.lookup x mp ->
+                          Map.insert (P.nodeInstName nid) nd mp
+          _ -> mp
+      P.DeclareType {} -> mp
+      P.DeclareConst {} -> mp
 
 

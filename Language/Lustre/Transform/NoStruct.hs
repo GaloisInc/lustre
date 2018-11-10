@@ -72,6 +72,24 @@ instance Functor StructData where
       STuple vs    -> STuple (fmap (fmap f) vs)
       SStruct s fs -> SStruct s (fmap (fmap (fmap f)) fs)
 
+instance Foldable StructData where
+  foldMap f st =
+    case st of
+      SLeaf a      -> f a
+      SArray vs    -> foldMap (foldMap f) vs
+      STuple vs    -> foldMap (foldMap f) vs
+      SStruct _ fs -> foldMap (foldMap (foldMap f)) fs
+
+instance Traversable StructData where
+  traverse f st =
+    case st of
+      SLeaf a       -> SLeaf     <$> f a
+      SArray vs     -> SArray    <$> traverse (traverse f) vs
+      STuple vs     -> STuple    <$> traverse (traverse f) vs
+      SStruct x fs  -> SStruct x <$> traverse (traverse (traverse f)) fs
+
+
+
 instance Pretty a => Pretty (StructData a) where
   ppPrec n sd =
     case sd of

@@ -191,9 +191,9 @@ sSelectField :: Ident -> Value -> EvalM Value
 sSelectField f v =
   case v of
     VStruct _ fs ->
-      case lookup f fs of
-        Just fv -> pure fv
-        Nothing -> crash "select-field" "Missing struct field"
+      case [ v | Field f1 fv <- fs, f1 == f ] of
+        fv : _ -> pure fv
+        []     -> crash "select-field" "Missing struct field"
     _ -> typeError "select-field" "a struct type."
 
 sSelectIndex :: Value {-^ index -} -> Value {- ^ array -} -> EvalM Value

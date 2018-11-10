@@ -10,8 +10,8 @@ import Language.Lustre.Pretty
 data Value    = VInt    !Integer
               | VBool   !Bool
               | VReal   !Rational
-              | VEnum   !Name !Ident              -- ^ Type, value
-              | VStruct !Name ![(Ident,Value)]    -- ^ Type, fields
+              | VEnum   !Name !Ident          -- ^ Type, value
+              | VStruct !Name ![Field Value]  -- ^ Type, fields
               | VArray  ![Value]
                 deriving Show
 
@@ -37,7 +37,7 @@ instance Eq Value where
     cmpStr as bs =
       case (as,bs) of
         ([],[]) -> True
-        ((f,v):more, fs) ->
+        (Field f v:more, fs) ->
           case getField f fs of
             Nothing -> False
             Just (v2,fs') -> v == v2 && cmpStr more fs'
@@ -46,9 +46,10 @@ instance Eq Value where
     getField nm fs =
       case fs of
         [] -> Nothing
-        (f,a) : more -> if nm == f then Just (a,more)
-                                   else do (a',more') <- getField nm more
-                                           return (a', (f,a) : more')
+        Field f a : more -> if nm == f
+                               then Just (a,more)
+                               else do (a',more') <- getField nm more
+                                       return (a', Field f a : more')
 
 
 
@@ -73,7 +74,6 @@ instance Pretty Value where
       VBool b -> text (show b)
       VReal r -> double (fromRational r) -- XXX
       VEnum _ a -> pp a
-      VStruct _ fs -> braces (hsep (punctuate comma (map ppF fs)))
-        where ppF (x,y) = pp x <+> "=" <+> pp y
+      VStruct _ fs -> braces (commaSep (map pp fs))
       VArray vs -> brackets (hsep (punctuate comma (map pp vs)))
 
