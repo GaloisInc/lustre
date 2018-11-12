@@ -74,8 +74,8 @@ evalNodeDecl enumCs nd
 evalType :: P.Type -> C.Type
 evalType ty =
   case ty of
-    P.NamedType {}   -> C.TInt -- ^ Only enum types should be left by now
-    P.IntSubrange {} -> C.TInt -- ^ Represented with a number
+    P.NamedType {}   -> C.TInt -- Only enum types should be left by now
+    P.IntSubrange {} -> C.TInt -- Represented with a number
     P.IntType        -> C.TInt
     P.RealType       -> C.TReal
     P.BoolType       -> C.TBool
