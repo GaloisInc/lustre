@@ -1,6 +1,11 @@
 module Language.Lustre.ModelState
-  ( Loc, atTop, locSubs, enterCall, exitCall
-  , S, lookupVars
+  ( -- * Locations and Navigation
+    Loc, locTop, locCalls, enterCall, exitCall,
+    -- * Accessing Variables
+    S, Vars(..), lookupVars,
+    -- * Names
+    CoreValue, SourceValue,
+    CoreIdent, SourceIdent
   ) where
 
 import Data.Map (Map)
@@ -15,12 +20,17 @@ import qualified Language.Lustre.Semantics.Core as L
 import qualified Language.Lustre.Semantics.Value as V
 import Language.Lustre.Panic(panic)
 
+-- | A state for a core lustre program.
+type S            = Map CoreIdent CoreValue
+type CoreIdent    = C.Ident   -- ^ Identifier in the core syntax
+type CoreValue    = L.Value   -- ^ Value for a core expression
 
-type S = Map C.Ident L.Value
+type SourceIdent  = P.Ident   -- ^ Identifier in the source syntax
+type SourceValue  = V.Value   -- ^ Value for full Lustre
 
 --------------------------------------------------------------------------------
 
--- | A "Loc" is an instantiation of a function with specific arguments.
+-- | A 'Loc' is an instantiation of a function with specific arguments.
 -- It helps is traverse the call tree at a specific state in the system.
 data Loc = Loc
   { lModel     :: ModelInfo
@@ -31,11 +41,11 @@ data Loc = Loc
   , lFunInfo   :: ModelFunInfo
     {- ^ Information about the translation of the specific function we are in -}
 
-  , lSubst     :: Map P.Ident P.Ident
+  , lSubst     :: Map SourceIdent SourceIdent
     {- ^ Accumulated renamings for variables resulting from Lustre-Lustre
          translations -}
 
-  , lVars      :: Vars P.Ident
+  , lVars      :: Vars SourceIdent
     -- ^ These are the variables we are observing.  The names are in their
     -- original form.
 
@@ -45,8 +55,8 @@ data Loc = Loc
   }
 
 -- | The location corresponding to the main function being verified.
-atTop :: ModelInfo -> Maybe Loc
-atTop mi =
+locTop :: ModelInfo -> Maybe Loc
+locTop mi =
   do let top = infoTop mi
      fi <- Map.lookup top (infoNodes mi)
      nd <- Map.lookup top (infoSource mi)
@@ -79,8 +89,8 @@ enterCall l cs =
             }
 
 -- | What are the callsites avaialable at a location.
-locSubs :: Loc -> [CallSiteId]
-locSubs = Map.keys . mfiCallSites . lFunInfo
+locCalls :: Loc -> [CallSiteId]
+locCalls = Map.keys . mfiCallSites . lFunInfo
 
 -- | Got back to the parent of a location.
 exitCall :: Loc -> Maybe Loc
@@ -90,13 +100,13 @@ exitCall = lAbove
 --------------------------------------------------------------------------------
 
 -- | Get the values for all varialbes in a location.
-lookupVars :: Loc -> S -> Vars (P.Ident, Maybe V.Value)
+lookupVars :: Loc -> S -> Vars (SourceIdent, Maybe SourceValue)
 lookupVars l s = fmap lkp (lVars l)
   where lkp i = (i, lookupVar l s i)
 
 
 -- | Get the value for a variable in a location, in a specific state.
-lookupVar :: Loc -> S -> P.Ident -> Maybe V.Value
+lookupVar :: Loc -> S -> SourceIdent -> Maybe SourceValue
 lookupVar l s i0 =
   case Map.lookup i (mfiStructs (lFunInfo l)) of
     Just si ->
@@ -111,7 +121,7 @@ lookupVar l s i0 =
 
 
 -- | Change representations of values.
-reval :: L.Value -> Maybe V.Value
+reval :: L.Value -> Maybe SourceValue
 reval val =
   case val of
     L.VInt n  -> Just (V.VInt n)
@@ -121,7 +131,7 @@ reval val =
 
 
 -- | Change of representations.
-restruct :: StructData V.Value -> V.Value
+restruct :: StructData SourceValue -> SourceValue
 restruct str =
   case str of
     SLeaf a       -> a
@@ -158,7 +168,7 @@ instance Traversable Vars where
 
 
 -- | Get the variables from a node.
-nodeVars :: P.NodeDecl -> Vars P.Ident
+nodeVars :: P.NodeDecl -> Vars SourceIdent
 nodeVars nd = Vars { vIns = fromB (P.nodeInputs prof)
                    , vLocs = fromB locs
                    , vOuts = fromB (P.nodeOutputs prof)
