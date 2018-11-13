@@ -452,5 +452,11 @@ instance HasRange e => HasRange (ArraySlice e) where
   range a =
     range (arrayStart a) <-> range (fromMaybe (arrayEnd a) (arrayStep a))
 
+instance HasRange StaticParam where
+  range param =
+    case param of
+      TypeParam i       -> range i
+      ConstParam i t    -> range i <-> range t
+      NodeParam _ _ i _ -> range i
 
 
