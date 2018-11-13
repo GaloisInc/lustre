@@ -4,6 +4,7 @@ module Language.Lustre.Parser.Monad
   , parse
   , happyGetToken
   , happyError
+  , happyErrorAt
   , ParseError(..)
   ) where
 
@@ -80,6 +81,8 @@ newtype ParseError = ParseError (Maybe SourcePos) -- ^ Nothing means EOF
 
 instance Exception ParseError
 
+happyErrorAt :: SourcePos -> Parser a
+happyErrorAt p = Parser (\_ -> Left (ParseError (Just p)))
 
 happyError :: Parser a
 happyError = Parser $ \ls ->
