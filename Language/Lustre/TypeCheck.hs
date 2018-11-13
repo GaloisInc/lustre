@@ -96,7 +96,8 @@ checkNodeDecl nd k =
                      ["Node:" <+> pp (nodeName nd)]
            Nothing -> pure ()
        let prof = nodeProfile nd
-       res <- checkBinders (nodeInputs prof ++ nodeOutputs prof) $
+       res <- checkInputBinders (nodeInputs prof) $
+              checkBinders      (nodeOutputs prof) $
          do case nodeDef nd of
               Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
                            "Missing node definition"
@@ -155,6 +156,13 @@ checkConstDef c m =
            checkConstExpr e t
            pure t
 
+checkInputBinder :: InputBinder -> M a -> M a
+checkInputBinder ib m =
+  case ib of
+    InputBinder b -> checkBinder b m
+    InputConst i t ->
+      do checkType t
+         withConst i t m
 
 checkBinder :: Binder -> M a -> M a
 checkBinder b m =
@@ -171,6 +179,12 @@ checkBinders bs m =
   case bs of
     [] -> m
     b : more -> checkBinder b (checkBinders more m)
+
+checkInputBinders :: [InputBinder] -> M a -> M a
+checkInputBinders bs m =
+  case bs of
+    [] -> m
+    b : more -> checkInputBinder b (checkInputBinders more m)
 
 
 checkType :: Type -> M ()
@@ -393,12 +407,17 @@ checkCall f es0 tys =
                         checkInputs mp1 bs as
       _ -> reportError $ text ("Bad arity in call to " ++ showPP f)
 
-  checkIn mp b e =
-    do c <- renBinderClock mp b
-       checkExpr1 e CType { cClock = c, cType = binderType b }
-       pure $ case isIdent e of
-                Just k  -> Map.insert (binderDefines b) k mp
-                Nothing -> mp
+  checkIn mp ib e =
+    case ib of
+      InputBinder b ->
+        do c <- renBinderClock mp b
+           checkExpr1 e CType { cClock = c, cType = binderType b }
+           pure $ case isIdent e of
+                    Just k  -> Map.insert (binderDefines b) k mp
+                    Nothing -> mp
+      InputConst _ t ->
+        do checkConstExpr e t
+           pure mp
 
   isIdent e =
     case e of

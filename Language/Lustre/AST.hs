@@ -141,7 +141,7 @@ data NodeInstDecl = NodeInstDecl
   } deriving Show
 
 data NodeProfile = NodeProfile
-  { nodeInputs  :: [Binder]
+  { nodeInputs  :: [InputBinder]
   , nodeOutputs :: [Binder]
   } deriving Show
 
@@ -153,6 +153,13 @@ data Safety     = Safe        -- ^ No side effects
 data NodeType   = Node        -- ^ Nodes may have memory (e.g., use @pre@)
                 | Function    -- ^ Functions do not have memory
                     deriving (Show, Eq)
+
+{- | These are used to support the notation where constant parameters
+are intermixed with normal parameters, rather then bing factored
+out before. -}
+data InputBinder = InputBinder Binder
+                 | InputConst Ident Type
+                   deriving Show
 
 data Binder = Binder
   { binderDefines :: Ident

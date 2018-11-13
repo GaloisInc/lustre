@@ -172,6 +172,18 @@ instance Uses NodeProfile where
 instance Defines NodeProfile where
   defines = defines . nodeInputs
 
+instance Uses InputBinder where
+  uses ib =
+    case ib of
+      InputBinder b  -> uses b
+      InputConst _ t -> uses t
+
+instance Defines InputBinder where
+  defines ib =
+    case ib of
+      InputBinder b -> defines b
+      InputConst c _ -> aVal (Unqual c)
+
 instance Uses Binder where
   uses b = uses (binderType b, binderClock b)
 

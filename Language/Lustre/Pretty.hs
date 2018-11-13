@@ -109,6 +109,12 @@ instance Pretty NodeProfile where
     parens (hsep (punctuate semi (map pp (nodeInputs np)))) <+>
     "returns" <+> parens (hsep (punctuate semi (map pp (nodeOutputs np))))
 
+instance Pretty InputBinder where
+  ppPrec n ib =
+    case ib of
+      InputBinder b  -> ppPrec n b
+      InputConst i t -> "const" <+> pp i <+> ":" <+> pp t
+
 instance Pretty Binder where
   ppPrec _ b = pp (binderDefines b) <+> ":" <+> pp (binderType b) <+> clockDoc
     where clockDoc = case binderClock b of

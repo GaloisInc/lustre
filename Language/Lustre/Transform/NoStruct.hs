@@ -197,10 +197,10 @@ evalNode :: Env -> NodeDecl -> (StructInfo, Map CallSiteId [Ident], NodeDecl)
 evalNode env nd
   | null (nodeStaticInputs nd) =
     let prof = nodeProfile nd
-        (inMap, inBs)   = expandBinders env (nodeInputs prof)
+        (inMap, inBs)   = expandBinders env (map inB (nodeInputs prof))
         (outMap, outBs) = expandBinders env (nodeOutputs prof)
         -- NOTE: it appears that inputs are not in scope in the outputs in Lus.
-        newProf = NodeProfile { nodeInputs = inBs
+        newProf = NodeProfile { nodeInputs = map InputBinder inBs
                               , nodeOutputs = outBs
                               }
         info1 = Map.unions [ inMap, outMap, envStructured env ]
@@ -227,6 +227,14 @@ evalNode env nd
                   , "*** Node: " ++ showPP nd
                   ]
 
+inB :: InputBinder -> Binder
+inB ib =
+  case ib of
+    InputBinder b -> b
+    InputConst i t -> panic "inB"
+                        [ "Unexpected input constant:"
+                        , "*** Name: " ++ showPP i
+                        , "*** Type: " ++ showPP t ]
 
 -- | Evaluate a node's definition.  Expands the local variables,
 -- and rewrites the equations.

@@ -156,7 +156,8 @@ computeRenaming used lhs nd =
                               , "*** LHS: " ++ showPP l ]
 
 
-  oldBinders            = nodeInputs prof ++ map localBinder (nodeLocals def)
+  oldBinders            = map inputBinder (nodeInputs prof) ++
+                          map localBinder (nodeLocals def)
   (newUsed,newBidners)  = mapAccumL freshBinder used oldBinders
 
 
@@ -166,6 +167,16 @@ computeRenaming used lhs nd =
   renaming              = Map.fromList $
                             zipExact renOut (nodeOutputs prof) lhs ++
                             zipExact renBind oldBinders newBidners
+
+inputBinder :: InputBinder -> Binder
+inputBinder ib =
+  case ib of
+    InputBinder b -> b
+    InputConst i t -> panic "inputBinder"
+                        [ "Unexpected constant parameter."
+                        , "Constants should have been eliminated by now."
+                        , "*** Name: " ++ showPP i
+                        , "*** Type: " ++ showPP t ]
 
 localBinder :: LocalDecl -> Binder
 localBinder l = case l of
@@ -259,7 +270,7 @@ inlineCallsNode env nd =
       | null (nodeStaticInputs nd) ->
         let prof = nodeProfile nd
             used = Set.fromList $ map binderDefines $
-                      nodeInputs prof ++
+                      map inputBinder (nodeInputs prof) ++
                       nodeOutputs prof ++
                       map localBinder (nodeLocals def)
             (newLocs,newEqs,rens) = renameEqns used (nodeEqns def)
@@ -293,7 +304,8 @@ inlineCallsNode env nd =
             let prof = nodeProfile cnd
                 (newUsed, su, newLocals,key) = computeRenaming used ls cnd
                 paramDef b p = Define [ LVar (rename su (binderDefines b)) ] p
-                paramDefs    = zipExact paramDef (nodeInputs prof) es
+                paramDefs    = zipExact paramDef
+                                        (map inputBinder (nodeInputs prof)) es
                 thisEqns     = updateProps (rename su (nodeEqns def))
                 (otherDefs,otherEqns,rens) = renameEqns newUsed more
             in ( newLocals ++ otherDefs

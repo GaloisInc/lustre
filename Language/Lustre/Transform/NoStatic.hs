@@ -41,6 +41,7 @@ import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
 import Data.Semigroup ( (<>) )
+import Data.Either(partitionEithers)
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
 
@@ -104,6 +105,8 @@ data Env = Env
   , nodeInfo :: Map Name NodeProfile
     -- ^ Types of the nodes that are in scope.
     -- This is used to determine how to name the call sites.
+    -- It is also used to figure out which parameters are constants
+    -- when we call a functino.
 
   , nodeTemplateInfo :: Map Name ( [StaticParam]
                                  , Either NodeProfile NodeInst
@@ -412,19 +415,22 @@ Nodes with static parameters are added to the template map, while "normal"
 nodes are evaluated and added to the declaration list. -}
 evalNodeDecl :: Env -> NodeDecl  -> Env
 evalNodeDecl env nd =
-  case nodeStaticInputs nd of
+  case nodeStaticInputs nd ++ constPs of
     [] -> evalNode env nd []
     ps -> env { nodeTemplates = Map.insert name (DeclareNode nd)
                                                 (nodeTemplates env)
               , nodeTemplateInfo = Map.insert name (ps, Left (nodeProfile nd))
-                                                   (nodeTemplateInfo env) }
+                                                   (nodeTemplateInfo env)
+              , nodeInfo = Map.insert name (nodeProfile nd) (nodeInfo env)
+              }
   where
   name = topIdentToName env (nodeName nd)
+  constPs = [ ConstParam i t | InputConst i t <- nodeInputs (nodeProfile nd) ]
 
 
 -- | Evaluate and instantiate a node with the given static parameters.
 -- We assume that the arguments have been evaluated already.
-evalNode :: Env -> NodeDecl  -> [StaticArg] -> Env
+evalNode :: Env -> NodeDecl -> [StaticArg] -> Env
 evalNode env nd args =
 
   case nodeDef nd of
@@ -440,7 +446,7 @@ evalNode env nd args =
       name      = topIdentToName env (nodeName nd)
       prof      = nodeProfile nd
       env0      = addStaticParams (nodeStaticInputs nd) args env
-      env1      = shadowBinders env0 (nodeInputs prof)
+      env1      = shadowBinders env0 [ b | InputBinder b <- nodeInputs prof ]
       (bs,env2) = evalLocalDecls env1 (nodeLocals body)
       env3      = shadowBinders (shadowBinders env2 bs) (nodeOutputs prof)
       env4      = env3 { envNameInstSeed = -77 }
@@ -495,9 +501,20 @@ evalBinder env b = b { binderType = evalType env (binderType b)
 -- in the outputs.
 evalNodeProfile :: Env -> NodeProfile -> NodeProfile
 evalNodeProfile env np =
-  NodeProfile { nodeInputs  = map (evalBinder env) (nodeInputs np)
+  NodeProfile { nodeInputs  = map (evalInputBinder env) (nodeInputs np)
               , nodeOutputs = map (evalBinder env) (nodeOutputs np)
               }
+
+
+evalInputBinder :: Env -> InputBinder -> InputBinder
+evalInputBinder env ib =
+  case ib of
+    InputBinder b -> InputBinder (evalBinder env b)
+    InputConst i t -> panic "evalInputBinder"
+                        [ "Unexpected constant parameter."
+                        , "It should have been desugared by now."
+                        , "*** Name: " ++ showPP i
+                        , "*** Type: " ++ showPP t ]
 
 
 -- | Evaluate a bunch of locals:  the constants are added to the environment,
@@ -611,7 +628,13 @@ expandNodeInstDecl env nid =
               case nt of
 
                 DeclareNode nd ->
-                  evalNode env nd { nodeName = nodeInstName nid } ps
+                  let prof     = nodeProfile nd
+                      (cs,is') = inputBindersToParams (nodeInputs prof)
+                      prof'    = prof { nodeInputs = is' }
+                  in evalNode env nd { nodeName = nodeInstName nid
+                                     , nodeProfile = prof'
+                                     , nodeStaticInputs =
+                                          nodeStaticInputs nd ++ cs } ps
 
                 DeclareNodeInst nd ->
                   evalNodeInst env nd { nodeInstName = nodeInstName nid } ps
@@ -741,7 +764,8 @@ getNodeInstProfile env (NodeInst c as) =
                 [ NodeArg _ ni, ExprArg n ] ->
                   do prof <- getNodeInstProfile env ni
                      case nodeInputs prof of
-                       b : bs -> Just prof { nodeInputs = b : map (toArr n) bs }
+                       b : bs -> Just prof
+                                   { nodeInputs = b : map (toArrI n) bs }
                        _ -> bad
                 _ -> bad
 
@@ -753,7 +777,7 @@ getNodeInstProfile env (NodeInst c as) =
                      case (nodeInputs prof, nodeOutputs prof) of
                        (i:is,o:os) ->
                           Just NodeProfile
-                                 { nodeInputs = i : map (toArr n) is
+                                 { nodeInputs = i : map (toArrI n) is
                                  , nodeOutputs = o : map (toArr n) os
                                  }
 
@@ -766,7 +790,7 @@ getNodeInstProfile env (NodeInst c as) =
                 [ NodeArg _ ni, ExprArg n ] ->
                   do prof <- getNodeInstProfile env ni
                      Just NodeProfile
-                            { nodeInputs = map (toArr n) (nodeInputs prof)
+                            { nodeInputs = map (toArrI n) (nodeInputs prof)
                             , nodeOutputs = map (toArr n) (nodeOutputs prof)
                             }
                 _ -> bad
@@ -779,18 +803,24 @@ getNodeInstProfile env (NodeInst c as) =
                                       , identRange = range c
                                       , identPragmas = []
                                       }
+                      paramI x t = InputBinder (param x t)
                       param x t = Binder { binderDefines = ident x
                                          , binderType = t
                                          , binderClock = Nothing
                                          }
                   in Just NodeProfile
-                            { nodeInputs = [ param "a" (ArrayType BoolType k) ]
+                            { nodeInputs = [ paramI "a" (ArrayType BoolType k) ]
                             , nodeOutputs = [ param "b" BoolType ]
                             }
                 _ -> bad
 
             where
-            toArr n x = x { binderType = ArrayType (binderType x) n }
+            toArr n x  = x { binderType = ArrayType (binderType x) n }
+            toArrI n x =
+              case x of
+                InputBinder b  -> InputBinder
+                                  b { binderType = ArrayType (binderType b) n }
+                InputConst i t -> InputConst i (ArrayType t n)
             bad = panic "getNodeInstProfile"
                     [ "Unexpecetd iterator instantiation."
                     , "*** Iterator: " ++ showPP it
@@ -846,9 +876,11 @@ addStaticParam p a env
                  ]
 
 
-      NodeParam _ _ f _ ->
+      NodeParam _ _ f prof ->
         case a of
-          NodeArg _ ni -> env { nodeArgs = Map.insert f ni (nodeArgs env) }
+          NodeArg _ ni -> env { nodeArgs = Map.insert f ni (nodeArgs env)
+                              , nodeInfo = Map.insert (Unqual f) prof
+                                                           (nodeInfo env) }
 
           _ -> panic "addStaticParam"
                  [ "Invalid static parameter:"
@@ -914,18 +946,29 @@ evalDynExpr eloc env expr =
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     CallPos f es ->
-      do es' <- do args <- mapM (evalDynExpr NestedExpr env) es
-                   pure $ case args of
-                            [ e ] | Just xs <- isTuple e -> xs
-                            _ -> args
-         ni  <- case f of
-                  NodeInst c [] ->
+      do let (cs,es0) =
+                case f of
+                  NodeInst (CallUser c) _ ->
+                    case Map.lookup c (nodeInfo env) of
+                       Just p  -> inputBindersToArgs (nodeInputs p) es
+                       Nothing -> panic "evalDynExpr"
+                                    [ "Missing node profile for function."
+                                    , "*** Function: " ++ showPP c
+                                    ]
+                  _ -> ([],es)
+         es' <- do  args <- mapM (evalDynExpr NestedExpr env) es0
+                    pure $ case args of
+                                 [ e ] | Just xs <- isTuple e -> xs
+                                 _ -> args
+         ni  <- case (f,cs) of
+                  (NodeInst c [],[]) ->
                     pure $
                     case c of
                       CallUser (Unqual i)
                         | Just ni <- Map.lookup i (nodeArgs env) -> ni
                       _ -> NodeInst c []
-                  _ -> nameInstance env f
+                  (NodeInst c as, _) ->
+                        nameInstance env (NodeInst c (as ++ cs))
 
          shouldName <- case eloc of
                          TopExpr ls -> do recordCallSite env ls
@@ -942,6 +985,27 @@ evalDynExpr eloc env expr =
       Tuple es    -> Just es
       _           -> Nothing
 
+inputBindersToParams :: [InputBinder] -> ([StaticParam],[InputBinder])
+inputBindersToParams = partitionEithers . map classify
+  where
+  classify ib = case ib of
+                  InputBinder _  -> Right ib
+                  InputConst i t -> Left (ConstParam i t)
+
+inputBindersToArgs ::
+  [InputBinder] -> [Expression] -> ([StaticArg],[Expression])
+inputBindersToArgs ins es =
+  case (ins,es) of
+    ([],[]) -> ([],[])
+    (i:is,e:rest) ->
+       let (cs,vs) = inputBindersToArgs is rest
+       in case i of
+            InputBinder _ -> (cs,e:vs)
+            InputConst {} -> (ExprArg e : cs,vs)
+    _ -> panic "inputBindersToArgs" [ "Type argument mismatch in call."]
+
+
+
 
 -- | Name a call site, by adding an additional equation for the call,
 -- and replacing the call with a tuple containing the results.
@@ -951,7 +1015,7 @@ nameCallSite env ni es =
   do mb <- findInstProf env ni
      case mb of
        Just prof ->
-         do let ins  = nodeInputs prof
+         do let ins  = map inB (nodeInputs prof)
                 outs = nodeOutputs prof
 
             -- XXX: we could try to use names derived from the outpus
@@ -995,7 +1059,13 @@ nameCallSite env ni es =
        Var (Unqual i) -> Just i
        _              -> Nothing
 
-
+  inB inb =
+    case inb of
+      InputBinder b -> b
+      InputConst i t -> panic "nameCallSite"
+          [ "Unexpecetd constant parameter"
+          , "*** Name: " ++ showPP i
+          , "*** Type: " ++ showPP t ]
 
 
 

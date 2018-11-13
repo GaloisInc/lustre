@@ -44,7 +44,7 @@ evalNodeDecl enumCs nd
   , Just def <- P.nodeDef nd =
       runProcessNode enumCs $
       do let prof = P.nodeProfile nd
-         ins  <- mapM evalBinder (P.nodeInputs prof)
+         ins  <- mapM evalInputBinder (P.nodeInputs prof)
          outs <- mapM evalBinder (P.nodeOutputs prof)
          mapM_ addBinder ins
          mapM_ addBinder outs
@@ -237,6 +237,17 @@ getVarMap :: M (Map P.Ident C.Ident)
 getVarMap = stVarMap <$> get
 
 --------------------------------------------------------------------------------
+
+evalInputBinder :: P.InputBinder -> M C.Binder
+evalInputBinder inp =
+  case inp of
+    P.InputBinder b -> evalBinder b
+    P.InputConst i t ->
+      panic "evalInputBinder"
+        [ "Unexpected constant parameter"
+        , "*** Name: " ++ showPP i
+        , "*** Type: " ++ showPP t ]
+
 
 -- | Add the type of a binder to the environment.
 evalBinder :: P.Binder -> M C.Binder

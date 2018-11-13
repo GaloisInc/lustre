@@ -340,7 +340,8 @@ nodeInstDecl :: { NodeInstDecl }
 
 
 nodeProfile :: { NodeProfile }
-  : params 'returns' params { NodeProfile { nodeInputs = $1, nodeOutputs = $3 }}
+  : params(inputParam) 'returns' params(varDecl)
+                        { NodeProfile { nodeInputs = $1, nodeOutputs = $3 }}
 
 nodeType :: { NodeType }
   : 'node'      { Node }
@@ -390,9 +391,13 @@ LHS :: { LHS Expression }
 
 -- Variable Declarations -------------------------------------------------------
 
-params :: { [Binder] }
-  : '(' ')'                                 { [] }
-  | '(' SepEndBy1(',',varDecl) ')'          { concat $2 }
+params(par) :: { par }
+  : '(' ')'                      { [] }
+  | '(' SepEndBy1(',',par) ')'   { concat $2 }
+
+inputParam :: { [InputBinder] }
+  : varDecl                      { map InputBinder $1 }
+  | 'const' typedIdents          { [ InputConst i (snd $2) | i <- fst $2 ] }
 
 varDecl :: { [Binder] }
   : typedIdents                             { toVarDeclBase $1 }

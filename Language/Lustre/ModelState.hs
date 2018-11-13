@@ -169,7 +169,7 @@ instance Traversable Vars where
 
 -- | Get the variables from a node.
 nodeVars :: P.NodeDecl -> Vars SourceIdent
-nodeVars nd = Vars { vIns = fromB (P.nodeInputs prof)
+nodeVars nd = Vars { vIns = fromB [ b | P.InputBinder b <- P.nodeInputs prof ]
                    , vLocs = fromB locs
                    , vOuts = fromB (P.nodeOutputs prof)
                    }
