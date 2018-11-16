@@ -52,6 +52,9 @@ data Loc = Loc
   , lAbove     :: Maybe Loc
     -- ^ Locations on the current call path.  This is for navigation,
     -- so we can go back to our parent.
+
+  , lRange     :: P.SourceRange
+    -- ^ Location in the source code for this node
   }
 
 -- | The location corresponding to the main function being verified.
@@ -65,6 +68,7 @@ locTop mi =
               , lSubst = Map.empty
               , lVars = nodeVars nd
               , lAbove = Nothing
+              , lRange = P.range nd
               }
 
 -- | Given a location and a call site in it, get the location corresponding
