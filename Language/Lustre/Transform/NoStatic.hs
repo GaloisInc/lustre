@@ -35,6 +35,7 @@ module Language.Lustre.Transform.NoStatic
   , CallSiteId, idFromRange
   ) where
 
+import Data.Function(on)
 import Data.Text(Text)
 import qualified Data.Text as Text
 import Data.Map(Map)
@@ -77,12 +78,23 @@ evalTopDecls :: Env -> [TopDecl ] -> Env
 evalTopDecls = foldl' evalTopDecl
 
 
-data CallSiteId = CallSiteId Int Int
-                  deriving (Eq,Ord,Show)
+data CallSiteId = CallSiteId { csId :: (Int,Int), csRange ::  SourceRange }
+                  deriving (Show)
+
+instance HasRange CallSiteId where
+  range = csRange
+
+
+instance Eq CallSiteId where
+  (==) = (==) `on` csId
+
+instance Ord CallSiteId where
+  compare = compare `on` csId
 
 -- | This ignores files, so it only makes sense for ranges in the same file.
 idFromRange :: SourceRange -> CallSiteId
-idFromRange r = CallSiteId (pos sourceFrom) (pos (sourceTo))
+idFromRange r = CallSiteId { csId    = (pos sourceFrom, pos sourceTo)
+                           , csRange = r }
   where
   pos f = sourceIndex (f r)
 
