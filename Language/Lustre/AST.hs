@@ -129,6 +129,7 @@ data NodeDecl = NodeDecl
   , nodeProfile      :: NodeProfile
   , nodeDef          :: Maybe NodeBody
     -- Must be "Nothing" if "nodeExtern" is set to "True"
+  , nodeRange        :: !SourceRange
   } deriving Show
 
 data NodeInstDecl = NodeInstDecl
@@ -141,8 +142,8 @@ data NodeInstDecl = NodeInstDecl
   } deriving Show
 
 data NodeProfile = NodeProfile
-  { nodeInputs  :: [InputBinder]
-  , nodeOutputs :: [Binder]
+  { nodeInputs    :: [InputBinder]
+  , nodeOutputs   :: [Binder]
   } deriving Show
 
 
@@ -465,5 +466,8 @@ instance HasRange StaticParam where
       TypeParam i       -> range i
       ConstParam i t    -> range i <-> range t
       NodeParam _ _ i _ -> range i
+
+instance HasRange NodeDecl where
+  range = nodeRange
 
 

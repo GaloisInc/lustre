@@ -203,11 +203,12 @@ packProvide :: { PackageProvides }
       { ProvidesNode
         NodeDecl { nodeExtern       = False
                  , nodeSafety       = isUnsafe $1
-                 , nodeType         = $2
+                 , nodeType         = thing $2
                  , nodeName         = $3
                  , nodeStaticInputs = $4
-                 , nodeProfile      = $5
+                 , nodeProfile      = thing $5
                  , nodeDef          = Nothing
+                 , nodeRange        = optR $1 $2 <-> $5
                  } }
 
 provideDef :: { Expression }
@@ -303,11 +304,12 @@ extDecl :: { NodeDecl }
       { NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = True
-          , nodeType    = $3
+          , nodeType    = thing $3
           , nodeName    = $4
           , nodeStaticInputs = [] -- XXX
-          , nodeProfile = $5
+          , nodeProfile = thing $5
           , nodeDef     = Nothing
+          , nodeRange   = optR $1 $2 <-> optR $6 $5
           }
       }
 
@@ -317,11 +319,12 @@ nodeDecl :: { NodeDecl }
       { NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = False
-          , nodeType    = $2
+          , nodeType    = thing $2
           , nodeName    = $3
           , nodeStaticInputs = $4
-          , nodeProfile = $5
-          , nodeDef     = Just NodeBody { nodeLocals = $7, nodeEqns = $8 }
+          , nodeProfile = thing $5
+          , nodeDef     = Just NodeBody { nodeLocals = $7, nodeEqns = thing $8 }
+          , nodeRange   = optR $1 $2 <-> optR $9 $8
           }
       }
 
@@ -330,22 +333,21 @@ nodeInstDecl :: { NodeInstDecl }
       '=' effNode Perhaps(';')
     { NodeInstDecl
         { nodeInstSafety        = isUnsafe $1
-        , nodeInstType          = $2
+        , nodeInstType          = thing $2
         , nodeInstName          = $3
         , nodeInstStaticInputs  = $4
-        , nodeInstProfile       = $5
+        , nodeInstProfile       = thing `fmap` $5
         , nodeInstDef           = $7
         }
     }
 
 
-nodeProfile :: { NodeProfile }
-  : params(inputParam) 'returns' params(varDecl)
-                        { NodeProfile { nodeInputs = $1, nodeOutputs = $3 }}
+nodeProfile :: { Located NodeProfile }
+  : params(inputParam) 'returns' params(varDecl) { mkNodeProfile $1 $3 }
 
-nodeType :: { NodeType }
-  : 'node'      { Node }
-  | 'function'  { Function }
+nodeType :: { Located NodeType }
+  : 'node'      { lat $1 Node }
+  | 'function'  { lat $1 Function }
 
 staticParams :: { [StaticParam] }
   : {- empty -}                       { [] }
@@ -357,7 +359,8 @@ staticParam :: { StaticParam }
   | 'const' ident ':' type          { ConstParam $2 $4 }
   | Perhaps('unsafe')
     nodeType
-    ident nodeProfile               { NodeParam (isUnsafe $1) $2 $3 $4 }
+    ident nodeProfile               { NodeParam (isUnsafe $1) (thing $2) $3
+                                                              (thing $4) }
 
 localDecls :: { [LocalDecl] }
   : {- empty -}                            { [] }
@@ -367,9 +370,8 @@ localDecl :: { [LocalDecl] }
   : 'var' EndBy1(';',varDecl)              { map LocalVar (concat $2) }
   | 'const' EndBy1(';',constDef)           { map LocalConst (concat $2) }
 
-body :: { [Equation] }
-  -- : 'let' EndBy1(';',equation) 'tel'       { $2 }
-  : 'let' ListOf1(equation)'tel'              { $2 }
+body :: { Located [Equation] }
+  : 'let' ListOf1(equation) 'tel'   { lat ($1 <-> $3) $2 }
 
 equation :: { Equation }
   : 'assert' expression ';'                     { Assert (propName $1 $2) $2 }
@@ -391,9 +393,9 @@ LHS :: { LHS Expression }
 
 -- Variable Declarations -------------------------------------------------------
 
-params(par) :: { par }
-  : '(' ')'                      { [] }
-  | '(' SepEndBy1(',',par) ')'   { concat $2 }
+params(par) :: { Located par }
+  : '(' ')'                      { lat ($1 <-> $2) [] }
+  | '(' SepEndBy1(',',par) ')'   { lat ($1 <-> $3) (concat $2) }
 
 inputParam :: { [InputBinder] }
   : varDecl                      { map InputBinder $1 }
@@ -571,7 +573,7 @@ withName :: { Ident }
 staticArgGen(nm) :: { (nm,StaticArg) }
   : 'type' nm type                       { ($2, TypeArg $3)     }
   | 'const' nm expression                { ($2, ExprArg $3)     }
-  | nodeType nm effNode                  { ($2, NodeArg $1 $3)  }
+  | nodeType nm effNode                  { ($2, NodeArg (thing $1) $3)  }
   | nm 'not'                             { ($1, op1Arg $2 Not)     }
   | nm 'fby'                             { ($1, op2Arg $2 Fby)     }
   | nm 'pre'                             { ($1, op1Arg $2 Pre)     }
@@ -618,9 +620,9 @@ pragma :: { Pragma }
 -- Combinators -----------------------------------------------------------------
 
 
-Perhaps(x) :: { Bool }
-  : {- nothing -}       { False }
-  | x                   { True  }
+Perhaps(x) :: { Maybe SourceRange }
+  : {- nothing -}       { Nothing }
+  | x                   { Just (range $1) }
 
 Opt(x) :: { Maybe x }
   : {- nothing -}       { Nothing }
@@ -671,6 +673,28 @@ instance At Type where
 
 instance At StaticArg where
   at x y  = ArgRange (x <-> y)
+
+data Located a = Located { loc :: SourceRange, thing :: a }
+
+instance HasRange (Located a) where
+  range = loc
+
+optR :: (HasRange a, HasRange b) => Maybe a -> b -> SourceRange
+optR x y = case x of
+             Nothing -> range y
+             Just a  -> range a
+
+lat :: HasRange a => a -> b -> Located b
+lat x y = Located { loc = range x, thing = y }
+
+mkNodeProfile ::
+  Located [InputBinder] -> Located [Binder] -> Located NodeProfile
+mkNodeProfile xs ys =
+  Located { loc = loc xs <-> loc ys
+          , thing = NodeProfile { nodeInputs  = thing xs
+                                , nodeOutputs = thing ys }
+          }
+
 
 --------------------------------------------------------------------------------
 
@@ -775,8 +799,10 @@ toVarDecl (xs,t) c = [ Binder { binderDefines = x
                               , binderClock   = Just c
                               } | x <- xs ]
 
-isUnsafe :: Bool -> Safety
-isUnsafe unsafe = if unsafe then Unsafe else Safe
+isUnsafe :: Maybe SourceRange -> Safety
+isUnsafe unsafe = case unsafe of
+                    Just _  -> Unsafe
+                    Nothing -> Safe
 
 --------------------------------------------------------------------------------
 
