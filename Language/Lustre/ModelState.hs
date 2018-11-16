@@ -1,6 +1,6 @@
 module Language.Lustre.ModelState
   ( -- * Locations and Navigation
-    Loc, locTop, locCalls, enterCall, exitCall,
+    Loc, locTop, ModelInfo, locCalls, CallSiteId, enterCall, exitCall,
     -- * Accessing Variables
     S, Vars(..), lookupVars,
     -- * Names
