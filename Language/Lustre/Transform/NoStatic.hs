@@ -32,7 +32,7 @@ NOTE: We do NOT name calls to primitives that return a single result
 module Language.Lustre.Transform.NoStatic
   ( quickNoConst
   , CallSiteMap
-  , CallSiteId, idFromRange
+  , CallSiteId, idFromRange, callSiteName
   ) where
 
 import Data.Function(on)
@@ -78,12 +78,18 @@ evalTopDecls :: Env -> [TopDecl ] -> Env
 evalTopDecls = foldl' evalTopDecl
 
 
-data CallSiteId = CallSiteId { csId :: (Int,Int), csRange ::  SourceRange }
+data CallSiteId = CallSiteId { csId :: (Int,Int), csRange :: SourceRange }
                   deriving (Show)
+
+-- | An identifer for a call site.  This is computed from the location in the
+-- source and so it should be unique wrt to a file, but not when multiple
+-- file are involved.
+callSiteName :: CallSiteId -> String
+callSiteName x = "cs_" ++ show a ++ "_" ++ show b
+  where (a,b) = csId x
 
 instance HasRange CallSiteId where
   range = csRange
-
 
 instance Eq CallSiteId where
   (==) = (==) `on` csId

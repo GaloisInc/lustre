@@ -1,6 +1,10 @@
 module Language.Lustre.ModelState
   ( -- * Locations and Navigation
-    Loc, locTop, ModelInfo, locCalls, CallSiteId, enterCall, exitCall,
+    Loc, locTop, ModelInfo, locCalls, enterCall, exitCall,
+
+    -- * Call sites
+    CallSiteId, callSiteName,
+
     -- * Accessing Variables
     S, Vars(..), lookupVars,
     -- * Names
@@ -13,7 +17,7 @@ import qualified Data.Map as Map
 
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
-import Language.Lustre.Transform.NoStatic(CallSiteId)
+import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
 import Language.Lustre.Transform.Desugar (ModelInfo(..), ModelFunInfo(..))
 import qualified Language.Lustre.Semantics.Core as L
@@ -56,6 +60,9 @@ data Loc = Loc
   , lRange     :: P.SourceRange
     -- ^ Location in the source code for this node
   }
+
+instance P.HasRange Loc where
+  range = lRange
 
 -- | The location corresponding to the main function being verified.
 locTop :: ModelInfo -> Maybe Loc
