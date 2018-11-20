@@ -179,6 +179,9 @@ data Env = Env
     of the call. -}
   }
 
+inRange :: SourceRange -> Env -> Env
+inRange r env = env { envCurRange = Just r }
+
 
 -- | Does not expand node instances
 emptyEnv :: Env
@@ -357,7 +360,7 @@ evalConstDef env cd = env { cEnv = newCEnv }
 evalIntExpr :: Env -> Expression -> Expression
 evalIntExpr env expr =
   case expr of
-    ERange r e -> ERange r (evalIntExpr env e)
+    ERange r e -> ERange r (evalIntExpr (inRange r env) e)
     _ -> case C.evalIntConst (cEnv env) expr of
            Right i  -> Lit (Int i)
            Left err -> panic "evalIntExpr" [err]
@@ -366,7 +369,7 @@ evalIntExpr env expr =
 evalExprToVal :: Env -> Expression -> Value
 evalExprToVal env expr =
   case expr of
-    ERange _ e -> evalExprToVal env e
+    ERange r e -> evalExprToVal (inRange r env) e
     _          -> case C.evalConst (cEnv env) expr of
                     Right val -> val
                     Left err  -> panic "evalExprToVal" [err]
@@ -375,7 +378,7 @@ evalExprToVal env expr =
 evalExpr :: Env -> Expression -> Expression
 evalExpr env expr =
   case expr of
-    ERange r e -> ERange r (evalExpr env e)
+    ERange r e -> ERange r (evalExpr (inRange r env) e)
     _          -> valToExpr env (evalExprToVal env expr)
 
 -- | Convert an evaluated expression back into an ordinary expression.
@@ -923,7 +926,7 @@ data ExprLoc = TopExpr [LHS Expression] | NestedExpr
 evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
 evalDynExpr eloc env expr =
   case expr of
-    ERange r e      -> ERange r <$> evalDynExpr eloc env e
+    ERange r e      -> ERange r <$> evalDynExpr eloc (inRange r env) e
     Var x           -> pure $ case Map.lookup x (C.envConsts (cEnv env)) of
                                 Just v  -> valToExpr env v
                                 Nothing -> expr
@@ -989,8 +992,12 @@ evalDynExpr eloc env expr =
                         nameInstance env (NodeInst c (as ++ cs))
 
          shouldName <- case eloc of
-                         TopExpr ls -> do recordCallSite env ls
-                                          pure False
+                         TopExpr ls ->
+                            do case f of
+                                 NodeInst (CallUser _) _ ->
+                                   recordCallSite env ls
+                                 _ -> pure ()
+                               pure False
                          NestedExpr -> pure (nameCallSites env)
          if shouldName
             then nameCallSite env ni es'
