@@ -97,6 +97,7 @@ enterCall l cs =
             , lSubst = su1
             , lVars = vars
             , lAbove = Just l
+            , lRange = P.range nd
             }
 
 -- | What are the callsites avaialable at a location.
