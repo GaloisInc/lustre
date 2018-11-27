@@ -995,7 +995,7 @@ evalDynExpr eloc env expr =
                          TopExpr ls ->
                             do case f of
                                  NodeInst (CallUser _) _ ->
-                                   recordCallSite env ls
+                                   recordCallSite (range f) ls
                                  _ -> pure ()
                                pure False
                          NestedExpr -> pure (nameCallSites env)
@@ -1071,7 +1071,7 @@ nameCallSite env ni es =
                                }
                 binds = zipWith toBind ns outs
             let lhs = map LVar ns
-            recordCallSite env lhs
+            recordCallSite (range ni) lhs
             addFunEqn binds (Define lhs (CallPos ni es))
             pure $ case map (Var . Unqual) ns of
                      [one] -> one
@@ -1231,12 +1231,9 @@ data RW = RW
     -- ^ Identified call sites
   }
 
-recordCallSite :: Env -> [LHS Expression] -> M ()
-recordCallSite env xs =
-  case envCurRange env of
-    Nothing -> pure ()
-    Just r  -> sets_ $ \s ->
-                        s { csInfo = Map.insert (idFromRange r) xs (csInfo s) }
+recordCallSite :: SourceRange -> [LHS Expression] -> M ()
+recordCallSite r xs =
+  sets_ $ \s -> s { csInfo = Map.insert (idFromRange r) xs (csInfo s) }
 
 
 {- | Name the given instantiation.
