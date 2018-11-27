@@ -65,7 +65,7 @@ $white+         { return [] }
 @block_comment1 { return [] }
 @block_comment2 { return [] }
 
-@special_comment    { specailComment }
+@special_comment    { specialComment }
 
 "package"           { lexeme TokKwPackage }
 "model"             { lexeme TokKwModel }
@@ -273,8 +273,8 @@ numDotDot =
                                                  , sourceTo = to } }
             ]
 
-specailComment :: Action s [ Lexeme Token ]
-specailComment =
+specialComment :: Action s [ Lexeme Token ]
+specialComment =
   do txt <- matchText
      rng <- matchRange
      pure [ Lexeme { lexemeText = txt
