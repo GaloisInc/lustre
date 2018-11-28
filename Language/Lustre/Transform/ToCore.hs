@@ -132,10 +132,10 @@ data St = St
     -- Since we process things in depth-first fashion, this should be
     -- reverse to get proper definition order.
 
-  , stAssertNames :: [(Text,C.Ident)]
+  , stAssertNames :: [(P.PropName,C.Ident)]
     -- ^ The names of the equations corresponding to asserts.
 
-  , stPropertyNames :: [(Text,C.Ident)]
+  , stPropertyNames :: [(P.PropName,C.Ident)]
     -- ^ The names of the equatiosn corresponding to properties.
 
 
@@ -145,11 +145,11 @@ data St = St
   }
 
 -- | Get the collected assert names.
-getAssertNames :: M [(Text,C.Ident)]
+getAssertNames :: M [(P.PropName,C.Ident)]
 getAssertNames = stAssertNames <$> get
 
 -- | Get the collected property names.
-getPropertyNames :: M [(Text,C.Ident)]
+getPropertyNames :: M [(P.PropName,C.Ident)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
@@ -226,11 +226,11 @@ nameExpr expr =
            C.Merge {}   -> "_merge_"
 
 -- | Remember that the given identifier was used for an assert.
-addAssertName :: Text -> C.Ident -> M ()
+addAssertName :: P.PropName -> C.Ident -> M ()
 addAssertName t i = sets_ $ \s -> s { stAssertNames = (t,i) : stAssertNames s }
 
 -- | Remember that the given identifier was used for a property.
-addPropertyName :: Text -> C.Ident -> M ()
+addPropertyName :: P.PropName -> C.Ident -> M ()
 addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 

@@ -14,7 +14,7 @@ import Text.PrettyPrint( Doc, text, (<+>)
                        , hsep, vcat, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
 
-import Language.Lustre.AST (Literal(..))
+import Language.Lustre.AST (Literal(..),PropName(..))
 import Language.Lustre.Pretty
 
 data Ident    = Ident Text
@@ -66,11 +66,10 @@ infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
                      , nOutputs     :: [Ident]
-                     , nAssuming    :: [(Text,Ident)]
-                       -- ^ Assuming that these are true (Text is a label)
-                     , nShows       :: [(Text,Ident)]
+                     , nAssuming    :: [(PropName,Ident)]
+                       -- ^ Assuming that these are true
+                     , nShows       :: [(PropName,Ident)]
                        -- ^ Need to show that these are also true
-                       -- (Text is a label)
                      , nEqns        :: [Eqn]
                      } deriving Show
 

@@ -200,10 +200,15 @@ data LocalDecl  = LocalVar Binder
                 | LocalConst ConstDef
                   deriving Show
 
-data Equation   = Assert Text Expression    -- ^ Assuming this
-                | Property Text Expression  -- ^ Prove this
-                | IsMain SourceRange        -- ^ This is the main node,
-                                            -- use it if nothing specified
+data PropName = PropName
+  { pName  :: Text
+  , pRange :: SourceRange
+  } deriving Show
+
+data Equation   = Assert PropName Expression    -- ^ Assuming this
+                | Property PropName Expression  -- ^ Prove this
+                | IsMain SourceRange            -- ^ This is the main node,
+                                                -- use it if nothing specified
                 | IVC [Ident]
                 | Define [LHS Expression] Expression
                   deriving Show

@@ -908,11 +908,19 @@ mkContract r1 cs r2 = Contract { contractRange = r1 <-> r2
 
 --------------------------------------------------------------------------------
 
-propName :: SourceRange -> Expression -> Text
+propName :: SourceRange -> Expression -> PropName
 propName rng e = case e of
                    ERange _ e1 -> propName rng e1
-                   Var x -> Text.pack (showPP x)
-                   _     -> Text.pack (showPP rng)
+                   Var x -> PropName
+                              { pName = Text.pack (showPP x)
+                              , pRange = rng
+                              }
+                   _     -> PropName
+                              { pName = synthName
+                              , pRange = rng
+                              }
+  where
+  synthName = "Prop on line " <> Text.pack (show (sourceLine (sourceFrom rng)))
 
 
 
