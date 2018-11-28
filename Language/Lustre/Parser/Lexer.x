@@ -67,6 +67,11 @@ $white+         { return [] }
 
 @special_comment    { specialComment }
 
+"/*@contract"       { lexeme TokStartSlashCommentContract }
+"*/"                { lexeme TokEndSlashComment }
+"(*@contract"       { lexeme TokStartParenCommentContract }
+"*)"                { lexeme TokEndParenComment }
+
 "package"           { lexeme TokKwPackage }
 "model"             { lexeme TokKwModel }
 "uses"              { lexeme TokKwUses }
@@ -138,7 +143,14 @@ $white+         { return [] }
 "var"               { lexeme TokKwVar }
 "struct"            { lexeme TokKwStruct }
 "enum"              { lexeme TokKwEnum }
+"contract"          { lexeme TokKwContract }
+"import"            { lexeme TokKwImport }
 "assert"            { lexeme TokKwAssert }
+"assume"            { lexeme TokKwAssume }
+"guarantee"         { lexeme TokKwGuarantee }
+"mode"              { lexeme TokKwEnsure }
+"require"           { lexeme TokKwRequire }
+"ensure"            { lexeme TokKwEnsure }
 
 "%"                 { lexeme TokMod }
 ":"                 { lexeme TokColon }
@@ -198,7 +210,21 @@ data Token =
   | TokKwTel
   | TokKwStruct
   | TokKwEnum
+
+  | TokKwContract
   | TokKwAssert
+  | TokKwAssume
+  | TokKwGuarantee
+  | TokKwMode
+  | TokKwRequire
+  | TokKwEnsure
+  | TokKwImport
+  | TokStartSlashCommentContract
+  | TokEndSlashComment
+  | TokStartParenCommentContract
+  | TokEndParenComment
+
+
 
   | TokKwCurrent
   | TokKwPre
@@ -254,6 +280,7 @@ data Token =
   | TokEOF
   | TokError
     deriving (Eq,Show)
+
 
 lexeme' :: Token -> Action () [Lexeme Token]
 lexeme' t = lexeme $! t

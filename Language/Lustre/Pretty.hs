@@ -61,6 +61,7 @@ instance Pretty TopDecl where
       DeclareConst cd     -> ppPrec n cd <> semi
       DeclareNode nd      -> ppPrec n nd
       DeclareNodeInst nid -> ppPrec n nid
+      DeclareContract cd  -> ppPrec n cd
 
 instance Pretty ConstDef where
   ppPrec _ def = "const" <+> pp (constName def) <+>
@@ -436,5 +437,32 @@ instance Pretty OpN where
       AtMostOne   -> "#"
       Nor         -> "nor"
 
+--------------------------------------------------------------------------------
+
+instance Pretty Contract where
+  ppPrec _ c = "/*@contract" $$ nest 2 (vcat (map pp (contractItems c))) $$ "*/"
+
+instance Pretty ContractItem where
+  ppPrec _ item =
+    case item of
+      GhostConst x mbT e -> "const" <+> pp x <+> sig <+> "=" <+> pp e PP.<> semi
+        where sig = maybe empty (\t -> ":" <+> pp t) mbT
+      GhostVar x t e ->
+        "var" <+> pp x <+> ":" <+> pp t <+> "=" <+> pp e PP.<> semi
+      Assume e -> "assume" <+> pp e PP.<> semi
+      Guarantee e -> "guarantee" <+> pp e PP.<> semi
+      Mode i res ens -> "mode" <+> pp i <+> "("
+                        $$ nest 2 (vcat (map (ppClause "requre") res))
+                        $$ nest 2 (vcat (map (ppClause "ensure") ens))
+                        $$ ")" PP.<> semi
+        where ppClause x e = x <+> pp e PP.<> semi
+      Import i eis eos ->
+        "import" <+> pp i PP.<> parens (commaSep (map pp eis))
+                            <+> parens (commaSep (map pp eos))
+
+instance Pretty ContractDecl where
+  ppPrec _ cd =
+    "contract" <+> pp (cdName cd) <+> pp (cdProfile cd) PP.<> semi
+    $$ "let" $$ nest 2 (vcat (map pp (cdItems cd))) $$ "tel"
 
 

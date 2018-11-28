@@ -72,7 +72,15 @@ import Language.Lustre.Panic
   'var'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwVar } }
   'struct'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwStruct } }
   'enum'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwEnum } }
+
+  'contract'  { Lexeme { lexemeRange = $$, lexemeToken = TokKwContract } }
+  'import'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwImport } }
   'assert'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwAssert } }
+  'assume'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwAssume } }
+  'guarantee' { Lexeme { lexemeRange = $$, lexemeToken = TokKwGuarantee } }
+  'mode'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwMode } }
+  'require'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwRequire } }
+  'ensure'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwEnsure } }
   '--%PROPERTY' { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaProperty } }
   '--%MAIN'     { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaMain } }
   '--%IVC'      { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaIVC } }
@@ -122,6 +130,13 @@ import Language.Lustre.Panic
   '}'         { Lexeme { lexemeRange = $$, lexemeToken = TokCloseBrace } }
 
   '%'         { Lexeme { lexemeRange = $$, lexemeToken = TokMod } }
+
+  '/*@contract'
+    { Lexeme { lexemeRange = $$, lexemeToken = TokStartSlashCommentContract } }
+  '*/'        { Lexeme { lexemeRange = $$, lexemeToken = TokEndSlashComment } }
+  '(*@contract'
+    { Lexeme { lexemeRange = $$, lexemeToken = TokStartParenCommentContract } }
+  '*)'        { Lexeme { lexemeRange = $$, lexemeToken = TokEndParenComment } }
 
 
   IDENT       { $$@Lexeme { lexemeToken = TokIdent {} } }
@@ -244,6 +259,7 @@ topDecl :: { [TopDecl] }
   | extDecl                          { [ DeclareNode $1 ] }
   | nodeDecl                         { [ DeclareNode $1 ] }
   | nodeInstDecl                     { [ DeclareNodeInst $1 ] }
+  | contractDecl                     { [ DeclareContract $1 ] }
 
 
 -- Constant Declarations -------------------------------------------------------
@@ -315,6 +331,7 @@ extDecl :: { NodeDecl }
 
 nodeDecl :: { NodeDecl }
   : Perhaps('unsafe') nodeType ident staticParams nodeProfile Perhaps(';')
+    Opt(contract)
     localDecls body Perhaps(';')
       { NodeDecl
           { nodeSafety  = isUnsafe $1
@@ -323,10 +340,46 @@ nodeDecl :: { NodeDecl }
           , nodeName    = $3
           , nodeStaticInputs = $4
           , nodeProfile = thing $5
-          , nodeDef     = Just NodeBody { nodeLocals = $7, nodeEqns = thing $8 }
-          , nodeRange   = optR $1 $2 <-> optR $9 $8
+          , nodeContract = $7
+          , nodeDef     = Just NodeBody { nodeLocals = $8, nodeEqns = thing $9 }
+          , nodeRange   = optR $1 $2 <-> optR $10 $9
           }
       }
+
+contractDecl :: { ContractDecl }
+  : 'contract' ident nodeProfile Perhaps(';')
+    'let' ListOf1(contractItem) 'tel'
+    { ContractDecl
+        { cdName    = $2
+        , cdProfile = thing $3
+        , cdItems   = $6
+        , cdRange   = $1 <-> $7
+        }
+    }
+
+contract :: { Contract }
+  : '/*@contract' ListOf1(contractItem) '*/' { mkContract $1 $2 $3 }
+  | '(*@contract' ListOf1(contractItem) '*)' { mkContract $1 $2 $3 }
+
+contractItem :: { ContractItem }
+  : 'const' ident '=' expression Perhaps(';') { GhostConst $2 Nothing   $4 }
+  | 'const' ident ':' type
+                  '=' expression Perhaps(';') { GhostConst $2 (Just $4) $6 }
+  | 'var'   ident ':' type
+                  '=' expression Perhaps(';') { GhostVar   $2 $4        $6 }
+  | 'assume' expression Perhaps(';')          { Assume $2 }
+  | 'guarantee' expression Perhaps(';')       { Guarantee $2 }
+  | 'mode' ident '(' ListOf(require)
+                     ListOf(ensure)
+                  ')' Perhaps(';')            { Mode $2 $4 $5 }
+  | 'import' ident '(' exprList ')'
+     'returns' '(' exprList ')' Perhaps(';')  { Import $2 $4 $8 }
+
+require :: { Expression }
+  : 'require' expression Perhaps(';') { $2 }
+
+ensure :: { Expression }
+  : 'ensure' expression Perhaps(';')  { $2}
 
 nodeInstDecl :: { NodeInstDecl }
   : Perhaps('unsafe') nodeType ident staticParams Opt(nodeProfile)
@@ -628,6 +681,9 @@ Opt(x) :: { Maybe x }
   : {- nothing -}       { Nothing }
   | x                   { Just $1 }
 
+ListOf(thing) :: { [thing] }
+  :                 { [] }
+  | ListOf1(thing)  { $1 }
 
 ListOf1(thing) :: { [thing] }
   : ListOf1_rev(thing) { reverse $1 }
@@ -842,6 +898,13 @@ tuple xs =
   case xs of
     [x] -> x
     _   -> Tuple xs
+
+--------------------------------------------------------------------------------
+
+mkContract :: SourceRange -> [ContractItem] -> SourceRange -> Contract
+mkContract r1 cs r2 = Contract { contractRange = r1 <-> r2
+                               , contractItems = cs }
+
 
 --------------------------------------------------------------------------------
 

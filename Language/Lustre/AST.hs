@@ -62,6 +62,7 @@ data TopDecl =
   | DeclareConst    !ConstDef
   | DeclareNode     !NodeDecl
   | DeclareNodeInst !NodeInstDecl
+  | DeclareContract !ContractDecl
     deriving Show
 
 data TypeDecl = TypeDecl
@@ -120,6 +121,26 @@ data ConstDef = ConstDef
   } deriving Show
 
 
+data Contract = Contract
+  { contractRange :: SourceRange
+  , contractItems :: [ContractItem]
+  } deriving Show
+
+data ContractItem = GhostConst Ident (Maybe Type) Expression
+                  | GhostVar   Ident Type         Expression
+                  | Assume Expression
+                  | Guarantee Expression
+                  | Mode Ident [Expression] [Expression]
+                  | Import Ident [Expression] [Expression]
+                    deriving Show
+
+data ContractDecl = ContractDecl
+  { cdName     :: Ident
+  , cdProfile  :: NodeProfile
+  , cdItems    :: [ContractItem]
+  , cdRange    :: SourceRange
+  } deriving Show
+
 data NodeDecl = NodeDecl
   { nodeSafety       :: Safety
   , nodeExtern       :: Bool
@@ -127,6 +148,7 @@ data NodeDecl = NodeDecl
   , nodeName         :: Ident
   , nodeStaticInputs :: [StaticParam]
   , nodeProfile      :: NodeProfile
+  , nodeContract     :: Maybe Contract
   , nodeDef          :: Maybe NodeBody
     -- Must be "Nothing" if "nodeExtern" is set to "True"
   , nodeRange        :: !SourceRange
@@ -469,5 +491,11 @@ instance HasRange StaticParam where
 
 instance HasRange NodeDecl where
   range = nodeRange
+
+instance HasRange Contract where
+  range = contractRange
+
+instance HasRange ContractDecl where
+  range = cdRange
 
 
