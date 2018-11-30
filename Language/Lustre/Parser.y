@@ -12,6 +12,7 @@ module Language.Lustre.Parser
   ) where
 
 import AlexTools
+import Data.Semigroup
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
