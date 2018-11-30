@@ -399,7 +399,7 @@ valToExpr env val =
                         , "*** Value: " ++ showPP x ]
         Nothing -> panic "valToExpr" [ "Unknown enum `" ++ showPP e ++ "`." ]
 
-    VStruct s fs  -> Struct s Nothing (fmap (fmap (valToExpr env)) fs)
+    VStruct s fs  -> Struct s (fmap (fmap (valToExpr env)) fs)
 
     VArray  vs    -> Array (map (valToExpr env) vs)
 
@@ -943,14 +943,14 @@ evalDynExpr eloc env expr =
 
     -- INVARIANT: the fields in a struct value are in the same order is
     -- in the declaration.
-    Struct s mb fs  ->
-      case mb of
-        Nothing -> evalNewStruct env s fs
-        Just x  ->
-          case Map.lookup x (C.envConsts (cEnv env)) of
-            Nothing -> evalUpdExprStruct env s x fs
-            Just v  -> evalUpdConstStruct env s v fs
+    Struct s fs  -> evalNewStruct env s fs
 
+    -- INVARIANT: the fields in a struct value are in the same order is
+    -- in the declaration.
+    UpdateStruct s x fs ->
+      case Map.lookup x (C.envConsts (cEnv env)) of
+        Nothing -> evalUpdExprStruct env s x fs
+        Just v  -> evalUpdConstStruct env s v fs
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
@@ -1114,7 +1114,7 @@ evalMergeCase env (MergeCase p e) =
 evalUpdExprStruct :: Env -> Name -> Name -> [Field Expression] -> M Expression
 evalUpdExprStruct env s x fs =
   do fs' <- mapM evalField fs
-     pure (Struct s (Just x) fs')
+     pure (UpdateStruct s x fs')
   where
   evalField (Field l e) = Field l <$> evalDynExpr NestedExpr env e
 
@@ -1151,7 +1151,7 @@ evalNewStructWithDefs ::
   Env -> Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
 evalNewStructWithDefs env s fs def =
   do fld <- Map.fromList <$> mapM evalField fs
-     pure (Struct s Nothing (map (setField fld) def))
+     pure (Struct s (map (setField fld) def))
   where
   evalField (Field l e) =
     do e1 <- evalDynExpr NestedExpr env e

@@ -599,10 +599,8 @@ evalExpr env expr =
 
     Array es -> SArray (map (evalExpr env) es)
 
-    Struct s mb es ->
-      case mb of
-        Nothing -> SStruct s [ Field l (evalExpr env e) | Field l e <- es ]
-        Just x  -> evalStructUpdate env s x es
+    Struct s es -> SStruct s [ Field l (evalExpr env e) | Field l e <- es ]
+    UpdateStruct s x es -> evalStructUpdate env s x es
 
     Select e sel ->
         case evalExpr env e of

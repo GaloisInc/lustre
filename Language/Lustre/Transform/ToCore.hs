@@ -402,6 +402,7 @@ evalExpr expr =
     P.Array {}  -> bad "array"
     P.Select {} -> bad "selection"
     P.Struct {} -> bad "struct"
+    P.UpdateStruct {} -> bad "update-struct"
     P.WithThenElse {} -> bad "with-then-else"
 
     P.Call ni es ->

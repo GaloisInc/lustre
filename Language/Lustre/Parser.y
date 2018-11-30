@@ -523,10 +523,10 @@ expression :: { Expression }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
   | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3) }
-  | name '{' '}'                      { at $1 $3 (Struct $1 Nothing []) }
-  | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 Nothing $3) }
+  | name '{' '}'                      { at $1 $3 (Struct $1 []) }
+  | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
-                                      { at $1 $6 (Struct $1 (Just $3) $5) }
+                                      { at $1 $6 (UpdateStruct $1 $3 $5) }
   | tuple                             { $1 }
 
 tuple :: { Expression }

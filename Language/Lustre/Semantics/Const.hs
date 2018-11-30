@@ -63,49 +63,33 @@ evalConst env expr =
 
     Array es -> sArray =<< mapM (evalConst env) es
 
-    -- NOTE: we don't report an error if there is a field that
-    -- is not part of a struct.  We assume that another pass checked this.
-    -- INVARIANT: the fields in a struct value are in the same order is
-    -- in the declaration.
-    Struct s x fes ->
+    Struct s fes ->
       case Map.lookup s (envStructs env) of
-        Just d ->
-          do fs <- Map.fromList <$> mapM evalField fes
-
-             case x of
-               -- New struct value
-               Nothing ->
-                 do fs1 <- mapM newField d
-                    pure (VStruct s fs1)
-                 where
-                 newField (f,mb) =
+        Nothing -> bad ("Undefined struct type `" ++ show s ++ "`.")
+        Just structDef ->
+          do fs  <- Map.fromList <$> mapM (evalField env) fes
+             let mkField (f,mb) =
                    case msum [ Map.lookup f fs, mb ] of
                      Just v  -> pure (Field f v)
                      Nothing -> bad ("Missing field `" ++ show f ++ "`.")
+             fs1 <- mapM mkField structDef
+             pure (VStruct s fs1)
 
-               -- Update a struct value
-               Just y ->
-                 case Map.lookup y (envConsts env) of
-                   Just uv ->
-                     case uv of
-                       VStruct s' fs1
-                          | s == s' ->
-                            pure $ VStruct s'
-                                     [ Field i v1
-                                     | Field i v <- fs1
-                                     , let v1 = Map.findWithDefault v i fs
-                                     ]
+    UpdateStruct s y fes ->
+      do fs <- Map.fromList <$> mapM (evalField env) fes
+         case Map.lookup y (envConsts env) of
+           Nothing -> bad ("Undefined struct constant `" ++ show y ++ "`.")
+           Just uv ->
+             case uv of
+               VStruct s' fs1
+                  | s == s' ->
+                    pure $ VStruct s'
+                             [ Field i v1
+                             | Field i v <- fs1
+                             , let v1 = Map.findWithDefault v i fs
+                             ]
 
-                       _ -> typeError "struct update" ("a `" ++ show x ++ "`.")
-                   Nothing ->
-                     bad ("Undefined struct constant `" ++ show y ++ "`.")
-
-
-        _ -> bad ("Undefined struct type `" ++ show x ++ "`.")
-
-        where
-        evalField (Field f v) = do v1 <- evalConst env v
-                                   pure (f,v1)
+               _ -> typeError "struct update" ("a `" ++ show s ++ "`.")
 
     Select e sel ->
       do s <- evalSel env sel
@@ -168,6 +152,10 @@ evalConst env expr =
   where
   bad = crash "evalConst"
 
+
+evalField :: Env -> Field Expression -> EvalM (Ident, Value)
+evalField env (Field f v) = do v1 <- evalConst env v
+                               pure (f,v1)
 
 -- | Evaluate a selector.
 evalSel :: Env -> Selector Expression -> EvalM (Selector Value)

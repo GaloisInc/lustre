@@ -241,9 +241,13 @@ data Expression = ERange !SourceRange !Expression
 
                 | Array ![Expression]
                 | Select Expression (Selector Expression)
-                | Struct Name (Maybe Name) [Field Expression]
-                  -- ^ The 'Maybe' parameter corresponds to @with@
-                  -- and is used for updating structs.
+                | Struct Name [Field Expression]
+                  -- ^ Create a new struct value.  'Name' is the struct type
+
+                | UpdateStruct Name Name [Field Expression]
+                  {- ^ Update a struct.
+                  The first 'Name' is the field type.
+                  The second one is the name of the struct being updated. -}
 
                 | WithThenElse Expression Expression Expression
                   {- ^ Used for recursive definitions.
@@ -392,6 +396,7 @@ exprRangeMaybe expr =
     Merge {}        -> Nothing
     Call {}         -> Nothing
     Struct {}       -> Nothing
+    UpdateStruct {} -> Nothing
 
 typeRangeMaybe :: Type -> Maybe SourceRange
 typeRangeMaybe ty =

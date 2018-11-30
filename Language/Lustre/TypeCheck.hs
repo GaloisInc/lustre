@@ -262,7 +262,8 @@ checkConstExpr expr ty =
          let n = Lit $ Int $ fromIntegral $ length es
          ensure (Subtype (ArrayType elT n) ty)
 
-    Struct {} -> undefined
+    Struct {} -> notYetImplemented "structs"
+    UpdateStruct {} -> notYetImplemented "updating structs"
 
     Select e s ->
       do t <- newTVar
@@ -329,7 +330,8 @@ checkExpr expr tys =
          t1 <- inferSelector s recT
          ensure (Subtype t1 (cType ty))
 
-    Struct {} -> undefined
+    Struct {} -> notYetImplemented "struct"
+    UpdateStruct {} -> notYetImplemented "update struct"
 
     WithThenElse e1 e2 e3 ->
       do checkConstExpr e1 BoolType

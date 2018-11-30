@@ -223,10 +223,11 @@ instance Rename Expression where
       e `When` ce -> rename su e `When` rename su ce
 
       -- These are probably eliminated, but we define them as they make sense
-      Tuple es        -> Tuple (rename su es)
-      Array es        -> Array (rename su es)
-      Select e s      -> Select (rename su e) s
-      Struct x mb fs  -> Struct x (rename su mb) (rename su fs)
+      Tuple es              -> Tuple (rename su es)
+      Array es              -> Array (rename su es)
+      Select e s            -> Select (rename su e) s
+      Struct x fs           -> Struct x (rename su fs)
+      UpdateStruct x y fs   -> UpdateStruct x (rename su y) (rename su fs)
       WithThenElse e1 e2 e3 ->
         WithThenElse e1 (rename su e2)  (rename su e3)
 

@@ -242,13 +242,10 @@ instance Pretty Expression where
       Tuple es      -> parens (hsep (punctuate comma (map pp es)))
       Array es      -> brackets (hsep (punctuate comma (map pp es)))
       Select e s    -> ppPrec 13 e <> pp s
-      Struct s mb fs ->
-        pp s <+> braces (mbWith <+> vcat (punctuate semi (map pp fs)))
-          where mbWith = case mb of
-                           Nothing -> mempty
-                           Just x  -> pp x <+> "with"
-
-
+      Struct s fs   -> pp s <+> braces (vcat (punctuate semi (map pp fs)))
+      UpdateStruct s x fs ->
+          pp s <+> braces (pp x <+> "with" <+>
+                              vcat (punctuate semi (map pp fs)))
       WithThenElse e1 e2 e3 -> parenIf (n > 0) doc
         where doc = "with" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
                                      $$ nest 2 ("else" <+> ppPrec 0 e3)

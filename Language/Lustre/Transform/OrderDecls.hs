@@ -229,7 +229,8 @@ instance Uses Expression where
       Tuple es -> uses es
       Array es -> uses es
       Select e s -> uses (e,s)
-      Struct x y fs -> mconcat [ aType x, maybe mempty aVal y, uses fs ]
+      Struct x fs -> mconcat [ aType x, uses fs ]
+      UpdateStruct x y fs -> mconcat [ aType x, aVal y, uses fs ]
       WithThenElse e1 e2 e3 -> uses (e1, (e2,e3))
       Merge x es -> aVal (Unqual x) <> uses es
       Call f es -> uses (f,es)
