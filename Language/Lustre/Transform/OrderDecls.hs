@@ -48,7 +48,7 @@ orderRec comp =
 
 --------------------------------------------------------------------------------
 
-data NS = T | V deriving (Show,Eq,Ord)
+data NS = TypeNS | ValNS | ContractNS deriving (Show,Eq,Ord)
 
 type Names = Set (NS,Name)
 
@@ -56,10 +56,13 @@ without :: Names -> Names -> Names
 without = Set.difference
 
 aType :: Name -> Names
-aType x = Set.singleton (T,x)
+aType x = Set.singleton (TypeNS,x)
 
 aVal :: Name -> Names
-aVal x = Set.singleton (V,x)
+aVal x = Set.singleton (ValNS,x)
+
+aContract :: Name -> Names
+aContract x = Set.singleton (ContractNS,x)
 
 --------------------------------------------------------------------------------
 
@@ -270,7 +273,7 @@ instance Uses Equation where
       Property _ e -> uses e
       Define lhs e -> uses (lhs,e)
       IsMain _ -> mempty
-      IVC is -> Set.fromList [ (V,Unqual i) | i <- is ]
+      IVC is -> Set.fromList [ (ValNS,Unqual i) | i <- is ]
 
 instance Uses e => Uses (LHS e) where
   uses lhs =
@@ -287,6 +290,29 @@ instance Uses e => Uses (Selector e) where
 
 instance Uses e => Uses (ArraySlice e) where
   uses as = uses (arrayStart as, (arrayEnd as, arrayStep as))
+
+
+instance Uses ContractItem where
+  uses ci =
+    case ci of
+      GhostConst _ mbT e -> uses (mbT, e)
+      GhostVar   b     e -> uses (b,e)
+      Assume e           -> uses e
+      Guarantee e        -> uses e
+      Mode _ mas mgs     -> uses (mas,mgs)
+      Import x as bs     -> Set.insert (ContractNS,Unqual x) (uses (as,bs))
+
+{-
+instance Defines ContractItem where
+  defines ci =
+    case ci of
+      GhostConst x _ _   -> aVal x
+      GhostVar   b _     -> defines b
+      Assume _           -> Set.empty
+      Guarantee _        -> Set.empty
+      Mode _ _ _         -> Set.empty -- XXX: Node references?
+      Import {}          -> Set.empty -- XXX:?
+-}
 
 
 

@@ -447,8 +447,7 @@ instance Pretty ContractItem where
     case item of
       GhostConst x mbT e -> "const" <+> pp x <+> sig <+> "=" <+> pp e PP.<> semi
         where sig = maybe empty (\t -> ":" <+> pp t) mbT
-      GhostVar x t e ->
-        "var" <+> pp x <+> ":" <+> pp t <+> "=" <+> pp e PP.<> semi
+      GhostVar b e -> "var" <+> pp b <+> "=" <+> pp e PP.<> semi
       Assume e -> "assume" <+> pp e PP.<> semi
       Guarantee e -> "guarantee" <+> pp e PP.<> semi
       Mode i res ens -> "mode" <+> pp i <+> "("

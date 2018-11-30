@@ -127,7 +127,7 @@ data Contract = Contract
   } deriving Show
 
 data ContractItem = GhostConst Ident (Maybe Type) Expression
-                  | GhostVar   Ident Type         Expression
+                  | GhostVar   Binder             Expression
                   | Assume Expression
                   | Guarantee Expression
                   | Mode Ident [Expression] [Expression]

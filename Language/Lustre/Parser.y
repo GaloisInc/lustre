@@ -366,7 +366,7 @@ contractItem :: { ContractItem }
   | 'const' ident ':' type
                   '=' expression Perhaps(';') { GhostConst $2 (Just $4) $6 }
   | 'var'   ident ':' type
-                  '=' expression Perhaps(';') { GhostVar   $2 $4        $6 }
+                  '=' expression Perhaps(';') { GhostVar (simpBinder $2 $4) $6 }
   | 'assume' expression Perhaps(';')          { Assume $2 }
   | 'guarantee' expression Perhaps(';')       { Guarantee $2 }
   | 'mode' ident '(' ListOf(require)
@@ -843,11 +843,13 @@ instance ToConstDef (Ident,Type,Expression) where
 
 --------------------------------------------------------------------------------
 
+simpBinder :: Ident -> Type -> Binder
+simpBinder i t = Binder { binderDefines = i
+                        , binderType = t
+                        , binderClock = Nothing }
+
 toVarDeclBase :: ([Ident], Type) -> [ Binder ]
-toVarDeclBase (xs,t) = [ Binder { binderDefines = x
-                                , binderType    = t
-                                , binderClock   = Nothing
-                                } | x <- xs ]
+toVarDeclBase (xs,t) = [ simpBinder x t | x <- xs ]
 
 toVarDecl :: ([Ident], Type) -> ClockExpr -> [ Binder ]
 toVarDecl (xs,t) c = [ Binder { binderDefines = x
