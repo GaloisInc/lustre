@@ -404,7 +404,7 @@ evalExpr expr =
     P.Struct {} -> bad "struct"
     P.WithThenElse {} -> bad "with-then-else"
 
-    P.CallPos ni es ->
+    P.Call ni es ->
       do as <- mapM evalExprAtom es
          let prim x = pure (C.Atom (C.Prim x as))
          case ni of

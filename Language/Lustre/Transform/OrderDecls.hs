@@ -232,7 +232,7 @@ instance Uses Expression where
       Struct x y fs -> mconcat [ aType x, maybe mempty aVal y, uses fs ]
       WithThenElse e1 e2 e3 -> uses (e1, (e2,e3))
       Merge x es -> aVal (Unqual x) <> uses es
-      CallPos f es -> uses (f,es)
+      Call f es -> uses (f,es)
 
 instance Uses e => Uses (MergeCase e) where
   uses (MergeCase c v) = uses (c,v)

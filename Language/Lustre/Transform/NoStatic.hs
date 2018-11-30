@@ -966,7 +966,7 @@ evalDynExpr eloc env expr =
         Just v  -> evalMergeConst env v ms
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
-    CallPos f es ->
+    Call f es ->
       do let (cs,es0) =
                 case f of
                   NodeInst (CallUser c) _ ->
@@ -1001,7 +1001,7 @@ evalDynExpr eloc env expr =
                          NestedExpr -> pure (nameCallSites env)
          if shouldName
             then nameCallSite env ni es'
-            else pure (CallPos ni es')
+            else pure (Call ni es')
 
   where
   isTuple e =
@@ -1072,11 +1072,11 @@ nameCallSite env ni es =
                 binds = zipWith toBind ns outs
             let lhs = map LVar ns
             recordCallSite (range ni) lhs
-            addFunEqn binds (Define lhs (CallPos ni es))
+            addFunEqn binds (Define lhs (Call ni es))
             pure $ case map (Var . Unqual) ns of
                      [one] -> one
                      notOne -> Tuple notOne
-       Nothing -> pure (CallPos ni es)
+       Nothing -> pure (Call ni es)
   where
   isIdent expr =
      case expr of

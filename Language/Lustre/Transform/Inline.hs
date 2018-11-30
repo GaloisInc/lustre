@@ -231,7 +231,7 @@ instance Rename Expression where
         WithThenElse e1 (rename su e2)  (rename su e3)
 
       Merge i ms -> Merge (rename su i) (rename su ms)
-      CallPos ni es -> CallPos ni (rename su es)
+      Call ni es -> Call ni (rename su es)
 
 instance Rename e => Rename (Field e) where
   rename su (Field l e) = Field l (rename su e)
@@ -289,7 +289,7 @@ inlineCallsNode env nd =
   isCall e =
     case e of
       ERange _ e1   -> isCall e1
-      CallPos (NodeInst (CallUser f) []) es -> Just (f,es)
+      Call (NodeInst (CallUser f) []) es -> Just (f,es)
       _             -> Nothing
 
   renameEqns used eqns =
@@ -318,7 +318,7 @@ inlineCallsNode env nd =
 
   updateProps eqns =
     let asmps = [ e | Assert _ e <- eqns ]
-        bin r f a b = CallPos (NodeInst (CallPrim r (Op2 f)) []) [a,b]
+        bin r f a b = Call (NodeInst (CallPrim r (Op2 f)) []) [a,b]
 
         addAsmps e1 = case asmps of
                         [] -> e1

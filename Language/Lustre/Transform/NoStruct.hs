@@ -395,7 +395,7 @@ evalEqn env eqn =
       ls = concatMap (expandLHS env) lhs
       isCall ex = case ex of
                     ERange _ ex1 -> isCall ex1
-                    CallPos {}   -> True
+                    Call {}      -> True
                     _            -> False
 
 expandLHS :: Env -> LHS Expression -> [ LHS a ]
@@ -624,7 +624,7 @@ evalExpr env expr =
       evalMerge i [ MergeCase p (evalExpr env e) | MergeCase p e <- as ]
 
     -- XXX: ITERATORS
-    CallPos f es ->
+    Call f es ->
       case (f, map (evalExpr env) es) of
 
         -- [x1,x2] | [y1,y2]  ~~> [ x1,x2,y1,y2 ]
@@ -664,13 +664,13 @@ evalExpr env expr =
         (_, evs) -> SLeaf (mkCall f evs)
 
   where
-  mkCall f as = CallPos f [ v | e <- as, v <- flatStructData e ]
+  mkCall f as = Call f [ v | e <- as, v <- flatStructData e ]
 
   ite r e1 e2 e3 =
     case e1 of
-      SLeaf b -> CallPos (NodeInst (CallPrim r ITE) []) [b,e2,e3]
+      SLeaf b -> Call (NodeInst (CallPrim r ITE) []) [b,e2,e3]
       _ -> panic "evalExpr" [ "ITE expects a boolean" ]
-  bin r op e1 e2 = CallPos (NodeInst (CallPrim r (Op2 op)) []) [e1,e2]
+  bin r op e1 e2 = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2]
 
   fTrue = Lit (Bool True)
   fFalse = Lit (Bool False)

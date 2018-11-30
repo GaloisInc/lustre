@@ -254,7 +254,7 @@ data Expression = ERange !SourceRange !Expression
 
                 | Merge Ident [MergeCase Expression]
 
-                | CallPos NodeInst [Expression]
+                | Call NodeInst [Expression]
                   deriving Show
 
 -- | The first expression (the "pattern") should be a constant.
@@ -390,7 +390,7 @@ exprRangeMaybe expr =
     Select {}       -> Nothing
     WithThenElse {} -> Nothing
     Merge {}        -> Nothing
-    CallPos {}      -> Nothing
+    Call {}         -> Nothing
     Struct {}       -> Nothing
 
 typeRangeMaybe :: Type -> Maybe SourceRange

@@ -522,7 +522,7 @@ expression :: { Expression }
   | expression '[' arraySel ']'       { at $1 $4 (Select $1 $3) }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
-  | effNode '(' exprList ')'          { at $1 $4 (CallPos $1 $3) }
+  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3) }
   | name '{' '}'                      { at $1 $3 (Struct $1 Nothing []) }
   | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 Nothing $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
@@ -891,7 +891,7 @@ opIf r     = primArg r ITE
 
 -- | Call a primitive with no static parameters
 callPrim :: SourceRange -> PrimNode -> [Expression] -> Expression
-callPrim r p es = CallPos (NodeInst (CallPrim r p) []) es
+callPrim r p es = Call (NodeInst (CallPrim r p) []) es
 
 --------------------------------------------------------------------------------
 

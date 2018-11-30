@@ -111,7 +111,7 @@ evalConst env expr =
       do s <- evalSel env sel
          evalSelFun s =<< evalConst env e
 
-    CallPos (NodeInst (CallPrim _ p) []) es ->
+    Call (NodeInst (CallPrim _ p) []) es ->
       do vs <- mapM (evalConst env) es
          case (p, vs) of
 
@@ -163,7 +163,7 @@ evalConst env expr =
            (_, _) -> bad ("Unknown primitive expression: " ++ showPP p)
 
 
-    CallPos {} -> bad "`call` is not a constant expression."
+    Call {} -> bad "`call` is not a constant expression."
 
   where
   bad = crash "evalConst"

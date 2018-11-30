@@ -276,7 +276,7 @@ checkConstExpr expr ty =
          checkConstExpr e3 ty
 
     Merge {}   -> reportError "`merge` is not a constant expression."
-    CallPos {} -> reportError "constant expressions do not support calls."
+    Call {}   -> reportError "constant expressions do not support calls."
 
 -- | Check that the expression has the given type.
 checkExpr1 :: Expression -> CType -> M ()
@@ -344,7 +344,7 @@ checkExpr expr tys =
              check c = checkMergeCase i c it ts
          mapM_ check as
 
-    CallPos (NodeInst call as) es
+    Call (NodeInst call as) es
       | not (null as) -> notYetImplemented "Call with static arguments."
 
       -- Special case for @^@ because its second argument is a constant

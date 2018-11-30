@@ -256,7 +256,7 @@ instance Pretty Expression where
       Merge i as  -> parenIf (n > 1) doc
         where doc = "merge" <+> pp i $$ nest 2 (vcat (map pp as))
 
-      CallPos f es ->
+      Call f es ->
         case f of
           NodeInst (CallPrim _ prim) [] ->
             case (prim, es) of
