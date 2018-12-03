@@ -16,13 +16,14 @@ runTC (M m) = case runM m ro0 rw0 of
                 Left err -> Left err
                 Right (a,_) -> Right a
   where
-  ro0 = RO { roConstants = Map.empty
-           , roUserNodes = Map.empty
-           , roIdents    = Map.empty
-           , roCurRange  = []
-           , roTypeNames = Map.empty
-           , roTemporal  = False
-           , roUnsafe    = False
+  ro0 = RO { roConstants  = Map.empty
+           , roUserNodes  = Map.empty
+           , roIdents     = Map.empty
+           , roOnlyInputs = False
+           , roCurRange   = []
+           , roTypeNames  = Map.empty
+           , roTemporal   = False
+           , roUnsafe     = False
            }
 
   rw0 = RW { rwNextClockVar = 0
@@ -80,14 +81,17 @@ instance Monad M where
 
 
 data RO = RO
-  { roConstants :: Map Name (SourceRange,Type)
-  , roUserNodes :: Map Name (SourceRange,Safety,NodeType,NodeProfile)
-  , roIdents    :: Map Ident (SourceRange, CType)
-  , roCurRange  :: [SourceRange]
-  , roTypeNames :: Map Name (SourceRange,NamedType) -- no type vars here
-  , roTemporal  :: Bool
-  , roUnsafe    :: Bool
+  { roConstants   :: Map Name (SourceRange,Type)
+  , roUserNodes   :: Map Name (SourceRange,Safety,NodeType,NodeProfile)
+  , roIdents      :: Map Ident (SourceRange, IdentMode, CType)
+  , roOnlyInputs  :: Bool
+  , roCurRange    :: [SourceRange]
+  , roTypeNames   :: Map Name (SourceRange,NamedType) -- no type vars here
+  , roTemporal    :: Bool
+  , roUnsafe      :: Bool
   }
+
+data IdentMode = InputIdent | NonInputIdent
 
 data RW = RW
   { rwNextClockVar   :: !Int
@@ -138,10 +142,17 @@ inRangeMaybe mb m = case mb of
                       Nothing -> m
                       Just r  -> inRange r m
 
-
+onlyInputs :: M a -> M a
+onlyInputs (M m) = M (mapReader (\ro -> ro { roOnlyInputs = True }) m)
 
 lookupIdentMaybe :: Ident -> M (Maybe CType)
-lookupIdentMaybe i = M (fmap snd . Map.lookup i . roIdents <$> ask)
+lookupIdentMaybe i =
+  M $ do ro <- ask
+         pure $
+           do (_,mo,t) <- Map.lookup i (roIdents ro)
+              case mo of
+                NonInputIdent | roOnlyInputs ro -> Nothing
+                _ -> Just t
 
 lookupIdent :: Ident -> M CType
 lookupIdent i =
@@ -246,13 +257,13 @@ uniqueConst x =
 
 
 
-withLocal :: Ident -> CType -> M a -> M a
-withLocal i t (M m) =
+withLocal :: Ident -> IdentMode -> CType -> M a -> M a
+withLocal i mo t (M m) =
   do ro <- M ask
      let is = roIdents ro
      case Map.lookup i is of
-       Nothing -> M (local ro { roIdents = Map.insert i (range i, t) is } m)
-       Just (r,_) ->
+       Nothing -> M (local ro { roIdents = Map.insert i (range i, mo, t) is } m)
+       Just (r,_,_) ->
          reportError $ nestedError
            "Multiple declarations for a local variable:"
            [ "Name:" <+> pp i
@@ -291,11 +302,11 @@ withNamedType x t (M m) =
                                                   (roTypeNames ro) } m)
 
 
-withLocals :: [(Ident,CType)] -> M a -> M a
+withLocals :: [(Ident,IdentMode,CType)] -> M a -> M a
 withLocals xs k =
   case xs of
-    []           -> k
-    (x,t) : more -> withLocal x t (withLocals more k)
+    []              -> k
+    (x,mo,t) : more -> withLocal x mo t (withLocals more k)
 
 allowTemporal :: Bool -> M a -> M a
 allowTemporal b (M m) = M (mapReader upd m)

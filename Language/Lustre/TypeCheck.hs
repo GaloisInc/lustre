@@ -96,8 +96,8 @@ checkNodeDecl nd k =
                      ["Node:" <+> pp (nodeName nd)]
            Nothing -> pure ()
        let prof = nodeProfile nd
-       res <- checkInputBinders (nodeInputs prof) $
-              checkBinders      (nodeOutputs prof) $
+       res <- checkInputBinders  (nodeInputs prof) $
+              checkOutputBinders (nodeOutputs prof) $
          do case nodeDef nd of
               Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
                            "Missing node definition"
@@ -128,7 +128,7 @@ checkNodeBody nb = addLocals (nodeLocals nb)
 checkLocalDecl :: LocalDecl -> M a -> M a
 checkLocalDecl ld m =
   case ld of
-    LocalVar b   -> checkBinder b m
+    LocalVar b   -> checkBinder b NonInputIdent m
     LocalConst c -> checkConstDef c m
 
 
@@ -159,32 +159,35 @@ checkConstDef c m =
 checkInputBinder :: InputBinder -> M a -> M a
 checkInputBinder ib m =
   case ib of
-    InputBinder b -> checkBinder b m
+    InputBinder b -> checkBinder b InputIdent m
     InputConst i t ->
       do checkType t
          withConst i t m
 
-checkBinder :: Binder -> M a -> M a
-checkBinder b m =
+checkBinder :: Binder -> IdentMode -> M a -> M a
+checkBinder b mo m =
   do c <- case binderClock b of
             Nothing -> pure BaseClock
             Just e  -> do _c <- checkClockExpr e
                           pure (KnownClock e)
      checkType (binderType b)
      let ty = CType { cType = binderType b, cClock = c }
-     withLocal (binderDefines b) ty m
-
-checkBinders :: [Binder] -> M a -> M a
-checkBinders bs m =
-  case bs of
-    [] -> m
-    b : more -> checkBinder b (checkBinders more m)
+     withLocal (binderDefines b) mo ty m
 
 checkInputBinders :: [InputBinder] -> M a -> M a
 checkInputBinders bs m =
   case bs of
     [] -> m
     b : more -> checkInputBinder b (checkInputBinders more m)
+
+
+checkOutputBinders :: [Binder] -> M a -> M a
+checkOutputBinders bs m =
+  case bs of
+    [] -> m
+    b : more -> checkBinder b NonInputIdent (checkOutputBinders more m)
+
+
 
 
 checkType :: Type -> M ()
@@ -214,9 +217,8 @@ checkEquation eqn =
   enterRange $
   case eqn of
     Assert _ e ->
-      checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
-         -- XXX: maybe make sure that this only uses inputs
-         -- as nothing else is under the caller's control.
+      onlyInputs $
+        checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
 
     Property _ e ->
       checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
