@@ -13,6 +13,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Language.Lustre.AST,
+                       Language.Lustre.Name,
                        Language.Lustre.Panic,
                        Language.Lustre.Parser.Lexer,
                        Language.Lustre.Parser,

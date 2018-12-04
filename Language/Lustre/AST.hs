@@ -2,6 +2,7 @@
 -- http://www-verimag.imag.fr/DIST-TOOLS/SYNCHRONE/lustre-v6/doc/lv6-ref-man.pdf
 module Language.Lustre.AST
   ( module Language.Lustre.AST
+  , module Language.Lustre.Name
   , HasRange(..)
   , SourceRange(..)
   , SourcePos(..)
@@ -13,6 +14,7 @@ import Data.Maybe(fromMaybe)
 import AlexTools(SourceRange(..), SourcePos(..), HasRange(..), (<->))
 
 import Language.Lustre.Panic
+import Language.Lustre.Name
 
 data Program  = ProgramDecls [TopDecl]
               | ProgramPacks [PackDecl]
@@ -21,24 +23,6 @@ data Program  = ProgramDecls [TopDecl]
 data PackDecl = PackDecl Package
               | PackInst Ident Ident [ (Ident, StaticArg) ]
                 deriving Show
-
-data Ident = Ident
-  { identText       :: !Text
-  , identRange      :: !SourceRange
-  , identPragmas    :: [Pragma]
-  } deriving Show
-
-instance Eq Ident where
-  x == y = identText x == identText y
-
-instance Ord Ident where
-  compare x y = compare (identText x) (identText y)
-
-data Pragma = Pragma
-  { pragmaTextA     :: !Text
-  , pragmaTextB     :: !Text
-  , pragmaRange     :: !SourceRange
-  } deriving Show
 
 -- | This is used for both packages and models.
 data Package = Package
@@ -75,25 +59,6 @@ data TypeDef = IsType !Type
              | IsStruct ![ FieldType ]
               deriving Show
 
-type Pragmas    = [Pragma]
-
-data Name =
-    Unqual Ident
-  | Qual SourceRange Text Text
-    deriving Show
-
-instance Eq Name where
-  m == n = case (m,n) of
-             (Unqual a, Unqual b)     -> a == b
-             (Qual _ x y, Qual _ p q) -> (x,y) == (p,q)
-             _                        -> False
-
-instance Ord Name where
-  compare m n = case (m,n) of
-                  (Unqual x, Unqual y)     -> compare x y
-                  (Unqual {}, _)           -> LT
-                  (Qual _ x y, Qual _ p q) -> compare (x,y) (p,q)
-                  (Qual {}, _)             -> GT
 
 data Type =
     NamedType Name
@@ -363,17 +328,9 @@ data Op2 = FbyArr       -- a -> a -> a
 data OpN = AtMostOne | Nor
                   deriving (Show, Eq, Ord)
 
-instance HasRange Ident where
-  range = identRange
 
-instance HasRange Pragma where
-  range = pragmaRange
 
-instance HasRange Name where
-  range nm =
-    case nm of
-      Unqual i   -> range i
-      Qual r _ _ -> r
+--------------------------------------------------------------------------------
 
 instance HasRange e => HasRange (Field e) where
   range (Field x y) = x <-> y
