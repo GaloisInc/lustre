@@ -53,10 +53,6 @@ executable lustre
   main-is: Lustre.hs
   build-depends: base, containers, pretty, language-lustre
 
-executable test-lustre
-  hs-source-dirs: exe
-  main-is: TestLustre.hs
-  build-depends: base, test-lib, language-lustre
 
 
 
