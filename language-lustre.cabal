@@ -53,70 +53,10 @@ executable lustre
   main-is: Lustre.hs
   build-depends: base, containers, pretty, language-lustre
 
-test-suite lexer
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: Lexer.hs
-  build-depends: base, text, language-lustre
-
-test-suite parser
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: Parser.hs
-  build-depends:
-    base, filepath, directory, language-lustre
-
-test-suite order
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: Order.hs
-  build-depends:
-    base, filepath, directory, containers, pretty, language-lustre
-
-test-suite no-static
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: NoStatic.hs
-  build-depends:
-    base, filepath, directory, containers, pretty, language-lustre
-
-test-suite no-struct
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: NoStruct.hs
-  build-depends:
-    base, filepath, directory, containers, pretty, language-lustre
-
-test-suite inline-calls
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: InlineCalls.hs
-  build-depends:
-    base, filepath, directory, containers, pretty, language-lustre
-
-test-suite desugar
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  hs-source-dirs: tests
-  main-is: Desugar.hs
-  build-depends:
-    base, filepath, directory, containers, pretty, language-lustre
-
-
-
-test-suite core
-  type: exitcode-stdio-1.0
-  default-language: Haskell2010
-  main-is: Core.hs
-  hs-source-dirs: tests
-  build-depends: base, text, language-lustre
-
+executable test-lustre
+  hs-source-dirs: exe
+  main-is: TestLustre.hs
+  build-depends: base, test-lib, language-lustre
 
 
 
