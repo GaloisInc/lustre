@@ -1,7 +1,6 @@
 {-# Language ImplicitParams #-}
 module Language.Lustre.Transform.OrderDecls (orderTopDecls) where
 
-import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Semigroup ( (<>) )
 import Data.Set(Set)
@@ -22,34 +21,12 @@ orderTopDecls ds = concatMap orderRec (stronglyConnComp graph)
   (repMap, graph) = foldr addRep (Map.empty,[]) ds
 
   addRep d (mp, gs) =
-    let ?contractInfo = contractInfo Map.empty (orderContracts ds)
-    in
     case Set.minView (defines d) of
       Nothing -> (mp,gs)    -- shouldn't happen?
       Just (a,rest) ->
         ( foldr (\x -> Map.insert x a) mp rest
         , (d, a, map getRep (Set.toList (uses d))) : gs
         )
-
-orderContracts :: [TopDecl] -> [ContractDecl]
-orderContracts ds = map check (stronglyConnComp graph)
-  where
-  deps c        = [ d | Import d _ _ <- cdItems c ]
-  graph         = [ (c,cdName c, deps c) | DeclareContract c <- ds ]
-
-  check s = case s of
-              AcyclicSCC x -> x
-              CyclicSCC xs -> panic "orderContracts"
-                                [ "Recursive top-level constracts:"
-                                , "*** " ++ unwords (map (showPP . cdName) xs)
-                                ]
-
-contractInfo :: ContractInfo -> [ContractDecl] -> ContractInfo
-contractInfo = foldl addDefs
-  where
-  addDefs done c = let ?contractInfo = done
-                   in Map.insert (Unqual (cdName c)) (definesContract c) done
-
 
 
 -- | Place declarations with no static parameters after declarations with
@@ -90,11 +67,8 @@ aContract x = Set.singleton (ContractNS,x)
 
 --------------------------------------------------------------------------------
 
--- | Ghost variables introduced by contracts
-type ContractInfo = Map Name Names
-
 class Uses t where
-  uses :: (?contractInfo :: ContractInfo) => t -> Names
+  uses :: t -> Names
 
 class Defines t where
   defines :: t -> Names
@@ -324,7 +298,8 @@ instance Uses e => Uses (ArraySlice e) where
 
 
 instance Uses Contract where
-  uses = usesContract . contractItems
+  uses c = uses is `without` defines is
+    where is = contractItems c
 
 instance Uses ContractItem where
   uses ci =
@@ -336,38 +311,21 @@ instance Uses ContractItem where
       Mode _ mas mgs     -> uses (mas,mgs)
       Import x as bs     -> Set.insert (ContractNS,Unqual x) (uses (as,bs))
 
+instance Defines ContractItem where
+  defines ci =
+    case ci of
+      GhostConst x _ _   -> aVal (Unqual x)
+      GhostVar   b _     -> defines b
+      Assume _           -> mempty
+      Guarantee _        -> mempty
+      Mode _ _ _         -> mempty  -- XXX: node references?
+      Import _ _ _       -> mempty -- XXX: node references
+
 instance Uses ContractDecl where
-  uses = usesContract . cdItems
+  uses cd = uses (cdItems cd) `without` defines (cdProfile cd)
 
 instance Defines ContractDecl where
   defines c = aContract (Unqual (cdName c))
 
-
-
-definesItem :: (?contractInfo :: ContractInfo) => ContractItem -> Names
-definesItem ci =
-  case ci of
-    GhostConst x _ _   -> aVal (Unqual x)
-    GhostVar   b _     -> defines b
-    Assume _           -> mempty
-    Guarantee _        -> mempty
-    Mode _ _ _         -> mempty  -- XXX: node references?
-    Import x _ _ ->
-      case Map.lookup (Unqual x) ?contractInfo of
-        Just c  -> c
-        Nothing -> panic "definesItem"
-                     [ "Unknwon contract in import"
-                     , "*** Name: " ++ showPP x
-                     ]
-
-definesContract :: (?contractInfo :: ContractInfo) => ContractDecl -> Names
-definesContract cd = Set.unions $ aContract (Unqual (cdName cd))
-                                : map definesItem (cdItems cd)
-
-
-usesContract :: (?contractInfo :: ContractInfo) => [ContractItem] -> Names
-usesContract cs = uses cs `without` defs
-  where
-  defs = Set.unions (map definesItem cs)
 
 
