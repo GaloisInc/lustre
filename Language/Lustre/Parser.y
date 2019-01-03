@@ -18,6 +18,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString as BS
+import Data.Semigroup ((<>))
 import Control.Exception(throwIO)
 
 import Language.Lustre.Parser.Lexer
