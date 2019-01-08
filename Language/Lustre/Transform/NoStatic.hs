@@ -547,6 +547,25 @@ evalLocalDecls env ds = ( [ evalBinder env1 b | LocalVar b <- ds ]
   where
   env1 = foldl' evalConstDef env [ c | LocalConst c <- ds ]
 
+{-
+evalContractItems env cis = undefined
+  where
+  consts = [ (c,e) | GhostConst c _ e <- cis ]
+  evalC env (c,e) = let v = evalExprToVal env e
+                        n = Unqual Ghost c
+                    in env { 
+
+-- | Assumes that ghost variables have been ordered.
+evalContractItem :: Env -> ContractItem -> M [ContractItem]
+evalContractItem env ci =
+  case ci of
+    GhostConst c mbT e -> GhostConst c 
+    GhostVar   b e     ->
+    Assume e           ->
+    Guarantee e        ->
+    Mode m as ts       ->
+    Import c is os     ->
+-}
 
 -- | Evaluate an equation.
 evalEqn :: Env -> Equation -> M [Equation]

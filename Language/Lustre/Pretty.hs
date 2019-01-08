@@ -462,3 +462,23 @@ instance Pretty ContractDecl where
     $$ "let" $$ nest 2 (vcat (map pp (cdItems cd))) $$ "tel"
 
 
+
+instance Pretty Thing where
+  ppPrec _ th =
+    case th of
+      AType     -> "type"
+      ANode     -> "node"
+      AContract -> "contract"
+      AConst    -> "constant"
+      AVal      -> "value"
+
+
+instance Pretty ResolvedName where
+  ppPrec p m = ppPrec p (rnIdent m)
+
+
+instance Pretty ModName where
+  ppPrec _ (Module t) = pp t
+
+
+

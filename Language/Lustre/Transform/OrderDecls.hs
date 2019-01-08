@@ -1,34 +1,27 @@
-{-# Language ImplicitParams #-}
+{-# Language DataKinds, GeneralizedNewtypeDeriving, TypeFamilies #-}
 module Language.Lustre.Transform.OrderDecls (orderTopDecls) where
 
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Semigroup ( (<>) )
 import Data.Set(Set)
 import qualified Data.Set as Set
+import Data.Maybe(mapMaybe)
 import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
+import Data.Foldable(traverse_)
+import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty(showPP)
 import Language.Lustre.Panic(panic)
+import Language.Lustre.Defines
 
 
 orderTopDecls :: [TopDecl] -> [TopDecl]
-orderTopDecls ds = concatMap orderRec (stronglyConnComp graph)
-  where
-  getRep x = Map.findWithDefault x x repMap
+orderTopDecls = concatMap orderRec . orderThings
 
-  (repMap, graph) = foldr addRep (Map.empty,[]) ds
-
-  addRep d (mp, gs) =
-    case Set.minView (defines d) of
-      Nothing -> (mp,gs)    -- shouldn't happen?
-      Just (a,rest) ->
-        ( foldr (\x -> Map.insert x a) mp rest
-        , (d, a, map getRep (Set.toList (uses d))) : gs
-        )
-
-
+-- XXX
 -- | Place declarations with no static parameters after declarations with
 -- static parameters.  We assume that the inputs were already validated,
 -- so this does not do proper error checking.
@@ -46,286 +39,523 @@ orderRec comp =
           DeclareNodeInst nid -> null (nodeInstStaticInputs nid)
           _                   -> False
 
+orderThings :: (Defines a, Resolve a) => [a] -> [SCC a]
+orderThings ds = undefined {-stronglyConnComp graph
+  where
+  getRep x = Map.findWithDefault x x repMap
+
+  (repMap, graph) = foldr addRep (Map.empty,[]) ds
+
+  addRep d (mp, gs) = undefined {
+    case Set.minView (getDefs d) of
+      Nothing -> (mp,gs)    -- shouldn't happen?
+      Just (a,rest) ->
+        ( foldr (\x -> Map.insert x a) mp rest
+        , (d, a, map getRep (Set.toList (resolve d))) : gs
+        ) -}
+
+
+resolveGroup :: (Defines a, Resolve a) => [a] -> ResolveM ([SCC a], InScope)
+resolveGroup ds =
+  do (namess, newScope) <- defsOf ds
+     resolved <- extendScope newScope (traverse resolveWithFree ds)
+     let mkRep i ns = [ (n,i) | n <- Set.toList ns ]
+         repFor     = (`Map.lookup` mp)
+            where mp = Map.fromList $ concat $ zipWith mkRep [ 0 .. ] namess
+         mkNode i (a,us) = (a, i, mapMaybe repFor (Set.toList us))
+         comps = stronglyConnComp (zipWith mkNode [0..] resolved)
+         localDef = Set.unions namess
+         allUsed  = Set.unions (map snd resolved) `Set.difference` localDef
+     traverse_ addUse allUsed
+     pure (comps, newScope)
+
+noRec :: (a -> Ident) -> [SCC a] -> ResolveM [a]
+noRec nm = traverse check
+  where check x = case x of
+                    AcyclicSCC a -> pure a
+                    CyclicSCC as -> reportError (BadRecursiveDefs (map nm as))
+
+resolveNonRecGroup ::
+  (Defines a, Resolve a) => (a -> Ident) -> [a] -> ResolveM ([a], InScope)
+resolveNonRecGroup isRec xs =
+  do (comps,scope) <- resolveGroup xs
+     xs <- noRec isRec comps
+     pure (xs, scope)
+
+
+
 
 --------------------------------------------------------------------------------
 
-data NS = TypeNS | ValNS | ContractNS deriving (Show,Eq,Ord)
-
-type Names = Set (NS,Name)
-
-without :: Names -> Names -> Names
-without = Set.difference
-
-aType :: Name -> Names
-aType x = Set.singleton (TypeNS,x)
-
-aVal :: Name -> Names
-aVal x = Set.singleton (ValNS,x)
-
-aContract :: Name -> Names
-aContract x = Set.singleton (ContractNS,x)
-
---------------------------------------------------------------------------------
-
-class Uses t where
-  uses :: t -> Names
-
-class Defines t where
-  defines :: t -> Names
+class Resolve t where
+  resolve :: t -> ResolveM t
 
 
-instance Uses a => Uses [a] where
-  uses = mconcat . map uses
-
-instance Defines a => Defines [a] where
-  defines = mconcat . map defines
-
-instance Uses a => Uses (Maybe a) where
-  uses = maybe mempty uses
-
-instance Defines a => Defines (Maybe a) where
-  defines = maybe mempty defines
-
-instance (Uses a, Uses b) => Uses (a,b) where
-  uses (x,y) = mappend (uses x) (uses y)
-
-instance Uses TopDecl where
-  uses ts =
+instance Resolve TopDecl where
+  resolve ts =
     case ts of
-      DeclareType td -> uses td
-      DeclareConst cd -> uses cd
-      DeclareNode nd -> uses nd
-      DeclareNodeInst nid -> uses nid
-      DeclareContract cd -> uses cd
+      DeclareType td      -> DeclareType     <$> resolve td
+      DeclareConst cd     -> DeclareConst    <$> resolve cd
+      DeclareNode nd      -> DeclareNode     <$> resolve nd
+      DeclareNodeInst nid -> DeclareNodeInst <$> resolve nid
+      DeclareContract cd  -> DeclareContract <$> resolve cd
 
-instance Defines TopDecl where
-  defines ts =
-    case ts of
-      DeclareType td -> defines td
-      DeclareConst cd -> defines cd
-      DeclareNode nd -> defines nd
-      DeclareNodeInst nid -> defines nid
-      DeclareContract cd -> defines cd
+instance Resolve TypeDecl where
+  resolve t = do t1 <- traverse resolve (typeDef t)
+                 pure t { typeDef = t1 }
 
-
-
-
-instance Uses TypeDecl where
-  uses = uses . typeDef
-
-instance Defines TypeDecl where
-  defines td = aType (Unqual (typeName td)) <> defines (typeDef td)
-
-
-instance Uses TypeDef where
-  uses td =
+instance Resolve TypeDef where
+  resolve td =
     case td of
-      IsType t -> uses t
-      IsEnum _ -> mempty
-      IsStruct fs -> uses fs
+      IsType t    -> IsType <$> resolve t
+      IsEnum _    -> pure td
+      IsStruct fs -> IsStruct <$> traverse resolve fs
 
-instance Defines TypeDef where
-  defines td =
-    case td of
-      IsType _ -> mempty
-      IsEnum xs -> mconcat (map (aVal . Unqual) xs)
-      IsStruct _ -> mempty
+instance Resolve FieldType where
+  resolve ft = do t1 <- resolve (fieldType ft)
+                  e1 <- traverse resolveConstExpr (fieldDefault ft)
+                  pure ft { fieldType = t1, fieldDefault = e1 }
 
+resolveField :: (e -> ResolveM e) -> Field e -> ResolveM (Field e)
+resolveField res (Field l e) = Field l <$> res e
 
-instance Uses FieldType where
-  uses t = uses (fieldType t, fieldDefault t)
-
-instance Uses e => Uses (Field e) where
-  uses (Field _ e) = uses e
-
-instance Uses Type where
-  uses ty =
+instance Resolve Type where
+  resolve ty =
     case ty of
-      NamedType t -> aType t
-      ArrayType t e -> uses (t,e)
-      IntSubrange e1 e2 -> uses (e1,e2)
-      IntType -> mempty
-      RealType -> mempty
-      BoolType -> mempty
-      TVar x -> panic "uses@Type" [ "Unexpected type variable"
-                                  , "*** Tvar: " ++ showPP x ]
-      TypeRange _ t -> uses t
+      TypeRange r t     -> TypeRange r  <$> resolve t
+
+      NamedType t       -> NamedType    <$> resolveName t AType
+      ArrayType t e     -> ArrayType    <$> resolve t <*> resolveConstExpr e
+      IntSubrange e1 e2 -> IntSubrange  <$> resolveConstExpr e1
+                                        <*> resolveConstExpr e2
+
+      IntType           -> pure ty
+      RealType          -> pure ty
+      BoolType          -> pure ty
+
+      TVar x            -> panic "resolve@Type" [ "Unexpected type variable"
+                                             , "*** Tvar: " ++ showPP x ]
+
+instance Resolve ConstDef where
+  resolve cd = do t <- traverse resolve (constType cd)
+                  e <- traverse resolveConstExpr (constDef cd)
+                  pure cd { constType = t, constDef = e }
 
 
-instance Uses ConstDef where
-  uses cd = uses (constType cd, constDef cd)
-
-instance Defines ConstDef where
-  defines = aVal . Unqual . constName
-
-instance Uses StaticParam where
-  uses sp =
+instance Resolve StaticParam where
+  resolve sp =
     case sp of
-      TypeParam _ -> mempty
-      ConstParam _ t -> uses t
-      NodeParam _ _ _ p -> uses p
+      TypeParam _       -> pure sp
+      ConstParam c t    -> ConstParam c    <$> resolve t
+      NodeParam s f x p -> NodeParam s f x <$> resolve p
 
-instance Defines StaticParam where
-  defines sp =
-    case sp of
-      TypeParam t       -> aType (Unqual t)
-      ConstParam c _    -> aVal (Unqual c)
-      NodeParam _ _ i _ -> aVal (Unqual i)
+instance Resolve NodeProfile where
+  resolve np = do is <- traverse {-XXX: scopes-} resolve (nodeInputs np)
+                  os <- traverse resolve (nodeOutputs np)
+                  pure np { nodeInputs = is, nodeOutputs = os }
 
-instance Uses NodeProfile where
-  uses np = uses (nodeInputs np, nodeOutputs np)
 
-instance Defines NodeProfile where
-  defines = defines . nodeInputs
-
-instance Uses InputBinder where
-  uses ib =
+instance Resolve InputBinder where
+  resolve ib =
     case ib of
-      InputBinder b  -> uses b
-      InputConst _ t -> uses t
-
-instance Defines InputBinder where
-  defines ib =
-    case ib of
-      InputBinder b -> defines b
-      InputConst c _ -> aVal (Unqual c)
-
-instance Uses Binder where
-  uses b = uses (binderType b, binderClock b)
-
-instance Defines Binder where
-  defines = aVal . Unqual . binderDefines
+      InputBinder b  -> InputBinder  <$> resolve b
+      InputConst c t -> InputConst c <$> resolve t
 
 
-instance Uses StaticArg where
-  uses sa =
+instance Resolve StaticArg where
+  resolve sa =
     case sa of
-      TypeArg t     -> uses t
-      ExprArg e     -> uses e
-      NodeArg _ ni  -> uses ni
-      ArgRange _ a  -> uses a
-
-instance Uses NodeInstDecl where
-  uses nid = uses (nodeInstStaticInputs nid,
-                            (nodeInstProfile nid, nodeInstDef nid))
+      TypeArg t     -> TypeArg    <$> resolve t
+      ExprArg e     -> ExprArg    <$> resolveConstExpr e
+      NodeArg f ni  -> NodeArg f  <$> resolve ni
+      ArgRange r a  -> ArgRange r <$> resolve a
 
 
-instance Defines NodeInstDecl where
-  defines nd = aVal (Unqual (nodeInstName nd))
 
-instance Uses NodeInst where
-  uses (NodeInst x as) = uses (x,as)
+instance Resolve NodeInstDecl where
+{- 
+  XXX: add `ins` to scope
+  resolve nid = do ins  <- resolve (nodeInstStaticInputs nid)
+                   prof <- resolve (nodeInstProfile nid)
+                   def  <- resolve (nodeInstDef nid)
+                   pure nid { nodeInstStaticInputs = ins
+                            , nodeInstProfile = prof
+                            , nodeInstDef = def
+                            }
+-}
 
-instance Uses Callable where
-  uses c =
+instance Resolve Binder where
+  resolve b = do t <- resolve (binderType b)
+                 c <- traverse resolve (binderClock b)
+                 pure b { binderType = t, binderClock = c }
+
+instance Resolve NodeInst where
+  resolve (NodeInst x as) = NodeInst <$> resolve x <*> traverse resolve as
+
+instance Resolve Callable where
+  resolve c =
     case c of
-      CallUser n  -> aVal n
-      CallPrim {} -> mempty
-
-instance Uses Expression where
-  uses expr =
-    case expr of
-      ERange _ e -> uses e
-      Var x -> aVal x
-      Lit _ -> mempty
-      e1 `When` e2 -> uses (e1,e2)
-      Tuple es -> uses es
-      Array es -> uses es
-      Select e s -> uses (e,s)
-      Struct x fs -> mconcat [ aType x, uses fs ]
-      UpdateStruct x y fs -> mconcat [ aType x, aVal y, uses fs ]
-      WithThenElse e1 e2 e3 -> uses (e1, (e2,e3))
-      Merge x es -> aVal (Unqual x) <> uses es
-      Call f es -> uses (f,es)
-
-instance Uses e => Uses (MergeCase e) where
-  uses (MergeCase c v) = uses (c,v)
-
-instance Uses ClockExpr where
-  uses (WhenClock _ cv i) = uses cv `mappend` aVal (Unqual i)
+      CallUser n  -> CallUser <$> resolveName n ANode
+      CallPrim {} -> pure c
 
 
-instance Uses NodeDecl where
-  uses x = uses (nodeStaticInputs x) <>
-           ((uses (nodeProfile x) <>
-              (uses (nodeContract x, nodeDef x)
-                                `without` defines (nodeProfile x)))
-           `without` defines (nodeStaticInputs x))
+resolveConstExpr :: Expression -> ResolveM Expression
+resolveConstExpr expr =
+  case expr of
+    ERange r e            -> ERange r <$> resolveConstExpr e
+    Var x                 -> Var <$> resolveName x AConst
+    Lit _                 -> pure expr
+    When {}               -> bad "when"
+    Tuple es              -> Tuple  <$> traverse resolveConstExpr es
+    Array es              -> Array  <$> traverse resolveConstExpr es
+    Select e s            -> Select <$> resolveConstExpr e <*> resolve s
 
-instance Defines NodeDecl where
-  defines nd = aVal (Unqual (nodeName nd))
+    Struct x fs           ->
+      do x1  <- resolveName x AType
+         fs1 <- traverse (resolveField resolveConstExpr) fs
+         pure (Struct x1 fs1)
 
-instance Uses NodeBody where
-  uses x = uses (nodeLocals x, nodeEqns x)
-              `without` defines (nodeLocals x)
+    UpdateStruct x y fs   ->
+      do x1  <- resolveName x AType
+         y1  <- resolveName y AConst
+         fs1 <- traverse (resolveField resolveConstExpr) fs
+         pure (UpdateStruct x1 y1 fs1)
 
-instance Uses LocalDecl where
-  uses ld =
-    case ld of
-      LocalVar b -> uses b
-      LocalConst c -> uses c
+    WithThenElse e1 e2 e3 ->
+      WithThenElse <$> resolveConstExpr e1
+                   <*> resolveConstExpr e2 <*> resolveConstExpr e3
 
-instance Defines LocalDecl where
-  defines ld =
-    case ld of
-      LocalVar b -> defines b
-      LocalConst b -> defines b
+    Merge {}  -> bad "merge"
+    Call {}   -> bad "call to a node"
 
-instance Uses Equation where
-  uses eqn =
+  where
+  bad = reportError . InvalidConstantExpression
+
+
+resolveExpr :: Expression -> ResolveM Expression
+resolveExpr expr =
+  case expr of
+    ERange r e            -> ERange r <$> resolveExpr e
+    Var x                 -> Var <$> inferName x
+    Lit _                 -> pure expr
+    e1 `When` e2          -> When <$> resolveExpr e1 <*> resolve e2
+
+    Tuple es              -> Tuple  <$> traverse resolveExpr es
+    Array es              -> Array  <$> traverse resolveExpr es
+    Select e s            -> Select <$> resolveExpr e <*> resolve s
+
+    Struct x fs           ->
+      do x1 <- resolveName x AType
+         fs1 <- traverse (resolveField resolveExpr) fs
+         pure (Struct x1 fs1)
+
+    UpdateStruct x y fs   ->
+      do x1   <- resolveName x AType
+         y1   <- inferName y
+         fs1  <- traverse (resolveField resolveExpr) fs
+         pure (UpdateStruct x1 y1 fs1)
+
+    WithThenElse e1 e2 e3 ->
+      WithThenElse <$> resolveConstExpr e1
+                   <*> resolveExpr e2 <*> resolveExpr e3
+
+    Merge x es -> Merge <$> resolveIdent x <*> traverse resolve es
+    Call f es  -> Call <$> resolve f <*> traverse resolveExpr es
+
+
+instance (e ~ Expression) => Resolve (MergeCase e) where
+  resolve (MergeCase c v) = MergeCase <$> resolveConstExpr c <*> resolveExpr v
+
+instance Resolve ClockExpr where
+  resolve (WhenClock r cv i) =
+    WhenClock r <$> resolveConstExpr cv <*> resolveIdent i
+
+
+instance Resolve NodeDecl where
+  resolve x = undefined
+{-
+    do inps <- resolve (nodeStaticInputs x)
+       withDefs (nodeStaticInputs x) $
+          do prof <- resolve (nodeProfile x)
+
+
+           ((resolve (nodeProfile x) <>
+              (resolve (nodeContract x, nodeDef x)
+                                `without` getDefs (nodeProfile x)))
+           `without` getDefs (nodeStaticInputs x))
+-}
+
+
+instance Resolve NodeBody where
+  resolve nb =
+    do (cs1,constScope) <- resolveNonRecGroup constName cs
+       vs1 <- undefined vs
+       eqs <- mapM resolve (nodeEqns nb)
+       pure nb { nodeLocals = map LocalConst cs1 ++
+                                         map LocalVar   vs1
+                           , nodeEqns   = eqs }
+    where
+    cs = [ c | LocalConst c <- nodeLocals nb ]
+    vs = [ v | LocalVar   v <- nodeLocals nb ]
+
+
+instance Resolve Equation where
+  resolve eqn =
     case eqn of
-      Assert _ e -> uses e
-      Property _ e -> uses e
-      Define lhs e -> uses (lhs,e)
-      IsMain _ -> mempty
-      IVC is -> Set.fromList [ (ValNS,Unqual i) | i <- is ]
+      Assert n e   -> Assert n   <$> resolveExpr e
+      Property n e -> Property n <$> resolveExpr e
+      Define lhs e -> Define     <$> traverse resolve lhs <*> resolveExpr e
+      IsMain _     -> pure eqn
+      IVC is       -> IVC <$> traverse resolveIdent is
 
-instance Uses e => Uses (LHS e) where
-  uses lhs =
+instance (e ~ Expression) => Resolve (LHS e) where
+  resolve lhs =
     case lhs of
-      LVar _ -> mempty
-      LSelect x e -> uses (x,e)
+      LVar i      -> LVar    <$> resolveIdent i
+      LSelect x e -> LSelect <$> resolve x <*> resolve e
 
-instance Uses e => Uses (Selector e) where
-  uses sel =
+
+instance (e ~ Expression) => Resolve (Selector e) where
+  resolve sel =
     case sel of
-      SelectField _ -> mempty
-      SelectElement e -> uses e
-      SelectSlice e -> uses e
+      SelectField _   -> pure sel
+      SelectElement e -> SelectElement <$> resolveConstExpr e
+      SelectSlice e   -> SelectSlice <$> resolve e
 
-instance Uses e => Uses (ArraySlice e) where
-  uses as = uses (arrayStart as, (arrayEnd as, arrayStep as))
+instance (e ~ Expression) => Resolve (ArraySlice e) where
+  resolve as = do s <- resolveConstExpr (arrayStart as)
+                  e <- resolveConstExpr (arrayEnd as)
+                  st <- traverse resolveConstExpr (arrayStep as)
+                  pure as { arrayStart = s, arrayEnd = e, arrayStep = st }
 
-
-instance Uses Contract where
-  uses c = uses is `without` defines is
+instance Resolve Contract where
+{-
+  resolve c = resolve is `without` getDefs is
     where is = contractItems c
+-}
 
-instance Uses ContractItem where
-  uses ci =
+
+instance Resolve ContractItem where
+{-
+  resolve ci =
     case ci of
-      GhostConst _ mbT e -> uses (mbT, e)
-      GhostVar   b     e -> uses (b,e)
-      Assume e           -> uses e
-      Guarantee e        -> uses e
-      Mode _ mas mgs     -> uses (mas,mgs)
-      Import x as bs     -> Set.insert (ContractNS,Unqual x) (uses (as,bs))
+      GhostConst _ mbT e -> resolve (mbT, e)
+      GhostVar   b     e -> resolve (b,e)
+      Assume e           -> resolve e
+      Guarantee e        -> resolve e
+      Mode _ mas mgs     -> resolve (mas,mgs)
+      Import x as bs     -> Set.insert (ContractNS,Unqual x) (resolve (as,bs))
+-}
 
-instance Defines ContractItem where
-  defines ci =
-    case ci of
-      GhostConst x _ _   -> aVal (Unqual x)
-      GhostVar   b _     -> defines b
-      Assume _           -> mempty
-      Guarantee _        -> mempty
-      Mode _ _ _         -> mempty  -- XXX: node references?
-      Import _ _ _       -> mempty -- XXX: node references
 
-instance Uses ContractDecl where
-  uses cd = uses (cdItems cd) `without` defines (cdProfile cd)
+instance Resolve ContractDecl where
+  -- resolve cd = resolve (cdItems cd) `without` getDefs (cdProfile cd)
 
-instance Defines ContractDecl where
-  defines c = aContract (Unqual (cdName c))
+
+
+--------------------------------------------------------------------------------
+
+newtype ResolveM a = ResolveM { unResolveM ::
+  WithBase Id
+    [ ExceptionT ResolveError -- state persists across exceptions
+    , ReaderT    ResR
+    , StateT     ResS
+    ] a
+  } deriving (Functor,Applicative,Monad)
+
+-- | What's in scope for each module.
+type InScope = Map (Maybe ModName) (Map Ident (Map Thing ResolvedName))
+
+-- | The "scoped" part of the resolver monad
+data ResR = ResR
+  { resInScope  :: InScope        -- ^ What's in scope
+  , resModule   :: Maybe ModName  -- ^ Use this for current definitions
+  }
+
+-- | The "mutable" part of the resolver monad
+data ResS = ResS
+  { resFree     :: !(Set ResolvedName)  -- ^ Free used variables
+  , resNextName :: !Int                 -- ^ To generate unique names
+  , resWarns    :: ![ResolveWarn]       -- ^ Warnings
+  }
+
+data ResolveError = InvalidConstantExpression String
+                  | UndefinedName Name
+                  | AmbiguousName Name
+                  | RepeatedDefinitions [Ident]
+                  | BadRecursiveDefs [Ident]
+
+data ResolveWarn  = Shadows ResolvedName ResolvedName
+
+-- | Report the given error, aborting the analysis.
+reportError :: ResolveError -> ResolveM a
+reportError e = ResolveM (raise e)
+
+-- | Record a warning.
+addWarning :: ResolveWarn -> ResolveM ()
+addWarning w = ResolveM $ sets_ $ \s -> s { resWarns = w : resWarns s }
+
+-- | Record a use of the given name.
+addUse :: ResolvedName -> ResolveM ()
+addUse rn = ResolveM $ sets_ $ \s -> s { resFree = Set.insert rn (resFree s) }
+
+
+-- | Compute the definitions from a bunch of things,
+-- checking that there are no duplicates.
+-- Note that this operation is **effectful**, as it assignes unique
+-- identifiers to the defined names.
+defsOf :: Defines a => [a] -> ResolveM ([Set ResolvedName], InScope)
+defsOf as =
+  do ds  <- traverse defsOfOne as
+     mp  <- traverse (traverse check) (foldr mergeDefs noDefs ds)
+     mo  <- ResolveM (resModule <$> ask)
+     pure (map defNames ds, Map.singleton mo mp)
+  where
+  check xs =
+    case Set.minView xs of
+      Just (a,more) | Set.null more -> pure a
+      _ -> reportError (RepeatedDefinitions (map rnIdent (Set.toList xs)))
+
+  defsOfOne a = ResolveM $
+    do l <- resModule <$> ask
+       sets $ \s -> let (d,n) = getDefs a l (resNextName s)
+                    in (d, s { resNextName = n })
+
+-- | Extend the current scope for the duration of the given computation.
+-- The new entries shadow the existing ones.
+extendScope :: InScope -> ResolveM a -> ResolveM a
+extendScope ds (ResolveM m) =
+  do ro <- ResolveM ask
+     let new = shadowScope ds (resInScope ro)
+     traverse_ (traverse_ (traverse_ reportShadow)) (gotShadowed new)
+     ResolveM (local ro { resInScope = newScope new } m)
+  where
+  reportShadow old =
+    case mb of
+      Nothing -> panic "extendScope" [ "Shadowed, but not?"
+                                     , "*** Name: " ++ showPP old ]
+      Just new ->
+        case rnThing old of
+          AVal -> reportError (RepeatedDefinitions [rnIdent new, rnIdent old])
+          _    -> addWarning (Shadows new old)
+
+    where
+    mb = do ids <- Map.lookup (rnModule old) ds
+            ths <- Map.lookup (rnIdent old) ids
+            Map.lookup (rnThing old) ths
+
+
+
+-- | Extend the definitions in the second scope with the first.
+-- New entries in the same namespace "shadow" existing ones.
+shadowScope :: InScope -> InScope -> WithShadows InScope
+shadowScope = joinWith (joinWith joinThings)
+  where
+  joinWith :: (Ord k, Ord k1) =>
+                ShadowFun (Map k v) -> ShadowFun (Map k1 (Map k v))
+  joinWith f m1 m2 =
+    let mp = Map.mergeWithKey (\_ a b -> Just (f a b)) noShadow noShadow m1 m2
+    in WS { newScope    = newScope <$> mp
+          , gotShadowed = Map.filter (not . Map.null) (gotShadowed <$> mp)
+          }
+
+  noShadow m = fmap (\a -> WS { newScope = a, gotShadowed = Map.empty }) m
+
+  joinThings :: ShadowFun (Map Thing ResolvedName)
+  joinThings as bs =
+    WS { newScope    = Map.union as bs'
+       , gotShadowed = Map.intersectionWith (\_ old -> old) as bs
+            -- XXX: but also constants shadow values and the other way
+       }
+    where
+    has x = x `Map.member` as
+
+    -- constants and values live in the same name space,
+    -- so we can't just use "union"
+    bs'   = if has AVal || has AConst
+               then Map.delete AVal (Map.delete AConst bs)
+               else bs
+
+data WithShadows a = WS { newScope :: a, gotShadowed :: a }
+type ShadowFun a   = a -> a -> WithShadows a
+
+
+
+-- | Specify the location of names for the scope of the given computation.
+withModName :: Maybe ModName -> ResolveM a -> ResolveM a
+withModName l (ResolveM m) =
+  ResolveM $ mapReader (\ro -> ro { resModule = l }) m
+
+-- | Resolve something but do not modify the state.  Instead the dependencies
+-- of the thing are returned.
+resolveWithFree :: Resolve a => a -> ResolveM (a, Set ResolvedName)
+resolveWithFree a =
+  do free <- ResolveM $ sets $ \s -> (resFree s, s { resFree = Set.empty })
+     a1   <- resolve a
+     thisFree <- ResolveM $ sets $ \s -> (resFree s, s { resFree = free })
+     pure (a1, thisFree)
+
+
+--------------------------------------------------------------------------------
+-- Resolving of names
+
+-- | Figure out what a name of the given flavor refers to.
+resolveName :: Name -> Thing -> ResolveM Name
+resolveName nm th =
+  do mb <- lkpIdent m th i
+     case mb of
+       Nothing -> reportError (UndefinedName nm)
+       Just rn -> do addUse rn
+                     pure nm -- XXX: use `rn`
+
+  where
+  (m,i) = case nm of
+            Unqual ide -> (Nothing , ide)
+            Qual _ q t -> (Just (Module q), identFromText t)
+
+
+-- | Figure out what the given name referes to (either value or a constnat).
+inferName :: Name -> ResolveM Name
+inferName nm =
+  do mb1 <- lkpIdent m AConst i
+     mb2 <- lkpIdent m AVal  i
+     case (mb1,mb2) of
+       (Nothing, Nothing) -> reportError (UndefinedName nm)
+       (Just _, Just _)   -> reportError (AmbiguousName nm)
+       (Just rn,Nothing)  -> do addUse rn
+                                pure nm -- XXX: use rn
+       (Nothing, Just rn) -> do addUse rn
+                                pure nm -- XXX: use rn
+  where
+  (m,i) = case nm of
+            Unqual ide -> (Nothing, ide)
+            Qual _ q t -> (Just (Module q), identFromText t)
+
+
+-- | Figure out what the given identifier refers (value or constnat)
+resolveIdent :: Ident -> ResolveM Ident
+resolveIdent i =
+  do mb1 <- lkpIdent Nothing AConst i
+     mb2 <- lkpIdent Nothing AVal  i
+     case (mb1,mb2) of
+       (Nothing, Nothing) -> reportError (UndefinedName (Unqual i))
+       (Just _, Just _)   -> reportError (AmbiguousName (Unqual i))
+       (Just rn,Nothing)  -> do addUse rn
+                                pure i -- XXX: use rn
+       (Nothing, Just rn) -> do addUse rn
+                                pure i -- XXX: use rn
+
+-- | Lookup something in the current scope.
+lkpIdent :: Maybe ModName -> Thing -> Ident -> ResolveM (Maybe ResolvedName)
+lkpIdent loc th i =
+  do scope <- ResolveM (resInScope <$> ask)
+     pure $ do defs   <- Map.lookup loc scope
+               things <- Map.lookup i   defs
+               Map.lookup th things
+
+
+
+
 
 
 

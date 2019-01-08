@@ -13,6 +13,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Language.Lustre.AST,
+                       Language.Lustre.Defines,
                        Language.Lustre.Name,
                        Language.Lustre.Panic,
                        Language.Lustre.Parser.Lexer,
@@ -43,7 +44,7 @@ library
   build-depends:       base < 4.13,
                        alex-tools >=0.4,
                        bytestring, text, array, panic, containers,
-                       GraphSCC, pretty, monadLib
+                       GraphSCC, pretty, monadLib >= 3.8
   build-tools:         alex, happy
   default-language:    Haskell2010
   ghc-options:         -Wall
