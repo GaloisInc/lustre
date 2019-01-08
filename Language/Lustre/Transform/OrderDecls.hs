@@ -55,6 +55,9 @@ orderThings ds = undefined {-stronglyConnComp graph
         ) -}
 
 
+{- | Order an unordered set of declarations, in dependency order.
+The result is a dependency-ordered sequence of strongly-connected
+components, and the new names introduced by the declarations -}
 resolveGroup :: (Defines a, Resolve a) => [a] -> ResolveM ([SCC a], InScope)
 resolveGroup ds =
   do (namess, newScope) <- defsOf ds
@@ -69,14 +72,23 @@ resolveGroup ds =
      traverse_ addUse allUsed
      pure (comps, newScope)
 
-noRec :: (a -> Ident) -> [SCC a] -> ResolveM [a]
+-- | Check that none of the given SCC-s are recursive.
+noRec :: (a -> Ident) {- ^ Pick an identifier to use for the given entry.
+                           This is used for error reporting. -} ->
+          [SCC a] ->
+          ResolveM [a]
 noRec nm = traverse check
   where check x = case x of
                     AcyclicSCC a -> pure a
                     CyclicSCC as -> reportError (BadRecursiveDefs (map nm as))
 
+-- | Resolve an unordered group of declarations,
+-- checking that none are recursive.
 resolveNonRecGroup ::
-  (Defines a, Resolve a) => (a -> Ident) -> [a] -> ResolveM ([a], InScope)
+  (Defines a, Resolve a) =>
+  (a -> Ident) {- ^ Use this name when reporting errors -} ->
+  [a]          {- ^ Unordered declarations -} ->
+  ResolveM ([a], InScope)
 resolveNonRecGroup isRec xs =
   do (comps,scope) <- resolveGroup xs
      xs <- noRec isRec comps
@@ -364,7 +376,7 @@ newtype ResolveM a = ResolveM { unResolveM ::
   } deriving (Functor,Applicative,Monad)
 
 -- | What's in scope for each module.
-type InScope = Map (Maybe ModName) (Map Ident (Map Thing ResolvedName))
+type InScope = Map (Maybe ModName) (Map Ident (Map NameSpace ResolvedName))
 
 -- | The "scoped" part of the resolver monad
 data ResR = ResR
@@ -442,7 +454,7 @@ extendScope ds (ResolveM m) =
     where
     mb = do ids <- Map.lookup (rnModule old) ds
             ths <- Map.lookup (rnIdent old) ids
-            Map.lookup (rnThing old) ths
+            Map.lookup (thingNS (rnThing old)) ths
 
 
 
@@ -461,20 +473,12 @@ shadowScope = joinWith (joinWith joinThings)
 
   noShadow m = fmap (\a -> WS { newScope = a, gotShadowed = Map.empty }) m
 
-  joinThings :: ShadowFun (Map Thing ResolvedName)
+  joinThings :: ShadowFun (Map NameSpace ResolvedName)
   joinThings as bs =
-    WS { newScope    = Map.union as bs'
+    WS { newScope    = Map.union as bs
        , gotShadowed = Map.intersectionWith (\_ old -> old) as bs
-            -- XXX: but also constants shadow values and the other way
        }
-    where
-    has x = x `Map.member` as
 
-    -- constants and values live in the same name space,
-    -- so we can't just use "union"
-    bs'   = if has AVal || has AConst
-               then Map.delete AVal (Map.delete AConst bs)
-               else bs
 
 data WithShadows a = WS { newScope :: a, gotShadowed :: a }
 type ShadowFun a   = a -> a -> WithShadows a
@@ -551,7 +555,7 @@ lkpIdent loc th i =
   do scope <- ResolveM (resInScope <$> ask)
      pure $ do defs   <- Map.lookup loc scope
                things <- Map.lookup i   defs
-               Map.lookup th things
+               Map.lookup (thingNS th) things
 
 
 

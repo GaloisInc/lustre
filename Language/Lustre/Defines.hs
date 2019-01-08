@@ -18,7 +18,7 @@ import MonadLib
 import Language.Lustre.AST
 
 
-type Defs = Map Ident (Map Thing (Set ResolvedName))
+type Defs = Map Ident (Map NameSpace (Set ResolvedName))
 
 -- | Empty set of definitinos
 noDefs :: Defs
@@ -45,7 +45,7 @@ getDefs a mn n0 =
   , defNextName s
   )
   where
-  one d = (rnIdent d, Map.singleton (rnThing d) (Set.singleton d))
+  one d = (rnIdent d, Map.singleton (thingNS (rnThing d)) (Set.singleton d))
   s0    = DefS { defNextName = n0, defThings = [] }
   (_,s) = runM (unDefM (defines a)) mn s0
 
