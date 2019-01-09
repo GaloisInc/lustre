@@ -17,9 +17,11 @@ import Data.Foldable(traverse_)
 import MonadLib
 
 import Language.Lustre.AST
+import Language.Lustre.Panic(panic)
 
 
-type Defs = Map Ident (Map NameSpace (Set ResolvedName))
+-- | Identifiers groupes by namespace
+type Defs = Map NameSpace (Set Ident)
 
 -- | Empty set of definitinos
 noDefs :: Defs
@@ -27,11 +29,11 @@ noDefs = Map.empty
 
 -- | Merge two sets of definitions
 mergeDefs :: Defs -> Defs -> Defs
-mergeDefs = Map.unionWith (Map.unionWith Set.union)
+mergeDefs = Map.unionWith Set.union
 
 -- | Collect all names in a definition map.
-defNames :: Defs -> Set ResolvedName
-defNames = foldr (\m xs -> foldr Set.union xs m) Set.empty
+defNames :: Defs -> Set Ident
+defNames = Set.unions . Map.elems
 
 
 
@@ -42,11 +44,13 @@ getDefs :: Defines a =>
   Int             {- ^ A seed for unique names -} ->
   (Defs, Int)     {- ^ Returns definitions and a new name seed -}
 getDefs a mn n0 =
-  ( Map.fromListWith (Map.unionWith Set.union) (map one (defThings s))
+  ( Map.fromListWith Set.union (map one (defThings s))
   , defNextName s
   )
   where
-  one d = (rnIdent d, Map.singleton (thingNS (rnThing d)) (Set.singleton d))
+  one d = case identResolved d of
+            Just i  -> (thingNS (rnThing i), Set.singleton d)
+            Nothing -> panic "getDefs" [ "Unresolved identifier." ]
   s0    = DefS { defNextName = n0, defThings = [] }
   (_,s) = runM (unDefM (defines a)) mn s0
 
@@ -59,19 +63,18 @@ newtype DefM a = DefM { unDefM ::
   deriving (Functor,Applicative,Monad)
 
 data DefS = DefS { defNextName :: !Int
-                 , defThings   :: [ResolvedName]
+                 , defThings   :: [Ident]
                  }
 
 addDef :: Ident -> Thing -> DefM ()
 addDef x t = DefM $
   do m <- ask
      sets_ $ \s ->
-       let n     = defNextName s
-           thing = ResolvedName { rnModule  = m
-                                , rnIdent   = x
-                                , rnThing   = t
-                                , rnUID     = n }
-       in DefS { defThings   = thing : defThings s
+       let n    = defNextName s
+           info = DefInfo { rnModule  = m
+                          , rnThing   = t
+                          , rnUID     = n }
+       in DefS { defThings   = x { identResolved = Just info } : defThings s
                , defNextName = n + 1
                }
 

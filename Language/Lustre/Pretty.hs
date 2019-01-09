@@ -45,7 +45,6 @@ instance Pretty Name where
     case nam of
       Unqual i   -> ppPrec n i
       Qual _ x y -> ppPrec n x PP.<> "::" PP.<> ppPrec n y
-      Resolved x -> ppPrec n x
 
 --------------------------------------------------------------------------------
 
@@ -472,10 +471,6 @@ instance Pretty Thing where
       AContract -> "contract"
       AConst    -> "constant"
       AVal      -> "value"
-
-
-instance Pretty ResolvedName where
-  ppPrec p m = ppPrec p (rnIdent m)
 
 
 instance Pretty ModName where

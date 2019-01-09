@@ -4,11 +4,37 @@ import Data.Text(Text)
 import qualified Data.Text as Text
 import AlexTools(SourceRange(..), HasRange(..), SourcePos(..))
 
+import Language.Lustre.Panic(panic)
+
 data Ident = Ident
   { identText       :: !Text
   , identRange      :: !SourceRange
   , identPragmas    :: [Pragma]
+  , identResolved   :: !(Maybe DefInfo)
   } deriving Show
+
+withResolved :: (DefInfo -> a) -> Ident -> a
+withResolved k i = case identResolved i of
+                    Just info -> k info
+                    Nothing -> panic "withResolved"
+                                  [ "The identifier is not resolved."
+                                  , "*** Name:  " ++ show (identText i)
+                                  , "*** Range: " ++ show (identRange i)
+                                  ]
+
+-- | Access the unique identifier of a resolved identifier.
+identUID :: Ident -> Int
+identUID = withResolved rnUID
+
+-- | Access the module, if any, of a resolved identifier.
+identModule :: Ident -> Maybe ModName
+identModule = withResolved rnModule
+
+-- | Get information about what sort of thing this resolved identifier
+-- refers to.
+identThing :: Ident -> Thing
+identThing = withResolved rnThing
+
 
 data Pragma = Pragma
   { pragmaTextA     :: !Text
@@ -18,8 +44,12 @@ data Pragma = Pragma
 
 data Name =
     Unqual Ident
+    -- ^ After name resolution, the 'identResolved' field of the
+    -- identifier should always be filled in.
+
   | Qual SourceRange Text Text
-  | Resolved ResolvedName
+    -- ^ Qualified name a produced in the parser, but should not
+    -- be used after resolving names.
     deriving Show
 
 
@@ -30,6 +60,7 @@ identFromText :: Text -> Ident
 identFromText txt = Ident { identText = txt
                           , identRange = dummy
                           , identPragmas = []
+                          , identResolved = Nothing
                           }
   where
   dummy    = SourceRange { sourceFrom = dummyPos, sourceTo = dummyPos }
@@ -42,10 +73,18 @@ identFromText txt = Ident { identText = txt
 --------------------------------------------------------------------------------
 
 instance Eq Ident where
-  x == y = identText x == identText y
+  x == y = case (identResolved x, identResolved y) of
+             (Just a, Just b)  -> a == b
+             (Nothing,Nothing) -> identText x == identText y
+             _                 -> False
 
 instance Ord Ident where
-  compare x y = compare (identText x) (identText y)
+  compare i j =
+    case (identResolved i, identResolved j) of
+      (Just x, Just y)   -> compare x y
+      (Nothing, Nothing) -> compare (identText i) (identText j)
+      (Nothing, Just _)  -> LT
+      (Just _, Nothing)  -> GT
 
 
 
@@ -53,14 +92,10 @@ instance Eq Name where
   m == n = case (m,n) of
              (Unqual a, Unqual b)     -> a == b
              (Qual _ x y, Qual _ p q) -> (x,y) == (p,q)
-             (Resolved x, Resolved y) -> x == y
              _                        -> False
 
 instance Ord Name where
   compare m n = case (m,n) of
-                  (Resolved x, Resolved y) -> compare x y
-                  (Resolved {}, _)         -> LT
-                  (_, Resolved {})         -> GT
                   (Unqual x, Unqual y)     -> compare x y
                   (Unqual {}, _)           -> LT
                   (_, Unqual {})           -> GT
@@ -82,24 +117,19 @@ instance HasRange Name where
     case nm of
       Unqual i   -> range i
       Qual r _ _ -> r
-      Resolved x -> range x
 
 
--- | A defined thing.
-data ResolvedName = ResolvedName
+-- | Information about the definition of an identifier.
+data DefInfo = DefInfo
   { rnUID     :: Int            -- ^ A unique identifier
-  , rnIdent   :: Ident          -- ^ Our name
   , rnModule  :: Maybe ModName  -- ^ Module where this is defined, if any
   , rnThing   :: Thing          -- ^ What are we
   } deriving Show
 
-instance HasRange ResolvedName where
-  range = range . rnIdent
-
-instance Eq ResolvedName where
+instance Eq DefInfo where
   x == y = rnUID x == rnUID y
 
-instance Ord ResolvedName where
+instance Ord DefInfo where
   compare x y = compare (rnUID x) (rnUID y)
 
 
@@ -113,9 +143,11 @@ data Thing = AType | ANode | AContract | AConst | AVal
              deriving (Show,Eq,Ord)
 
 
+-- | Various name spaces.
 data NameSpace = NSType | NSNode | NSContract | NSVal
              deriving (Show,Eq,Ord)
 
+-- | In what namespace do things live in.
 thingNS :: Thing -> NameSpace
 thingNS th =
   case th of

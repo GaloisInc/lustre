@@ -774,6 +774,7 @@ toIdent :: Lexeme Token -> [Pragma] -> Ident
 toIdent l ps = Ident { identText    = lexemeText l
                      , identRange   = lexemeRange l
                      , identPragmas = ps
+                     , identResolved = Nothing
                      }
 
 toQIdent :: Lexeme Token -> Name

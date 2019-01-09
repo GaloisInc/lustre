@@ -229,6 +229,7 @@ addNamed x a mp =
       let ide = Ident { identText  = i
                       , identRange = r
                       , identPragmas = []
+                      , identResolved = error "XXX: TODO addNamed"
                       }
       in Map.insert (Unqual ide) a mp1
   where mp1 = Map.insert x a mp
@@ -842,6 +843,7 @@ getNodeInstProfile env (NodeInst c as) =
                   let ident x = Ident { identText = x
                                       , identRange = range c
                                       , identPragmas = []
+                                      , identResolved = error "XXX: TODO"
                                       }
                       paramI x t = InputBinder (param x t)
                       param x t = Binder { binderDefines = ident x
@@ -1283,6 +1285,7 @@ newIdent r = sets $ \s -> let x = nameSeed s
                               i = Ident { identRange = r
                                         , identText = newName
                                         , identPragmas = []
+                                        , identResolved = error "XXX: todo newIdent"
                                         }
                               s1 = s { nameSeed = x + 1 }
                           in s1 `seq` (i, s1)

@@ -396,7 +396,7 @@ newtype ResolveM a = ResolveM { _unResolveM ::
   } deriving (Functor,Applicative,Monad)
 
 -- | What's in scope for each module.
-type InScope = Map (Maybe ModName) (Map Ident (Map NameSpace ResolvedName))
+type InScope = Map (Maybe ModName) (Map NameSpace Ident)
 
 -- | The "scoped" part of the resolver monad
 data ResR = ResR
@@ -406,7 +406,7 @@ data ResR = ResR
 
 -- | The "mutable" part of the resolver monad
 data ResS = ResS
-  { resFree     :: !(Set ResolvedName)  -- ^ Free used variables
+  { resFree     :: !(Set Ident)         -- ^ Free used variables
   , resNextName :: !Int                 -- ^ To generate unique names
   , resWarns    :: ![ResolveWarn]       -- ^ Warnings
   }
@@ -415,12 +415,12 @@ data ResS = ResS
 -- | Various things that can go wrong when resolving names.
 data ResolveError = InvalidConstantExpression String
                   | UndefinedName Name
-                  | AmbiguousName Name
+                  | AmbiguousName Name Ident Ident
                   | RepeatedDefinitions [Ident]
                   | BadRecursiveDefs [Ident]
 
 -- | Potential problems, but not fatal.
-data ResolveWarn  = Shadows ResolvedName ResolvedName
+data ResolveWarn  = Shadows Ident Ident
 
 -- | Report the given error, aborting the analysis.
 reportError :: ResolveError -> ResolveM a
@@ -431,7 +431,7 @@ addWarning :: ResolveWarn -> ResolveM ()
 addWarning w = ResolveM $ sets_ $ \s -> s { resWarns = w : resWarns s }
 
 -- | Record a use of the given name.
-addUse :: ResolvedName -> ResolveM ()
+addUse :: Ident -> ResolveM ()
 addUse rn = ResolveM $ sets_ $ \s -> s { resFree = Set.insert rn (resFree s) }
 
 
@@ -439,17 +439,17 @@ addUse rn = ResolveM $ sets_ $ \s -> s { resFree = Set.insert rn (resFree s) }
 -- checking that there are no duplicates.
 -- Note that this operation is **effectful**, as it assignes unique
 -- identifiers to the defined names.
-defsOf :: Defines a => [a] -> ResolveM ([Set ResolvedName], InScope)
+defsOf :: Defines a => [a] -> ResolveM ([Set Ident], InScope)
 defsOf as =
   do ds  <- traverse defsOfOne as
-     mp  <- traverse (traverse check) (foldr mergeDefs noDefs ds)
+     mp  <- traverse check (foldr mergeDefs noDefs ds)
      mo  <- ResolveM (resModule <$> ask)
      pure (map defNames ds, Map.singleton mo mp)
   where
   check xs =
     case Set.minView xs of
       Just (a,more) | Set.null more -> pure a
-      _ -> reportError (RepeatedDefinitions (map rnIdent (Set.toList xs)))
+      _ -> reportError (RepeatedDefinitions (Set.toList xs))
 
   defsOfOne a = ResolveM $
     do l <- resModule <$> ask
@@ -462,12 +462,12 @@ extendScope :: InScope -> ResolveM a -> ResolveM a
 extendScope ds (ResolveM m) =
   do ro <- ResolveM ask
      let new = shadowScope ds (resInScope ro)
-     traverse_ (traverse_ (traverse_ reportShadow)) (gotShadowed new)
+     traverse_ (traverse_ reportShadow) (gotShadowed new)
      a <- ResolveM (local ro { resInScope = newScope new } m)
      -- remove uses of the locally added variables as they are not free
-     let isHere x = isJust $ do is <- Map.lookup (rnModule x) ds
-                                ns <- Map.lookup (rnIdent x) is
-                                Map.lookup (thingNS (rnThing x)) ns
+     let isHere x = isJust $ do is <- Map.lookup (identModule x) ds
+                                let ns = thingNS (identThing x)
+                                Map.lookup ns is
      ResolveM $ sets_
               $ \s -> s { resFree = Set.filter (not . isHere) (resFree s) }
      pure a
@@ -479,22 +479,21 @@ extendScope ds (ResolveM m) =
       Nothing -> panic "extendScope" [ "Shadowed, but not?"
                                      , "*** Name: " ++ showPP old ]
       Just new ->
-        case rnThing old of
+        case identThing old of
           -- value identifiers cannot be shadowed
-          AVal -> reportError (RepeatedDefinitions [rnIdent new, rnIdent old])
+          AVal -> reportError (RepeatedDefinitions [new, old])
           _    -> addWarning (Shadows new old)
 
     where
-    mb = do ids <- Map.lookup (rnModule old) ds
-            ths <- Map.lookup (rnIdent old) ids
-            Map.lookup (thingNS (rnThing old)) ths
+    mb = do ids <- Map.lookup (identModule old) ds
+            Map.lookup (thingNS (identThing old)) ids
 
 
 
 -- | Extend the definitions in the second scope with the first.
 -- New entries in the same namespace "shadow" existing ones.
 shadowScope :: InScope -> InScope -> WithShadows InScope
-shadowScope = joinWith (joinWith joinThings)
+shadowScope = joinWith joinThings
   where
   joinWith :: (Ord k, Ord k1) =>
                 ShadowFun (Map k v) -> ShadowFun (Map k1 (Map k v))
@@ -506,7 +505,7 @@ shadowScope = joinWith (joinWith joinThings)
 
   noShadow m = fmap (\a -> WS { newScope = a, gotShadowed = Map.empty }) m
 
-  joinThings :: ShadowFun (Map NameSpace ResolvedName)
+  joinThings :: ShadowFun (Map NameSpace Ident)
   joinThings as bs =
     WS { newScope    = Map.union as bs
        , gotShadowed = Map.intersectionWith (\_ old -> old) as bs
@@ -525,7 +524,7 @@ withModName l (ResolveM m) =
 
 -- | Resolve something, and also return its free variables.
 -- Note that the free variables are also saved in the state of the monad.
-resolveWithFree :: Resolve a => a -> ResolveM (a, Set ResolvedName)
+resolveWithFree :: Resolve a => a -> ResolveM (a, Set Ident)
 resolveWithFree a =
   do free     <- ResolveM $ sets $ \s -> (resFree s, s { resFree = Set.empty })
      a1       <- resolve a
@@ -542,14 +541,16 @@ resolveWithFree a =
 resolveName :: Name -> Thing -> ResolveM Name
 resolveName nm th =
   case nm of
-    Resolved ResolvedName { rnThing = t }
-      | t == th -> pure nm
-      | otherwise -> panic "resolveName"
-                       [ "Resolved name in the wrong location:"
-                       , "*** Expected:" ++ showPP th
-                       , "*** Got:     " ++ showPP t
-                       ]
-    Unqual ide  -> doResolve Nothing ide
+    Unqual ide  ->
+      case identResolved ide of
+        Nothing -> doResolve Nothing ide
+        Just DefInfo { rnThing = t }
+          | t == th -> pure nm
+          | otherwise -> panic "resolveName"
+                           [ "Resolved name in the wrong location:"
+                           , "*** Expected:" ++ showPP th
+                           , "*** Got:     " ++ showPP t
+                           ]
     Qual _ q t  -> doResolve (Just (Module q)) (identFromText t)
   where
   doResolve m i =
@@ -557,15 +558,17 @@ resolveName nm th =
        case mb of
          Nothing -> reportError (UndefinedName nm)
          Just rn -> do addUse rn
-                       pure (Resolved rn)
+                       pure (Unqual rn)
 
 
 -- | Figure out what the given name referes to (either value or a constnat).
 inferName :: Name -> ResolveM Name
 inferName nm =
   case nm of
-    Resolved {} -> pure nm
-    Unqual ide -> doResolve Nothing ide
+    Unqual ide ->
+      case identResolved ide of
+        Nothing -> doResolve Nothing ide
+        Just _  -> pure nm
     Qual _ q t -> doResolve (Just (Module q)) (identFromText t)
   where
   doResolve m i =
@@ -573,11 +576,11 @@ inferName nm =
        mb2 <- lkpIdent m AVal  i
        case (mb1,mb2) of
          (Nothing, Nothing) -> reportError (UndefinedName nm)
-         (Just _, Just _)   -> reportError (AmbiguousName nm)
+         (Just p, Just q)   -> reportError (AmbiguousName nm p q)
          (Just rn,Nothing)  -> do addUse rn
-                                  pure (Resolved rn)
+                                  pure (Unqual rn)
          (Nothing, Just rn) -> do addUse rn
-                                  pure (Resolved rn)
+                                  pure (Unqual rn)
 
 
 -- | Figure out what the given identifier refers (value or constnat)
@@ -587,19 +590,18 @@ resolveIdent i =
      mb2 <- lkpIdent Nothing AVal  i
      case (mb1,mb2) of
        (Nothing, Nothing) -> reportError (UndefinedName (Unqual i))
-       (Just _, Just _)   -> reportError (AmbiguousName (Unqual i))
+       (Just p, Just q)   -> reportError (AmbiguousName (Unqual i) p q)
        (Just rn,Nothing)  -> do addUse rn
-                                pure i -- XXX: use rn
+                                pure rn
        (Nothing, Just rn) -> do addUse rn
-                                pure i -- XXX: use rn
+                                pure rn
 
 -- | Lookup something in the current scope.
-lkpIdent :: Maybe ModName -> Thing -> Ident -> ResolveM (Maybe ResolvedName)
+lkpIdent :: Maybe ModName -> Thing -> Ident -> ResolveM (Maybe Ident)
 lkpIdent loc th i =
   do scope <- ResolveM (resInScope <$> ask)
      pure $ do defs   <- Map.lookup loc scope
-               things <- Map.lookup i   defs
-               Map.lookup (thingNS th) things
+               Map.lookup (thingNS th) defs
 
 
 
