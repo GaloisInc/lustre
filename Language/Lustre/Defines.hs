@@ -6,6 +6,7 @@ module Language.Lustre.Defines
   , noDefs
   , defNames
   , mergeDefs
+  , ValBinder(..)
   ) where
 
 import Data.Map (Map)
@@ -107,6 +108,13 @@ instance Defines InputBinder where
     case ib of
       InputBinder b  -> addDef (binderDefines b) AVal
       InputConst c _ -> addDef c AConst
+
+-- | A temporary to be used in situations where we know that the
+-- binder introduces values (i.e., not constants)
+newtype ValBinder = ValBinder Binder
+
+instance Defines ValBinder where
+  defines (ValBinder b) = addDef (binderDefines b) AVal
 
 instance Defines TypeDef where
   defines td =

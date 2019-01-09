@@ -19,6 +19,7 @@ data Pragma = Pragma
 data Name =
     Unqual Ident
   | Qual SourceRange Text Text
+  | Resolved ResolvedName
     deriving Show
 
 
@@ -52,14 +53,18 @@ instance Eq Name where
   m == n = case (m,n) of
              (Unqual a, Unqual b)     -> a == b
              (Qual _ x y, Qual _ p q) -> (x,y) == (p,q)
+             (Resolved x, Resolved y) -> x == y
              _                        -> False
 
 instance Ord Name where
   compare m n = case (m,n) of
+                  (Resolved x, Resolved y) -> compare x y
+                  (Resolved {}, _)         -> LT
+                  (_, Resolved {})         -> GT
                   (Unqual x, Unqual y)     -> compare x y
                   (Unqual {}, _)           -> LT
+                  (_, Unqual {})           -> GT
                   (Qual _ x y, Qual _ p q) -> compare (x,y) (p,q)
-                  (Qual {}, _)             -> GT
 
 
 --------------------------------------------------------------------------------
@@ -77,7 +82,7 @@ instance HasRange Name where
     case nm of
       Unqual i   -> range i
       Qual r _ _ -> r
-
+      Resolved x -> range x
 
 
 -- | A defined thing.
@@ -86,7 +91,7 @@ data ResolvedName = ResolvedName
   , rnIdent   :: Ident          -- ^ Our name
   , rnModule  :: Maybe ModName  -- ^ Module where this is defined, if any
   , rnThing   :: Thing          -- ^ What are we
-  }
+  } deriving Show
 
 instance HasRange ResolvedName where
   range = range . rnIdent

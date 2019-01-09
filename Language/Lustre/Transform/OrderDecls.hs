@@ -3,13 +3,13 @@ module Language.Lustre.Transform.OrderDecls (orderTopDecls) where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Semigroup ( (<>) )
 import Data.Set(Set)
 import qualified Data.Set as Set
-import Data.Maybe(mapMaybe)
+import Data.Maybe(mapMaybe,isJust)
 import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
 import Data.Foldable(traverse_)
+import Data.Coerce(coerce)
 import MonadLib
 
 import Language.Lustre.AST
@@ -19,7 +19,7 @@ import Language.Lustre.Defines
 
 
 orderTopDecls :: [TopDecl] -> [TopDecl]
-orderTopDecls = concatMap orderRec . orderThings
+orderTopDecls = undefined -- concatMap orderRec . undefined
 
 -- XXX
 -- | Place declarations with no static parameters after declarations with
@@ -39,38 +39,43 @@ orderRec comp =
           DeclareNodeInst nid -> null (nodeInstStaticInputs nid)
           _                   -> False
 
-orderThings :: (Defines a, Resolve a) => [a] -> [SCC a]
-orderThings ds = undefined {-stronglyConnComp graph
-  where
-  getRep x = Map.findWithDefault x x repMap
-
-  (repMap, graph) = foldr addRep (Map.empty,[]) ds
-
-  addRep d (mp, gs) = undefined {
-    case Set.minView (getDefs d) of
-      Nothing -> (mp,gs)    -- shouldn't happen?
-      Just (a,rest) ->
-        ( foldr (\x -> Map.insert x a) mp rest
-        , (d, a, map getRep (Set.toList (resolve d))) : gs
-        ) -}
-
-
 {- | Order an unordered set of declarations, in dependency order.
 The result is a dependency-ordered sequence of strongly-connected
 components, and the new names introduced by the declarations -}
-resolveGroup :: (Defines a, Resolve a) => [a] -> ResolveM ([SCC a], InScope)
-resolveGroup ds =
-  do (namess, newScope) <- defsOf ds
-     resolved <- extendScope newScope (traverse resolveWithFree ds)
-     let mkRep i ns = [ (n,i) | n <- Set.toList ns ]
-         repFor     = (`Map.lookup` mp)
-            where mp = Map.fromList $ concat $ zipWith mkRep [ 0 .. ] namess
-         mkNode i (a,us) = (a, i, mapMaybe repFor (Set.toList us))
-         comps = stronglyConnComp (zipWith mkNode [0..] resolved)
-         localDef = Set.unions namess
-         allUsed  = Set.unions (map snd resolved) `Set.difference` localDef
-     traverse_ addUse allUsed
-     pure (comps, newScope)
+resolveGroup ::
+  (Defines a, Resolve a) => [a] -> ([SCC a] -> ResolveM b) -> ResolveM b
+resolveGroup ds k =
+  do (namess, scope) <- defsOf ds
+     extendScope scope $
+      do resolved <- traverse resolveWithFree ds
+
+         let mkRep i ns = [ (n,i) | n <- Set.toList ns ]
+             keys       = [ 0 .. ] :: [Int]
+             repFor     = (`Map.lookup` mp)
+                where mp = Map.fromList $ concat $ zipWith mkRep keys namess
+             mkNode i (a,us) = (a, i, mapMaybe repFor (Set.toList us))
+             comps = stronglyConnComp (zipWith mkNode keys resolved)
+
+         k comps
+
+
+-- | Resolve a list of declaratons, where the results of each are in scope
+-- of the next. The continuation is then executed in the newly computed scope.
+-- Note that value identifiers still cannot shadow each other
+-- so multiple declarations should still result in errors.
+resolveOrderedGroup ::
+  (Defines a, Resolve a) => [a] -> ([a] -> ResolveM b) -> ResolveM b
+resolveOrderedGroup ds0 k = go [] ds0
+  where
+  go done ds =
+    case ds of
+      [] -> k (reverse done)
+      d : more ->
+        do d1        <- resolve d
+           (_,scope) <- defsOf [d]
+           extendScope scope (go (d1 : done) more)
+
+
 
 -- | Check that none of the given SCC-s are recursive.
 noRec :: (a -> Ident) {- ^ Pick an identifier to use for the given entry.
@@ -82,18 +87,17 @@ noRec nm = traverse check
                     AcyclicSCC a -> pure a
                     CyclicSCC as -> reportError (BadRecursiveDefs (map nm as))
 
+
 -- | Resolve an unordered group of declarations,
 -- checking that none are recursive.
 resolveNonRecGroup ::
   (Defines a, Resolve a) =>
-  (a -> Ident) {- ^ Use this name when reporting errors -} ->
-  [a]          {- ^ Unordered declarations -} ->
-  ResolveM ([a], InScope)
-resolveNonRecGroup isRec xs =
-  do (comps,scope) <- resolveGroup xs
-     xs <- noRec isRec comps
-     pure (xs, scope)
-
+  (a -> Ident)              {- ^ Use this name when reporting errors -} ->
+  [a]                       {- ^ Group of declarations -} ->
+  ([a] -> ResolveM b)       {- ^ Run this continuation in the new scope -} ->
+  ResolveM b
+resolveNonRecGroup isRec xs k =
+  resolveGroup xs $ \comps -> k =<< noRec isRec comps
 
 
 
@@ -159,12 +163,7 @@ instance Resolve StaticParam where
     case sp of
       TypeParam _       -> pure sp
       ConstParam c t    -> ConstParam c    <$> resolve t
-      NodeParam s f x p -> NodeParam s f x <$> resolve p
-
-instance Resolve NodeProfile where
-  resolve np = do is <- traverse {-XXX: scopes-} resolve (nodeInputs np)
-                  os <- traverse resolve (nodeOutputs np)
-                  pure np { nodeInputs = is, nodeOutputs = os }
+      NodeParam s f x p -> NodeParam s f x <$> resolveProfile p pure
 
 
 instance Resolve InputBinder where
@@ -183,23 +182,36 @@ instance Resolve StaticArg where
       ArgRange r a  -> ArgRange r <$> resolve a
 
 
+resolveProfile :: NodeProfile -> (NodeProfile -> ResolveM a) -> ResolveM a
+resolveProfile prof k =
+  resolveOrderedGroup (nodeInputs prof) $ \ins ->
+  resolveOrderedGroup (coerce (nodeOutputs prof)) $ \outs ->
+  k prof { nodeInputs = ins, nodeOutputs = coerce (outs :: [ValBinder]) }
+
+
+
 
 instance Resolve NodeInstDecl where
-{- 
-  XXX: add `ins` to scope
-  resolve nid = do ins  <- resolve (nodeInstStaticInputs nid)
-                   prof <- resolve (nodeInstProfile nid)
-                   def  <- resolve (nodeInstDef nid)
-                   pure nid { nodeInstStaticInputs = ins
-                            , nodeInstProfile = prof
-                            , nodeInstDef = def
-                            }
--}
+  resolve nid =
+    withModName Nothing $
+    resolveOrderedGroup (nodeInstStaticInputs nid) $ \sinps ->
+    let k prof = do def <- resolve (nodeInstDef nid)
+                    pure nid { nodeInstStaticInputs = sinps
+                             , nodeInstProfile      = prof
+                             , nodeInstDef          = def
+                             }
+    in
+    case nodeInstProfile nid of
+      Nothing -> k Nothing
+      Just prof -> resolveProfile prof (k . Just)
 
 instance Resolve Binder where
   resolve b = do t <- resolve (binderType b)
                  c <- traverse resolve (binderClock b)
                  pure b { binderType = t, binderClock = c }
+
+instance Resolve ValBinder where
+  resolve (ValBinder b) = ValBinder <$> resolve b
 
 instance Resolve NodeInst where
   resolve (NodeInst x as) = NodeInst <$> resolve x <*> traverse resolve as
@@ -284,31 +296,39 @@ instance Resolve ClockExpr where
 
 
 instance Resolve NodeDecl where
-  resolve x = undefined
-{-
-    do inps <- resolve (nodeStaticInputs x)
-       withDefs (nodeStaticInputs x) $
-          do prof <- resolve (nodeProfile x)
-
-
-           ((resolve (nodeProfile x) <>
-              (resolve (nodeContract x, nodeDef x)
-                                `without` getDefs (nodeProfile x)))
-           `without` getDefs (nodeStaticInputs x))
--}
-
+  resolve nd =
+    resolveOrderedGroup (nodeStaticInputs nd) $ \sinps ->
+    resolveProfile (nodeProfile nd)           $ \prof ->
+    do ctr  <- traverse resolve (nodeContract nd)
+       body <- traverse resolve (nodeDef nd)
+       pure nd { nodeStaticInputs = sinps
+               , nodeProfile      = prof
+               , nodeContract     = ctr
+               , nodeDef          = body
+               }
 
 instance Resolve NodeBody where
   resolve nb =
-    do (cs1,constScope) <- resolveNonRecGroup constName cs
-       vs1 <- undefined vs
-       eqs <- mapM resolve (nodeEqns nb)
-       pure nb { nodeLocals = map LocalConst cs1 ++
-                                         map LocalVar   vs1
-                           , nodeEqns   = eqs }
+    -- We do constants before local variables.
+    -- This matters if a local variable shadows a global constant.
+    -- In that case the, the constant definitions would resolve correctly.
+    -- XXX: It is a bit questionable if allowing such definitios is a good idea.
+    resolveNonRecGroup getIdent cs $ \cs1 ->
+    resolveNonRecGroup getIdent vs $ \vs1 ->
+    do eqs <- traverse resolve (nodeEqns nb)
+       pure nb { nodeLocals = cs1 ++ vs1, nodeEqns = eqs }
     where
-    cs = [ c | LocalConst c <- nodeLocals nb ]
-    vs = [ v | LocalVar   v <- nodeLocals nb ]
+    cs = [ LocalConst c | LocalConst c <- nodeLocals nb ]
+    vs = [ LocalVar v   | LocalVar   v <- nodeLocals nb ]
+    getIdent x = case x of
+                  LocalConst c -> constName c
+                  LocalVar b   -> binderDefines b
+
+instance Resolve LocalDecl where
+  resolve ld =
+    case ld of
+      LocalConst c -> LocalConst <$> resolve c
+      LocalVar   v -> LocalVar   <$> resolve v
 
 
 instance Resolve Equation where
@@ -367,7 +387,7 @@ instance Resolve ContractDecl where
 
 --------------------------------------------------------------------------------
 
-newtype ResolveM a = ResolveM { unResolveM ::
+newtype ResolveM a = ResolveM { _unResolveM ::
   WithBase Id
     [ ExceptionT ResolveError -- state persists across exceptions
     , ReaderT    ResR
@@ -391,12 +411,15 @@ data ResS = ResS
   , resWarns    :: ![ResolveWarn]       -- ^ Warnings
   }
 
+
+-- | Various things that can go wrong when resolving names.
 data ResolveError = InvalidConstantExpression String
                   | UndefinedName Name
                   | AmbiguousName Name
                   | RepeatedDefinitions [Ident]
                   | BadRecursiveDefs [Ident]
 
+-- | Potential problems, but not fatal.
 data ResolveWarn  = Shadows ResolvedName ResolvedName
 
 -- | Report the given error, aborting the analysis.
@@ -440,7 +463,16 @@ extendScope ds (ResolveM m) =
   do ro <- ResolveM ask
      let new = shadowScope ds (resInScope ro)
      traverse_ (traverse_ (traverse_ reportShadow)) (gotShadowed new)
-     ResolveM (local ro { resInScope = newScope new } m)
+     a <- ResolveM (local ro { resInScope = newScope new } m)
+     -- remove uses of the locally added variables as they are not free
+     let isHere x = isJust $ do is <- Map.lookup (rnModule x) ds
+                                ns <- Map.lookup (rnIdent x) is
+                                Map.lookup (thingNS (rnThing x)) ns
+     ResolveM $ sets_
+              $ \s -> s { resFree = Set.filter (not . isHere) (resFree s) }
+     pure a
+
+
   where
   reportShadow old =
     case mb of
@@ -448,6 +480,7 @@ extendScope ds (ResolveM m) =
                                      , "*** Name: " ++ showPP old ]
       Just new ->
         case rnThing old of
+          -- value identifiers cannot be shadowed
           AVal -> reportError (RepeatedDefinitions [rnIdent new, rnIdent old])
           _    -> addWarning (Shadows new old)
 
@@ -490,14 +523,16 @@ withModName :: Maybe ModName -> ResolveM a -> ResolveM a
 withModName l (ResolveM m) =
   ResolveM $ mapReader (\ro -> ro { resModule = l }) m
 
--- | Resolve something but do not modify the state.  Instead the dependencies
--- of the thing are returned.
+-- | Resolve something, and also return its free variables.
+-- Note that the free variables are also saved in the state of the monad.
 resolveWithFree :: Resolve a => a -> ResolveM (a, Set ResolvedName)
 resolveWithFree a =
-  do free <- ResolveM $ sets $ \s -> (resFree s, s { resFree = Set.empty })
-     a1   <- resolve a
-     thisFree <- ResolveM $ sets $ \s -> (resFree s, s { resFree = free })
-     pure (a1, thisFree)
+  do free     <- ResolveM $ sets $ \s -> (resFree s, s { resFree = Set.empty })
+     a1       <- resolve a
+     newFree  <- ResolveM $ sets$ \s ->
+                  let newFree = resFree s
+                  in (newFree, s { resFree = Set.union newFree free })
+     pure (a1, newFree)
 
 
 --------------------------------------------------------------------------------
@@ -506,34 +541,43 @@ resolveWithFree a =
 -- | Figure out what a name of the given flavor refers to.
 resolveName :: Name -> Thing -> ResolveM Name
 resolveName nm th =
-  do mb <- lkpIdent m th i
-     case mb of
-       Nothing -> reportError (UndefinedName nm)
-       Just rn -> do addUse rn
-                     pure nm -- XXX: use `rn`
-
+  case nm of
+    Resolved ResolvedName { rnThing = t }
+      | t == th -> pure nm
+      | otherwise -> panic "resolveName"
+                       [ "Resolved name in the wrong location:"
+                       , "*** Expected:" ++ showPP th
+                       , "*** Got:     " ++ showPP t
+                       ]
+    Unqual ide  -> doResolve Nothing ide
+    Qual _ q t  -> doResolve (Just (Module q)) (identFromText t)
   where
-  (m,i) = case nm of
-            Unqual ide -> (Nothing , ide)
-            Qual _ q t -> (Just (Module q), identFromText t)
+  doResolve m i =
+    do mb <- lkpIdent m th i
+       case mb of
+         Nothing -> reportError (UndefinedName nm)
+         Just rn -> do addUse rn
+                       pure (Resolved rn)
 
 
 -- | Figure out what the given name referes to (either value or a constnat).
 inferName :: Name -> ResolveM Name
 inferName nm =
-  do mb1 <- lkpIdent m AConst i
-     mb2 <- lkpIdent m AVal  i
-     case (mb1,mb2) of
-       (Nothing, Nothing) -> reportError (UndefinedName nm)
-       (Just _, Just _)   -> reportError (AmbiguousName nm)
-       (Just rn,Nothing)  -> do addUse rn
-                                pure nm -- XXX: use rn
-       (Nothing, Just rn) -> do addUse rn
-                                pure nm -- XXX: use rn
+  case nm of
+    Resolved {} -> pure nm
+    Unqual ide -> doResolve Nothing ide
+    Qual _ q t -> doResolve (Just (Module q)) (identFromText t)
   where
-  (m,i) = case nm of
-            Unqual ide -> (Nothing, ide)
-            Qual _ q t -> (Just (Module q), identFromText t)
+  doResolve m i =
+    do mb1 <- lkpIdent m AConst i
+       mb2 <- lkpIdent m AVal  i
+       case (mb1,mb2) of
+         (Nothing, Nothing) -> reportError (UndefinedName nm)
+         (Just _, Just _)   -> reportError (AmbiguousName nm)
+         (Just rn,Nothing)  -> do addUse rn
+                                  pure (Resolved rn)
+         (Nothing, Just rn) -> do addUse rn
+                                  pure (Resolved rn)
 
 
 -- | Figure out what the given identifier refers (value or constnat)
