@@ -87,6 +87,9 @@ instance Ord Ident where
     case (identResolved i, identResolved j) of
       (Just x, Just y)   -> compare x y
       (Nothing, Nothing) -> compare (identText i) (identText j)
+
+      -- This are arbitrary, and somehwat questionable.
+      -- Perhaps we should panic instead?
       (Nothing, Just _)  -> LT
       (Just _, Nothing)  -> GT
 
