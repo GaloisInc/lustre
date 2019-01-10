@@ -383,31 +383,56 @@ instance (e ~ Expression) => Resolve (ArraySlice e) where
        pure ArraySlice { arrayStart = s, arrayEnd = e, arrayStep = st }
 
 instance Resolve Contract where
-  resolveDef _ _ = undefined
-{-
-  resolve c = resolve is `without` getDefs is
-    where is = contractItems c
--}
+  resolveDef _ ct = do is <- resolveContractItems (contractItems ct)
+                       pure ct { contractItems = is }
 
+resolveContractItems :: [ContractItem] -> ResolveM [ContractItem]
+resolveContractItems cits =
+  -- The comment on NodeBody also applies here
+  resolveNonRecGroup getIdent cis $ \cs ->
+  resolveNonRecGroup getIdent cvs $ \vs ->
+    do others <- traverse resolve (reverse cothers)
+       pure (cs ++ vs ++ others)
+  where
+  (cis,cvs,cothers) = foldr classify ([],[],[]) cits
+
+  classify ci (cs,vs,others) =
+    case ci of
+      GhostConst {} -> (ci : cs, vs, others)
+      GhostVar  {}  -> (cs, ci : vs, others)
+      _             -> (cs, vs, ci : others)
+
+  getIdent ci = case ci of
+                  GhostConst i _ _ -> i
+                  GhostVar b _     -> binderDefines b
+                  _ -> panic "getIdent (in Contract)"
+                        [ "Called on non-ghost var/const decl." ]
 
 instance Resolve ContractItem where
-  resolveDef _ _ = undefined
-{-
-  resolve ci =
+  resolveDef ds ci =
     case ci of
-      GhostConst _ mbT e -> resolve (mbT, e)
-      GhostVar   b     e -> resolve (b,e)
-      Assume e           -> resolve e
-      Guarantee e        -> resolve e
-      Mode _ mas mgs     -> resolve (mas,mgs)
-      Import x as bs     -> Set.insert (ContractNS,Unqual x) (resolve (as,bs))
--}
+      GhostConst c mbT e -> GhostConst (lkpDef ds AConst c)
+                              <$> traverse resolve mbT <*> resolveConstExpr e
+      GhostVar b e       -> GhostVar <$> resolveDef ds b <*> resolveExpr e
+      Assume e           -> Assume <$> resolveExpr e
+      Guarantee e        -> Guarantee <$> resolveExpr e
+      -- XXX: resolve mode names
+      Mode x mas mgs     -> Mode x <$> traverse resolveExpr mas
+                                   <*> traverse resolveExpr mgs
+      Import x as bs     -> Import x <$> traverse resolveExpr as
+                                     <*> traverse resolveExpr bs
+
 
 
 instance Resolve ContractDecl where
-  resolveDef _ _ = undefined
-  -- resolve cd = resolve (cdItems cd) `without` getDefs (cdProfile cd)
-
+  resolveDef ds cd =
+    inLocalScope $
+    resolveProfile (cdProfile cd) $ \prof ->
+    do is <- resolveContractItems (cdItems cd)
+       pure cd { cdName    = lkpDef ds AContract (cdName cd)
+               , cdProfile = prof
+               , cdItems   = is
+               }
 
 
 --------------------------------------------------------------------------------
