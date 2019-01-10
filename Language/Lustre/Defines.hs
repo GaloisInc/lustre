@@ -6,7 +6,6 @@ module Language.Lustre.Defines
   , noDefs
   , defNames
   , mergeDefs
-  , ValBinder(..)
   ) where
 
 import Data.Map (Map)
@@ -17,11 +16,10 @@ import Data.Foldable(traverse_)
 import MonadLib
 
 import Language.Lustre.AST
-import Language.Lustre.Panic(panic)
 
 
 -- | Identifiers groupes by namespace
-type Defs = Map NameSpace (Set Ident)
+type Defs = Map NameSpace (Set OrigName)
 
 -- | Empty set of definitinos
 noDefs :: Defs
@@ -32,7 +30,7 @@ mergeDefs :: Defs -> Defs -> Defs
 mergeDefs = Map.unionWith Set.union
 
 -- | Collect all names in a definition map.
-defNames :: Defs -> Set Ident
+defNames :: Defs -> Set OrigName
 defNames = Set.unions . Map.elems
 
 
@@ -48,9 +46,7 @@ getDefs a mn n0 =
   , defNextName s
   )
   where
-  one d = case identResolved d of
-            Just i  -> (thingNS (rnThing i), Set.singleton d)
-            Nothing -> panic "getDefs" [ "Unresolved identifier." ]
+  one i = (thingNS (rnThing i), Set.singleton i)
   s0    = DefS { defNextName = n0, defThings = [] }
   (_,s) = runM (unDefM (defines a)) mn s0
 
@@ -63,7 +59,7 @@ newtype DefM a = DefM { unDefM ::
   deriving (Functor,Applicative,Monad)
 
 data DefS = DefS { defNextName :: !Int
-                 , defThings   :: [Ident]
+                 , defThings   :: [OrigName]
                  }
 
 addDef :: Ident -> Thing -> DefM ()
@@ -71,10 +67,11 @@ addDef x t = DefM $
   do m <- ask
      sets_ $ \s ->
        let n    = defNextName s
-           info = DefInfo { rnModule  = m
+           info = OrigName { rnModule  = m
                           , rnThing   = t
+                          , rnIdent   = x
                           , rnUID     = n }
-       in DefS { defThings   = x { identResolved = Just info } : defThings s
+       in DefS { defThings   = info : defThings s
                , defNextName = n + 1
                }
 
@@ -112,12 +109,9 @@ instance Defines InputBinder where
       InputBinder b  -> addDef (binderDefines b) AVal
       InputConst c _ -> addDef c AConst
 
--- | A temporary to be used in situations where we know that the
--- binder introduces values (i.e., not constants)
-newtype ValBinder = ValBinder Binder
-
-instance Defines ValBinder where
-  defines (ValBinder b) = addDef (binderDefines b) AVal
+-- | Note that binders are always used for values, not constants.
+instance Defines Binder where
+  defines b = addDef (binderDefines b) AVal
 
 instance Defines TypeDef where
   defines td =

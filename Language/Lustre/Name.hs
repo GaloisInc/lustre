@@ -10,10 +10,10 @@ data Ident = Ident
   { identText       :: !Text
   , identRange      :: !SourceRange
   , identPragmas    :: [Pragma]
-  , identResolved   :: !(Maybe DefInfo)
+  , identResolved   :: !(Maybe OrigName)
   } deriving Show
 
-withResolved :: (DefInfo -> a) -> Ident -> a
+withResolved :: (OrigName -> a) -> Ident -> a
 withResolved k i = case identResolved i of
                     Just info -> k info
                     Nothing -> panic "withResolved"
@@ -21,6 +21,10 @@ withResolved k i = case identResolved i of
                                   , "*** Name:  " ++ show (identText i)
                                   , "*** Range: " ++ show (identRange i)
                                   ]
+
+-- | Access the definition site for the given resolved identifier.
+identOrigName :: Ident -> OrigName
+identOrigName = withResolved id
 
 -- | Access the unique identifier of a resolved identifier.
 identUID :: Ident -> Int
@@ -120,16 +124,25 @@ instance HasRange Name where
 
 
 -- | Information about the definition of an identifier.
-data DefInfo = DefInfo
-  { rnUID     :: Int            -- ^ A unique identifier
-  , rnModule  :: Maybe ModName  -- ^ Module where this is defined, if any
-  , rnThing   :: Thing          -- ^ What are we
+data OrigName = OrigName
+  { rnUID     :: !Int             -- ^ A unique identifier
+  , rnModule  :: !(Maybe ModName) -- ^ Module where this is defined, if any
+  , rnIdent   :: !Ident           -- ^ Original (unresolved) identifier at
+                                  -- definition site.  Useful for location,
+                                  -- pragmas, etc.
+  , rnThing   :: !Thing           -- ^ What are we
   } deriving Show
 
-instance Eq DefInfo where
+defInfoToResolvedIdent :: OrigName -> Ident
+defInfoToResolvedIdent d = (rnIdent d) { identResolved = Just d }
+
+instance HasRange OrigName where
+  range = range . rnIdent
+
+instance Eq OrigName where
   x == y = rnUID x == rnUID y
 
-instance Ord DefInfo where
+instance Ord OrigName where
   compare x y = compare (rnUID x) (rnUID y)
 
 

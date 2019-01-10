@@ -477,4 +477,7 @@ instance Pretty ModName where
   ppPrec _ (Module t) = pp t
 
 
+instance Pretty OrigName where
+  ppPrec _ x = pp (rnIdent x) -- XXX: more?
+
 
