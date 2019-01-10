@@ -149,6 +149,7 @@ data InputBinder = InputBinder Binder
                  | InputConst Ident Type
                    deriving Show
 
+-- | Introduces a local variable (not constant).
 data Binder = Binder
   { binderDefines :: Ident
   , binderType    :: Type
