@@ -154,7 +154,7 @@ data Env = Env
     -- that name.  So, we should never have any remaining static
     -- arguments.
 
-  , curModule :: Maybe Text
+  , curModule :: Maybe ModName
     -- ^ If this is 'Just', then we use this to qualify top-level
     -- 'Ident' when we need a name 'Name'
 
@@ -203,11 +203,12 @@ emptyEnv = Env { cEnv = C.emptyEnv
 
 -- | Compute the name for a top-level identifyiner, qualifying with the
 -- current module, if any.
+-- XXX: OBSOLETE
 topIdentToName :: Env -> Ident -> Name
 topIdentToName env i =
   case curModule env of
     Nothing -> Unqual i
-    Just m  -> Qual (identRange i) m (identText i)    -- XXX: Pragmas?
+    Just m  -> Qual m i
 
 
 -- | Lookup something.  Unqualified names are qualified with the current module.
@@ -224,15 +225,8 @@ lookupNamed env x mp = Map.lookup name mp
 addNamed :: Name -> a -> Map Name a -> Map Name a
 addNamed x a mp =
   case x of
-    Unqual _   -> mp1
-    Qual r _ i ->
-      let ide = Ident { identText  = i
-                      , identRange = r
-                      , identPragmas = []
-                      , identResolved = error "XXX: TODO addNamed"
-                      }
-      in Map.insert (Unqual ide) a mp1
-  where mp1 = Map.insert x a mp
+    Unqual _   ->  Map.insert x a mp
+    Qual _ i -> undefined
 
 
 --------------------------------------------------------------------------------
@@ -1220,9 +1214,9 @@ evalStaticArg env sa =
 type M = ReaderT RO (StateT RW Id)
 
 runNameStatic ::
-  Maybe Text {- ^ Qualify generated names with this -} ->
-  Int        {- ^ Start generating names using this seed -} ->
-  M a        {- ^ This is what we want to do -} ->
+  Maybe ModName {- ^ Qualify generated names with this -} ->
+  Int           {- ^ Start generating names using this seed -} ->
+  M a           {- ^ This is what we want to do -} ->
   (a, [Binder], [ NodeInstDecl ], Map CallSiteId [LHS Expression], Int)
   -- ^ result, new locals, new instances, call site info, new name seed
 runNameStatic qual seed m
@@ -1240,7 +1234,7 @@ runNameStatic qual seed m
                , csInfo = Map.empty }
 
 newtype RO = RO
-  { qualify :: Maybe Text             -- ^ Qualify references to generated names
+  { qualify :: Maybe ModName -- ^ Qualify references to generated names
   }
 
 data RW = RW
@@ -1292,11 +1286,8 @@ newIdent r = sets $ \s -> let x = nameSeed s
 
 -- | Convert an identifier to a name, by qualifying it, if neccesary.
 identToName :: Ident -> M Name
-identToName i =
-  do mbQ <- asks qualify
-     pure $ case mbQ of
-              Nothing -> Unqual i
-              Just q  -> Qual (identRange i) q (identText i)
+identToName i = undefined
+
 
 -- | Remember the given instance.
 addInst :: NodeInstDecl -> M ()
@@ -1307,7 +1298,6 @@ findInstProf env ni@(NodeInst c as) =
   case (c,as) of
     (CallUser n, [])
        | Unqual i <- n -> search (identText i)
-       | Qual _ m t <- n, Just m' <- curModule env, m == m' -> search t
        where
        search t = do is <- instances <$> get
                      case filter ((t ==) . identText . nodeInstName) is of

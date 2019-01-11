@@ -31,6 +31,18 @@ vcatSep = vcat . intersperse " "
 commaSep :: [Doc] -> Doc
 commaSep = hsep . punctuate comma
 
+bullet :: Doc
+bullet = "•"
+
+bullets :: [Doc] -> Doc
+bullets xs = vcat [ bullet <+> x | x <- xs ]
+
+backticks :: Doc -> Doc
+backticks x = "`" PP.<> x PP.<> "`"
+
+nested :: Doc -> Doc -> Doc
+nested x y = x $$ nest 2 y
+
 instance Pretty Text where
   ppPrec _ = text . Text.unpack
 
@@ -43,8 +55,8 @@ instance Pretty Ident where
 instance Pretty Name where
   ppPrec n nam =
     case nam of
-      Unqual i   -> ppPrec n i
-      Qual _ x y -> ppPrec n x PP.<> "::" PP.<> ppPrec n y
+      Unqual i -> ppPrec n i
+      Qual x y -> ppPrec n x PP.<> "::" PP.<> ppPrec n y
 
 --------------------------------------------------------------------------------
 

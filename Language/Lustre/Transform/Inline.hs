@@ -351,9 +351,7 @@ addNodeDecl nd env = env { envNodes = Map.insert (Unqual i) nd
                                     $ addQual $ envNodes env }
   where
   i = nodeName nd
-  addQual = case envCurModule env of
-              Nothing -> id
-              Just m  -> Map.insert (Qual (identRange i) m (identText i)) nd
+  addQual = undefined
 
 --------------------------------------------------------------------------------
 -- Resugar

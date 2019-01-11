@@ -20,7 +20,7 @@ import Language.Lustre.Pretty(showPP)
 
 
 -- | Compute info about enums from some top-level declarations.
-getEnumInfo :: Maybe Text -> [ P.TopDecl ] -> Map P.Name C.Expr
+getEnumInfo :: Maybe P.ModName -> [ P.TopDecl ] -> Map P.Name C.Expr
 getEnumInfo mbCur tds = foldr addDefs Map.empty enums
   where
   enums = [ is | P.DeclareType
@@ -32,10 +32,7 @@ getEnumInfo mbCur tds = foldr addDefs Map.empty enums
 
   addDef (i,n) = Map.insert (P.Unqual i) n . addQual i n
 
-  addQual i x =
-    case mbCur of
-     Nothing -> id
-     Just m -> Map.insert (P.Qual (P.identRange i) m (P.identText i)) x
+  addQual i x = undefined
 
 
 -- | Translate a node to core form, given information about enumerations.

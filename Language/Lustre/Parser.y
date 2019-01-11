@@ -780,8 +780,14 @@ toIdent l ps = Ident { identText    = lexemeText l
 toQIdent :: Lexeme Token -> Name
 toQIdent l =
   case lexemeToken l of
-    TokQualIdent p n -> Qual (lexemeRange l) p n
+    TokQualIdent p n -> Qual (Module p)
+                          Ident { identText     = n
+                                , identRange    = lexemeRange l
+                                , identPragmas  = []
+                                , identResolved = Nothing
+                                 }
     _ -> panic "toQIdent" [ "Not a qualified identifier", show l ]
+
 
 toLit :: Lexeme Token -> Expression
 toLit l =

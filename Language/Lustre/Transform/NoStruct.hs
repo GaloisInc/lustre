@@ -53,7 +53,7 @@ data Env = Env
   , envStructs :: Map Name [(Ident,Type)]
     -- ^ Definitions for strcut types.
 
-  , envCurModule :: Maybe Text
+  , envCurModule :: Maybe ModName
     -- ^ If this is 'Just', then we use this to qualify top-level
     -- 'Ident' when we need a name 'Name'
   }
@@ -187,9 +187,9 @@ doAddStructDef env i fs = env { envStructs = Map.insert (Unqual i) def
                                            $ envStructs env }
   where
   def     = [ (fieldName f, fieldType f) | f <- fs ]
-  addQual = case envCurModule env of
+  addQual = undefined {-case envCurModule env of
               Nothing -> id
-              Just m  -> Map.insert (Qual (identRange i) m (identText i)) def
+              Just m  -> Map.insert (Qual (identRange i) m (identText i)) def-}
 
 
 -- | Evaluate a node, expanding structured data.

@@ -1,5 +1,13 @@
 {-# Language DataKinds, GeneralizedNewtypeDeriving, TypeFamilies #-}
-module Language.Lustre.Transform.OrderDecls (orderTopDecls) where
+{-# Language OverloadedStrings #-}
+module Language.Lustre.Transform.OrderDecls
+  ( orderTopDecls
+  , quickOrderTopDecl
+  , ScopeInfo(..)
+  , InScope
+  , ResolveError(..)
+  , ResolveWarn(..)
+  ) where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -10,33 +18,42 @@ import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
 import Data.Foldable(traverse_)
 import MonadLib
+import Text.PrettyPrint as PP
 
 import Language.Lustre.AST
-import Language.Lustre.Pretty(showPP)
+import Language.Lustre.Pretty
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Defines
 
 
-orderTopDecls :: [TopDecl] -> [TopDecl]
-orderTopDecls = undefined -- concatMap orderRec . undefined
+-- | Resoolve some declaration in an empty scope, starting with seed 0,
+-- and discarding the last seed.
+-- Useful to quickly test things, or if we are just doing a once off module.
+quickOrderTopDecl ::
+  [TopDecl] {- ^ Declarations that need resolving -} ->
+  Either ResolveError ([SCC TopDecl], [ResolveWarn])
+    -- ^ Either an error on the left,
+    -- or the resolved declarations and some warnings.
+quickOrderTopDecl ds =
+  case orderTopDecls scp 0 ds of
+    Left err              -> Left err
+    Right (comps,warns,_) -> Right (comps,warns)
+  where
+  scp = ScopeInfo { resInScope = Map.empty
+                  , resModule  = Nothing
+                  }
 
--- XXX
--- | Place declarations with no static parameters after declarations with
--- static parameters.  We assume that the inputs were already validated,
--- so this does not do proper error checking.
-orderRec :: SCC TopDecl -> [TopDecl]
-orderRec comp =
-  case comp of
-    AcyclicSCC x -> [x]
-    CyclicSCC xs -> case break noParam xs of
-                      (as,b:bs) -> as ++ bs ++ [b]
-                      _         -> xs
-      where
-      noParam td =
-        case td of
-          DeclareNode nd      -> null (nodeStaticInputs nd)
-          DeclareNodeInst nid -> null (nodeInstStaticInputs nid)
-          _                   -> False
+
+orderTopDecls ::
+  ScopeInfo {- ^ Information of what's currently in scope -} ->
+  Int       {- ^ A seed for generating fresh names -} ->
+  [TopDecl] {- ^ Declarations that need resolving -} ->
+  Either ResolveError
+         ([SCC TopDecl], [ResolveWarn], Int)
+    -- ^ Either an error on the left,
+    -- or the resolved declarations, some warnings, and a new name seed.
+
+orderTopDecls sci seed ds = runResolver sci seed (resolveGroup ds pure)
 
 {- | Order an unordered set of declarations, in dependency order.
 The result is a dependency-ordered sequence of strongly-connected
@@ -241,6 +258,8 @@ instance Resolve Callable where
       CallPrim {} -> pure c
 
 
+-- XXX: keep track of where we are, so if we report and error we can
+-- point to it.
 resolveConstExpr :: Expression -> ResolveM Expression
 resolveConstExpr expr =
   case expr of
@@ -301,7 +320,7 @@ resolveExpr expr =
       WithThenElse <$> resolveConstExpr e1
                    <*> resolveExpr e2 <*> resolveExpr e3
 
-    Merge x es -> Merge <$> resolveIdent x <*> traverse resolve es
+    Merge x es -> Merge <$> inferIdent x <*> traverse resolve es
     Call f es  -> Call <$> resolve f <*> traverse resolveExpr es
 
 
@@ -311,7 +330,7 @@ instance (e ~ Expression) => Resolve (MergeCase e) where
 
 instance Resolve ClockExpr where
   resolveDef _ (WhenClock r cv i) =
-    WhenClock r <$> resolveConstExpr cv <*> resolveIdent i
+    WhenClock r <$> resolveConstExpr cv <*> inferIdent i
 
 
 instance Resolve NodeDecl where
@@ -359,12 +378,12 @@ instance Resolve Equation where
       Property n e -> Property n <$> resolveExpr e
       Define lhs e -> Define     <$> traverse resolve lhs <*> resolveExpr e
       IsMain _     -> pure eqn
-      IVC is       -> IVC <$> traverse resolveIdent is
+      IVC is       -> IVC <$> traverse inferIdent is
 
 instance (e ~ Expression) => Resolve (LHS e) where
   resolveDef _ lhs =
     case lhs of
-      LVar i      -> LVar    <$> resolveIdent i
+      LVar i      -> LVar    <$> resolveIdent i AVal
       LSelect x e -> LSelect <$> resolve x <*> resolve e
 
 
@@ -419,9 +438,9 @@ instance Resolve ContractItem where
       -- XXX: resolve mode names
       Mode x mas mgs     -> Mode x <$> traverse resolveExpr mas
                                    <*> traverse resolveExpr mgs
-      Import x as bs     -> Import x <$> traverse resolveExpr as
-                                     <*> traverse resolveExpr bs
-
+      Import x as bs     -> Import <$> resolveIdent x AContract
+                                   <*> traverse resolveExpr as
+                                   <*> traverse resolveExpr bs
 
 
 instance Resolve ContractDecl where
@@ -440,7 +459,7 @@ instance Resolve ContractDecl where
 newtype ResolveM a = ResolveM { _unResolveM ::
   WithBase Id
     [ ExceptionT ResolveError -- state persists across exceptions
-    , ReaderT    ResR
+    , ReaderT    ScopeInfo
     , StateT     ResS
     ] a
   } deriving (Functor,Applicative,Monad)
@@ -449,7 +468,7 @@ newtype ResolveM a = ResolveM { _unResolveM ::
 type InScope = Map (Maybe ModName) (Map NameSpace OrigName)
 
 -- | The "scoped" part of the resolver monad
-data ResR = ResR
+data ScopeInfo = ScopeInfo
   { resInScope  :: InScope        -- ^ What's in scope
   , resModule   :: Maybe ModName  -- ^ Use this for current definitions
   }
@@ -471,6 +490,23 @@ data ResolveError = InvalidConstantExpression String
 
 -- | Potential problems, but not fatal.
 data ResolveWarn  = Shadows OrigName OrigName
+
+runResolver ::
+  ScopeInfo ->
+  Int ->
+  ResolveM a ->
+  Either ResolveError (a,[ResolveWarn],Int)
+runResolver r0 seed (ResolveM m) =
+  case mb of
+    Left err -> Left err
+    Right a  -> Right (a, resWarns finS, resNextName finS)
+  where
+  (mb,finS) = runId $ runStateT s0 $ runReaderT r0 $ runExceptionT m
+
+  s0 = ResS { resFree     = Set.empty
+            , resNextName = seed
+            , resWarns    = []
+            }
 
 -- | Report the given error, aborting the analysis.
 reportError :: ResolveError -> ResolveM a
@@ -593,64 +629,60 @@ resolveWithFree ds a =
 
 -- | Figure out what a name of the given flavor refers to.
 resolveName :: Name -> Thing -> ResolveM Name
-resolveName nm th =
-  case nm of
-    Unqual ide  ->
-      case identResolved ide of
-        Nothing -> doResolve Nothing ide
-        Just OrigName { rnThing = t }
-          | t == th -> pure nm
-          | otherwise -> panic "resolveName"
-                           [ "Resolved name in the wrong location:"
-                           , "*** Expected:" ++ showPP th
-                           , "*** Got:     " ++ showPP t
-                           ]
-    Qual _ q t  -> doResolve (Just (Module q)) (identFromText t)
+resolveName nm th = Unqual <$> newNm
   where
-  doResolve m i =
-    do mb <- lkpIdent m th i
-       case mb of
-         Nothing -> reportError (UndefinedName nm)
-         Just rn -> do addUse rn
-                       pure (Unqual i { identResolved = Just rn })
-
+  newNm = case nm of
+            Unqual ide -> resolveIdent ide th
+            Qual q ide -> resolveIdentIn (Just q) ide th
 
 -- | Figure out what the given name referes to (either value or a constnat).
 inferName :: Name -> ResolveM Name
-inferName nm =
-  case nm of
-    Unqual ide ->
-      case identResolved ide of
-        Nothing -> doResolve Nothing ide
-        Just _  -> pure nm
-    Qual _ q t -> doResolve (Just (Module q)) (identFromText t)
+inferName nm = Unqual <$> newNm
   where
-  doResolve m i =
-    do mb1 <- lkpIdent m AConst i
-       mb2 <- lkpIdent m AVal  i
-       let toId rn = pure (Unqual i { identResolved = Just rn })
-       case (mb1,mb2) of
-         (Nothing, Nothing) -> reportError (UndefinedName nm)
-         (Just p, Just q)   -> reportError (AmbiguousName nm p q)
-         (Just rn,Nothing)  -> do addUse rn
-                                  toId rn
-         (Nothing, Just rn) -> do addUse rn
-                                  toId rn
+  newNm = case nm of
+            Unqual ide -> inferIdent ide
+            Qual q ide -> inferIdentIn (Just q) ide
 
+resolveIdentIn :: Maybe ModName -> Ident -> Thing -> ResolveM Ident
+resolveIdentIn mb i th =
+  case identResolved i of
+    Nothing ->
+      do mbi <- lkpIdent mb th i
+         case mbi of
+           Nothing -> reportError (UndefinedName (asName mb i))
+           Just rn -> do addUse rn
+                         pure i { identResolved = Just rn }
+    Just rn | rnThing rn == th -> pure i
+            | otherwise -> panic "resolveIdent"
+                             [ "Wired-in identifier used in the wrong place"
+                             , "*** Idnetifier: " ++ show i
+                             , "*** Expected: " ++ show th
+                             ]
 
+resolveIdent :: Ident -> Thing -> ResolveM Ident
+resolveIdent = resolveIdentIn Nothing
 
 -- | Figure out what the given identifier refers (value or constnat)
-resolveIdent :: Ident -> ResolveM Ident
-resolveIdent i =
-  do mb1 <- lkpIdent Nothing AConst i
-     mb2 <- lkpIdent Nothing AVal  i
+inferIdentIn :: Maybe ModName -> Ident -> ResolveM Ident
+inferIdentIn mb i =
+  do mb1 <- lkpIdent mb AConst i
+     mb2 <- lkpIdent mb AVal  i
      case (mb1,mb2) of
-       (Nothing, Nothing) -> reportError (UndefinedName (Unqual i))
-       (Just p, Just q)   -> reportError (AmbiguousName (Unqual i) p q)
+       (Nothing, Nothing) -> reportError (UndefinedName (asName mb i))
+       (Just p, Just q)   -> reportError (AmbiguousName (asName mb i) p q)
        (Just rn,Nothing)  -> do addUse rn
                                 pure i { identResolved = Just rn }
        (Nothing, Just rn) -> do addUse rn
                                 pure i { identResolved = Just rn }
+
+asName :: Maybe ModName -> Ident -> Name
+asName mb i = case mb of
+                Nothing -> Unqual i
+                Just m  -> Qual m i
+
+inferIdent :: Ident -> ResolveM Ident
+inferIdent = inferIdentIn Nothing
+
 
 -- | Lookup something in the current scope.
 lkpIdent :: Maybe ModName -> Thing -> Ident -> ResolveM (Maybe OrigName)
@@ -673,6 +705,46 @@ lkpDef ds th i = case Set.minView (Set.filter matches ds) of
   matches j = rnThing j == th && identText (rnIdent j) == identText i
 
 
+--------------------------------------------------------------------------------
+
+instance Pretty ResolveError where
+  ppPrec _ err =
+    case err of
+
+      InvalidConstantExpression x ->
+        "Construct" <+> backticks (text x) <+>
+          "may not appear in constant expressions."
+
+      UndefinedName x ->
+        located (range x)
+          [ "The name" <+> backticks (pp x) <+> "is undefined." ]
+
+      AmbiguousName x a b ->
+        located (range x)
+            [ "The name" <+> backticks (pp x) <+> "is ambiguous."
+            , block "It may refer to:" [ppOrig a, ppOrig b]
+            ]
+
+      RepeatedDefinitions xs ->
+        block "Multiple declaratoins for the same name:" (map ppOrig xs)
+
+      BadRecursiveDefs xs ->
+        block "Invalid recursive declarations:" (map ppOrig xs)
+
+    where
+    block x ys = nested x (bullets ys)
+    located r xs = block ("At" <+> pp r) xs
+
+ppOrig :: OrigName -> Doc
+ppOrig x = backticks (pp x) PP.<> ","
+                <+> "defined at" <+> pp (identRange (rnIdent x))
+
+
+instance Pretty ResolveWarn where
+  ppPrec _ warn =
+    case warn of
+      Shadows x y ->
+        ppOrig x <+> "shadows" <+> ppOrig y
 
 
 

@@ -1,8 +1,7 @@
 module Language.Lustre.Name where
 
 import Data.Text(Text)
-import qualified Data.Text as Text
-import AlexTools(SourceRange(..), HasRange(..), SourcePos(..))
+import AlexTools(SourceRange(..), HasRange(..))
 
 import Language.Lustre.Panic(panic)
 
@@ -51,7 +50,7 @@ data Name =
     -- ^ After name resolution, the 'identResolved' field of the
     -- identifier should always be filled in.
 
-  | Qual SourceRange Text Text
+  | Qual ModName Ident
     -- ^ Qualified name a produced in the parser, but should not
     -- be used after resolving names.
     deriving Show
@@ -60,20 +59,12 @@ data Name =
 -- | Make an ident with no known location.
 -- This can be useful when looking up things in maps---only the 'Text'
 -- matters.
-identFromText :: Text -> Ident
-identFromText txt = Ident { identText = txt
-                          , identRange = dummy
-                          , identPragmas = []
-                          , identResolved = Nothing
-                          }
-  where
-  dummy    = SourceRange { sourceFrom = dummyPos, sourceTo = dummyPos }
-  dummyPos = SourcePos { sourceIndex  = -1
-                       , sourceLine   = -1
-                       , sourceColumn = -1
-                       , sourceFile   = Text.pack ""
-                       }
-
+identFromText :: SourceRange -> Text -> Ident
+identFromText rng txt = Ident { identText = txt
+                              , identRange = rng
+                              , identPragmas = []
+                              , identResolved = Nothing
+                              }
 --------------------------------------------------------------------------------
 
 instance Eq Ident where
@@ -97,16 +88,16 @@ instance Ord Ident where
 
 instance Eq Name where
   m == n = case (m,n) of
-             (Unqual a, Unqual b)     -> a == b
-             (Qual _ x y, Qual _ p q) -> (x,y) == (p,q)
-             _                        -> False
+             (Unqual a, Unqual b) -> a == b
+             (Qual x y, Qual p q) -> (x,y) == (p,q)
+             _                    -> False
 
 instance Ord Name where
   compare m n = case (m,n) of
-                  (Unqual x, Unqual y)     -> compare x y
-                  (Unqual {}, _)           -> LT
-                  (_, Unqual {})           -> GT
-                  (Qual _ x y, Qual _ p q) -> compare (x,y) (p,q)
+                  (Unqual x, Unqual y)  -> compare x y
+                  (Unqual {}, _)        -> LT
+                  (_, Unqual {})        -> GT
+                  (Qual x y, Qual p q)  -> compare (x,y) (p,q)
 
 
 --------------------------------------------------------------------------------
@@ -122,8 +113,8 @@ instance HasRange Pragma where
 instance HasRange Name where
   range nm =
     case nm of
-      Unqual i   -> range i
-      Qual r _ _ -> r
+      Unqual i -> range i
+      Qual _ i -> range i
 
 
 -- | Information about the definition of an identifier.
@@ -150,7 +141,7 @@ instance Ord OrigName where
 
 
 -- | The name of a module.
-newtype ModName  = Module Text
+newtype ModName = Module Text
   deriving (Eq,Ord,Show)
 
 
