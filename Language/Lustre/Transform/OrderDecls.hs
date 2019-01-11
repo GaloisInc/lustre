@@ -698,8 +698,8 @@ lkpDef :: Set OrigName -> Thing -> Ident -> Ident
 lkpDef ds th i = case Set.minView (Set.filter matches ds) of
                    Just (a,_) -> i { identResolved = Just a }
                    _ -> panic "lkpDef" [ "Missing identifier for defining site"
-                                       , "*** Identifier: " ++ show i
-                                       , "*** Context: " ++ show th
+                                       , "*** Identifier: " ++ showPP i
+                                       , "*** Context: " ++ showPP th
                                        ]
   where
   matches j = rnThing j == th && identText (rnIdent j) == identText i

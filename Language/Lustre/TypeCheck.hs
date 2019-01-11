@@ -6,6 +6,7 @@ import qualified Data.Set as Set
 import Control.Monad(when,unless,zipWithM_)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
+import Data.Graph(SCC(..))
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -15,13 +16,25 @@ import Language.Lustre.TypeCheck.Monad
 import Language.Lustre.TypeCheck.Constraint
 
 
+type TypeError = Doc
+type TypeWarn  = Doc
 
-quickCheckDecls :: [TopDecl] -> Either Doc ()
-quickCheckDecls = runTC . go . orderTopDecls
+
+quickCheckDecls :: [TopDecl] -> Either TypeError ()
+quickCheckDecls ds =
+  case quickOrderTopDecl ds of
+    Left err           -> Left (pp err)
+    Right (ds1,_warns) -> runTC (go ds1) -- XXX: Don't ignore warnings
   where
   go xs = case xs of
             [] -> pure ()
-            x : more -> checkTopDecl x (go more)
+            x : more -> checkTopDeclSCC x (go more)
+
+checkTopDeclSCC :: SCC TopDecl -> M a -> M a
+checkTopDeclSCC sc m =
+  case sc of
+    AcyclicSCC a -> checkTopDecl a m
+    CyclicSCC _  -> notYetImplemented "recursive nodes" -- XXX
 
 checkTopDecl :: TopDecl -> M a -> M a
 checkTopDecl td m =
@@ -30,6 +43,7 @@ checkTopDecl td m =
     DeclareConst cd -> checkConstDef cd m
     DeclareNode nd -> checkNodeDecl nd m
     DeclareNodeInst _nid -> notYetImplemented "node instances"
+    DeclareContract {} -> notYetImplemented "top-level contract"
 
 
 checkTypeDecl :: TypeDecl -> M a -> M a
@@ -40,10 +54,11 @@ checkTypeDecl td m =
       case dec of
 
         IsEnum is ->
-          do mapM_ uniqueConst is
-             let n      = typeName td
-                 addE i = withConst i (NamedType (Unqual n))
-             withNamedType n (EnumTy (Set.fromList is)) (foldr addE m is)
+          do let ti     = typeName td
+                 nty    = NamedType (Unqual ti)
+                 addE i = withConst i nty
+                 ty     = EnumTy (Set.fromList (map identOrigName is))
+             withNamedType ti ty (foldr addE m is)
 
         IsStruct fs ->
           do mapM_ checkFieldType fs
@@ -98,7 +113,12 @@ checkNodeDecl nd k =
        let prof = nodeProfile nd
        res <- checkInputBinders  (nodeInputs prof) $
               checkOutputBinders (nodeOutputs prof) $
-         do case nodeDef nd of
+
+         do case nodeContract nd of
+              Nothing -> pure ()
+              Just _  -> notYetImplemented "Node contracts"
+
+            case nodeDef nd of
               Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
                            "Missing node definition"
                            ["Node:" <+> pp (nodeName nd)]
@@ -240,7 +260,7 @@ checkEquation eqn =
 checkLHS :: LHS Expression -> M CType
 checkLHS lhs =
   case lhs of
-    LVar i -> lookupIdent i
+    LVar i -> lookupLocal i
     LSelect l s ->
       do t  <- checkLHS l
          t1 <- inferSelector s (cType t)
@@ -341,7 +361,7 @@ checkExpr expr tys =
          checkExpr e3 tys
 
     Merge i as ->
-      do t <- lookupIdent i
+      do t <- lookupLocal i
          mapM_ (sameClock (cClock t) . cClock) tys
          let it      = cType t
              ts      = map cType tys
@@ -631,11 +651,19 @@ checkOp2 op2 e1 e2 res =
 checkVar :: Name -> CType -> M ()
 checkVar x ty =
   case x of
-    Unqual i -> do mb <- lookupIdentMaybe i
-                   case mb of
-                     Just c  -> subCType c ty
-                     Nothing -> checkConstVar x (cType ty)
-    Qual {}  -> checkConstVar x (cType ty)
+    Unqual i ->
+      case rnThing (nameOrigName x) of
+        AVal   -> do c <- lookupLocal i
+                     subCType c ty
+        AConst -> checkConstVar x (cType ty)
+        t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
+                              , "*** Name: " ++ showPP x
+                              , "*** Thing: " ++ showPP t ]
+
+    Qual {}  -> panic "checkVar" [ "Unexpected qualified name"
+                                 , "*** Name: " ++ showPP x ]
+
+
 
 -- | Check the type of a named constnat.
 checkConstVar :: Name -> Type -> M ()
@@ -655,7 +683,7 @@ inferLit lit =
 checkClockExpr :: ClockExpr -> M IClock
 checkClockExpr (WhenClock r v i) =
   inRange r $
-    do ct <- lookupIdent i
+    do ct <- lookupLocal i
        checkConstExpr v (cType ct)
        pure (cClock ct)
 
@@ -772,7 +800,8 @@ clockParent ct0 =
   do ct <- zonkClock ct0
      case ct of
        BaseClock -> reportError "The base clock has no parent."
-       KnownClock (WhenClock _ _ i) -> cClock <$> lookupIdent i
+       KnownClock (WhenClock _ _ i) -> cClock <$> lookupLocal i
+                                          -- XXX: This can be a constnat?
        ClockVar _ -> reportError "Failed to infer the expressions's clock"
 
 

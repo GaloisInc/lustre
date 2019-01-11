@@ -10,6 +10,7 @@ import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
+import Language.Lustre.Panic
 
 runTC :: M a -> Either Doc a
 runTC (M m) = case runM m ro0 rw0 of
@@ -81,12 +82,12 @@ instance Monad M where
 
 
 data RO = RO
-  { roConstants   :: Map Name (SourceRange,Type)
-  , roUserNodes   :: Map Name (SourceRange,Safety,NodeType,NodeProfile)
-  , roIdents      :: Map Ident (SourceRange, IdentMode, CType)
+  { roConstants   :: Map OrigName (SourceRange, Type)
+  , roUserNodes   :: Map OrigName (SourceRange, Safety,NodeType,NodeProfile)
+  , roIdents      :: Map OrigName (SourceRange, IdentMode, CType)
+  , roTypeNames   :: Map OrigName (SourceRange, NamedType) -- no type vars here
   , roOnlyInputs  :: Bool
   , roCurRange    :: [SourceRange]
-  , roTypeNames   :: Map Name (SourceRange,NamedType) -- no type vars here
   , roTemporal    :: Bool
   , roUnsafe      :: Bool
   }
@@ -102,9 +103,9 @@ data RW = RW
                         -- ^ delayed constraints
   }
 
-data NamedType = StructTy (Map Ident Type)
-               | EnumTy   (Set Ident)
-               | AliasTy  Type          -- already tidied
+data NamedType = StructTy (Map Ident Type)  -- ^ The Ident's are just labels
+               | EnumTy   (Set OrigName)
+               | AliasTy  Type              -- ^ already tidied
                | AbstractTy
 
 
@@ -145,27 +146,26 @@ inRangeMaybe mb m = case mb of
 onlyInputs :: M a -> M a
 onlyInputs (M m) = M (mapReader (\ro -> ro { roOnlyInputs = True }) m)
 
-lookupIdentMaybe :: Ident -> M (Maybe CType)
-lookupIdentMaybe i =
-  M $ do ro <- ask
-         pure $
-           do (_,mo,t) <- Map.lookup i (roIdents ro)
-              case mo of
-                NonInputIdent | roOnlyInputs ro -> Nothing
-                _ -> Just t
+lookupLocal :: Ident -> M CType
+lookupLocal i =
+  do ro <- M ask
+     let orig = identOrigName i
+     case Map.lookup orig (roIdents ro) of
+       Nothing -> panic "lookupLocal"
+                            [ "Undefined identifier: " ++ showPP i ]
+       Just (_,mo,t) ->
+         case mo of
+           NonInputIdent | roOnlyInputs ro ->
+             reportError $ "Local variable" <+> backticks (pp i) <+>
+                           "is not an input."
+           _ -> pure t
 
-lookupIdent :: Ident -> M CType
-lookupIdent i =
-  do mb <- lookupIdentMaybe i
-     case mb of
-       Just t  -> pure t
-       Nothing -> reportError ("Undefined identifier:" <+> pp i)
 
 lookupConst :: Name -> M Type
 lookupConst c =
   do ro <- M ask
-     case Map.lookup c (roConstants ro) of
-       Nothing -> reportError ("Undefined constant:" <+> pp c)
+     case Map.lookup (nameOrigName c) (roConstants ro) of
+       Nothing    -> panic "lookupConst" [ "Undefined constant: " ++ showPP c ]
        Just (_,t) -> pure t
 
 
@@ -190,8 +190,8 @@ tidyConstraint ctr =
 resolveNamed :: Name -> M Type
 resolveNamed x =
   do ro <- M ask
-     case Map.lookup x (roTypeNames ro) of
-       Nothing -> reportError ("Undefined type:" <+> pp x)
+     case Map.lookup (nameOrigName x) (roTypeNames ro) of
+       Nothing -> panic "resolveNamed" [ "Undefined type:" ++ showPP x ]
        Just (_,nt) -> pure $ case nt of
                                AliasTy t -> t
                                _         -> NamedType x
@@ -204,8 +204,8 @@ resolveTVar tv =
 lookupStruct :: Name -> M (Map Ident Type)
 lookupStruct s =
   do ro <- M ask
-     case Map.lookup s (roTypeNames ro) of
-       Nothing -> reportError ("Undefined struct:" <+> pp s)
+     case Map.lookup (nameOrigName s) (roTypeNames ro) of
+       Nothing -> panic "lookupStruct" [ "Undefined struct: " ++ showPP s ]
        Just (_,nt) ->
          case nt of
            StructTy fs -> pure fs
@@ -229,77 +229,38 @@ lookupStruct s =
 lookupNodeProfile :: Name -> M (Safety,NodeType,NodeProfile)
 lookupNodeProfile n =
   do ro <- M ask
-     case Map.lookup n (roUserNodes ro) of
+     case Map.lookup (nameOrigName n) (roUserNodes ro) of
        Just (_,x,y,z) -> pure (x,y,z)
-       Nothing -> reportError $ nestedError
-                      ("Undefined node:" <+> pp n)
-                      ("Known nodes:" : map pp (Map.keys (roUserNodes ro)))
+       Nothing -> panic "lookupNodeProfile" [ "Undefined node: " ++ showPP n ]
 
 withConst :: Ident -> Type -> M a -> M a
 withConst x t (M m) =
   do ro <- M ask
-     let nm = Unqual x
+     let nm = identOrigName x
      let cs = roConstants ro
      M (local ro { roConstants = Map.insert nm (range x,t) cs } m)
-
-uniqueConst :: Ident -> M ()
-uniqueConst x =
-  do ro <- M ask
-     let nm = Unqual x
-     case Map.lookup nm (roConstants ro) of
-       Just (r,_) -> reportError $ nestedError
-                        "Multiple definitions for constant:"
-                        [ "Name:" <+> pp x
-                        , "Location 1:" <+> pp r
-                        , "Location 2:" <+> pp (range x)
-                        ]
-       Nothing -> pure ()
-
 
 
 withLocal :: Ident -> IdentMode -> CType -> M a -> M a
 withLocal i mo t (M m) =
-  do ro <- M ask
-     let is = roIdents ro
-     case Map.lookup i is of
-       Nothing -> M (local ro { roIdents = Map.insert i (range i, mo, t) is } m)
-       Just (r,_,_) ->
-         reportError $ nestedError
-           "Multiple declarations for a local variable:"
-           [ "Name:" <+> pp i
-           , "Location 1:" <+> pp r
-           , "Location 2:" <+> pp (range i)
-           ]
+  M $ do ro <- ask
+         let is = roIdents ro
+             nm = identOrigName i
+         local ro { roIdents = Map.insert nm (range i, mo, t) is } m
 
 withNode :: Ident -> (Safety, NodeType, NodeProfile) -> M a -> M a
 withNode x (a,b,c) (M m) =
-  do ro <- M ask
-     let nm = Unqual x
-     case Map.lookup nm (roUserNodes ro) of
-       Just (r,_,_,_) ->
-         reportError $ nestedError
-            "Multiple declarations for a node:"
-            [ "Name:" <+> pp x
-            , "Location 1:" <+> pp r
-            , "Location 2:" <+> pp (range x)
-            ]
-       Nothing -> M (local ro { roUserNodes = Map.insert nm (range x,a,b,c)
-                                                (roUserNodes ro) } m)
+  M $ do ro <- ask
+         let nm = identOrigName x
+         local ro { roUserNodes = Map.insert nm (range x,a,b,c)
+                                                (roUserNodes ro) } m
 
 withNamedType :: Ident -> NamedType -> M a -> M a
 withNamedType x t (M m) =
-  do ro <- M ask
-     let nm = Unqual x
-     case Map.lookup nm (roTypeNames ro) of
-       Just (r,_) -> reportError $ nestedError
-                      "Multiple declaration for a type:"
-                      [ "Name:" <+> pp x
-                      , "Location 1" <+> pp r
-                      , "Location 2" <+> pp (range x)
-                      ]
-       Nothing ->
-        M (local ro { roTypeNames = Map.insert nm (range x,t)
-                                                  (roTypeNames ro) } m)
+  M $ do ro <- ask
+         let nm = identOrigName x
+         local ro { roTypeNames = Map.insert nm (range x,t)
+                                               (roTypeNames ro) } m
 
 
 withLocals :: [(Ident,IdentMode,CType)] -> M a -> M a

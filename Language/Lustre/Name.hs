@@ -56,6 +56,17 @@ data Name =
     deriving Show
 
 
+-- | Get the original name of a resolved name.
+nameOrigName :: Name -> OrigName
+nameOrigName nm =
+  case nm of
+    Unqual i -> identOrigName i
+    Qual {}  -> panic "nameOrigName"
+                  [ "Unexpected qualified name:"
+                  , "*** Name: " ++ show nm
+                  ]
+
+
 -- | Make an ident with no known location.
 -- This can be useful when looking up things in maps---only the 'Text'
 -- matters.
