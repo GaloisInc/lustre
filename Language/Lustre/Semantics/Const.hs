@@ -12,8 +12,8 @@ import Language.Lustre.Semantics.Value
 import Language.Lustre.Semantics.BuiltIn
 
 data Env = Env
-  { envConsts   :: Map Name Value
-  , envStructs  :: Map Name [ (Ident, Maybe Value) ]
+  { envConsts   :: Map OrigName Value
+  , envStructs  :: Map OrigName [ (Ident, Maybe Value) ]
   }
 
 emptyEnv :: Env
@@ -55,7 +55,7 @@ evalConst env expr =
     Merge {}  -> bad "`merge` is not a constant expression."
 
     Var x ->
-      case Map.lookup x (envConsts env) of
+      case Map.lookup (nameOrigName x) (envConsts env) of
         Just v  -> pure v
         Nothing -> bad ("Undefined variable `" ++ show x ++ "`.")
 
@@ -64,7 +64,7 @@ evalConst env expr =
     Array es -> sArray =<< mapM (evalConst env) es
 
     Struct s fes ->
-      case Map.lookup s (envStructs env) of
+      case Map.lookup (nameOrigName s) (envStructs env) of
         Nothing -> bad ("Undefined struct type `" ++ show s ++ "`.")
         Just structDef ->
           do fs  <- Map.fromList <$> mapM (evalField env) fes
@@ -77,7 +77,7 @@ evalConst env expr =
 
     UpdateStruct s y fes ->
       do fs <- Map.fromList <$> mapM (evalField env) fes
-         case Map.lookup y (envConsts env) of
+         case Map.lookup (nameOrigName y) (envConsts env) of
            Nothing -> bad ("Undefined struct constant `" ++ show y ++ "`.")
            Just uv ->
              case uv of
