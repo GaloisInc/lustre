@@ -138,8 +138,11 @@ data OrigName = OrigName
   , rnThing   :: !Thing           -- ^ What are we
   } deriving Show
 
-defInfoToResolvedIdent :: OrigName -> Ident
-defInfoToResolvedIdent d = (rnIdent d) { identResolved = Just d }
+origNameToIdent :: OrigName -> Ident
+origNameToIdent d = (rnIdent d) { identResolved = Just d }
+
+origNameToName :: OrigName -> Name
+origNameToName = Unqual . origNameToIdent
 
 instance HasRange OrigName where
   range = range . rnIdent

@@ -36,12 +36,9 @@ module Language.Lustre.Transform.NoStatic
   ) where
 
 import Data.Function(on)
-import Data.Text(Text)
-import qualified Data.Text as Text
 import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
-import Data.Semigroup ( (<>) )
 import Data.Either(partitionEithers)
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
@@ -53,7 +50,6 @@ import Language.Lustre.Panic(panic)
 import Language.Lustre.Pretty
 
 
-type CallSiteMap = Map Ident (Map CallSiteId [LHS Expression])
 
 -- XXX
 quickNoConst ::
@@ -78,6 +74,14 @@ evalTopDecls :: Env -> [TopDecl ] -> Env
 evalTopDecls = foldl' evalTopDecl
 
 
+-- | Maps node definitions to the places in the source where they are called.
+-- For each call, we keep track of the left-hand-sides storing the results
+-- of the call.
+type CallSiteMap = Map OrigName (Map CallSiteId [LHS Expression])
+
+-- | Identifies a call site uniquely.
+-- Currently, it is computed from the location in the source.
+-- XXX: Needs to be augmented to support multiple files/modules.
 data CallSiteId = CallSiteId { csId :: (Int,Int), csRange :: SourceRange }
                   deriving (Show)
 
@@ -107,7 +111,6 @@ idFromRange r = CallSiteId { csId    = (pos sourceFrom, pos sourceTo)
 
 --------------------------------------------------------------------------------
 -- Evaluation Context and State
---
 
 
 
@@ -116,47 +119,39 @@ data Env = Env
   { cEnv :: C.Env
     -- ^ Environment for evaluating constants.
 
-  , enumInfo :: Map Name (Map Ident Name)
-    -- ^ For each enum, a map that maps identifiers to the names to
-    -- use for the corresponding values.
-
-  , nodeInfo :: Map Name NodeProfile
+  , nodeInfo :: Map OrigName NodeProfile
     -- ^ Types of the nodes that are in scope.
     -- This is used to determine how to name the call sites.
     -- It is also used to figure out which parameters are constants
     -- when we call a functino.
 
-  , nodeTemplateInfo :: Map Name ( [StaticParam]
-                                 , Either NodeProfile NodeInst
-                                 )
+  , nodeTemplateInfo :: Map OrigName ( [StaticParam]
+                                     , Either NodeProfile NodeInst
+                                     )
     -- ^ Types for node templates.
     -- Note that the 'NodeProfile's in the map are NOT evaluated, and should
     -- be evaluated for each concrete instantiation.
     -- This is used to determine how to name the call sites.
 
-  , typeAliases :: Map Name Type
+  , typeAliases :: Map OrigName Type
     -- ^ Maps type names to evaluated types.
     -- The only named types in an evaluated type are either structs or enums,
     -- there should be no aliases to other types.
     -- We also use this field when we are instantiating a node parameterized
     -- by a type:  the type parameters go in this map, temporarily.
 
-  , nodeTemplates :: Map Name (TopDecl )
+  , nodeTemplates :: Map OrigName TopDecl
     -- ^ Nodes with static parameters, used when we expand definitions.
 
   , readyDecls    :: [TopDecl]
     -- ^ Declarations that we've already processed.
     -- These are the output of the algorithm.
 
-  , nodeArgs      :: Map Ident NodeInst
+  , nodeArgs      :: Map OrigName NodeInst
     -- ^ Instantiated node arguments: if the node argument was an instantiation,
     -- then we first instantiate the template, give it a name, and use
     -- that name.  So, we should never have any remaining static
     -- arguments.
-
-  , curModule :: Maybe ModName
-    -- ^ If this is 'Just', then we use this to qualify top-level
-    -- 'Ident' when we need a name 'Name'
 
   , expandNodeInsts :: Bool
     {- ^ Should we expand node instances, or leave them named at the
@@ -173,7 +168,7 @@ data Env = Env
   , envCurRange :: Maybe SourceRange
     -- ^ Wherreabouts are we
 
-  , envCallSiteMap :: Map Ident (Map CallSiteId [LHS Expression])
+  , envCallSiteMap :: CallSiteMap
     {- ^ For each node, maps a range in the source to a call site.
     The call site is identified by the variables storing the results
     of the call. -}
@@ -186,48 +181,18 @@ inRange r env = env { envCurRange = Just r }
 -- | Does not expand node instances
 emptyEnv :: Env
 emptyEnv = Env { cEnv = C.emptyEnv
-               , enumInfo = Map.empty
                , nodeInfo = Map.empty
                , nodeTemplateInfo = Map.empty
                , typeAliases = Map.empty
                , nodeTemplates = Map.empty
                , readyDecls = []
                , nodeArgs = Map.empty
-               , curModule = Nothing
                , expandNodeInsts = False
                , nameCallSites = False
                , envNameInstSeed = 0
                , envCurRange = Nothing
                , envCallSiteMap = Map.empty
                }
-
--- | Compute the name for a top-level identifyiner, qualifying with the
--- current module, if any.
--- XXX: OBSOLETE
-topIdentToName :: Env -> Ident -> Name
-topIdentToName env i =
-  case curModule env of
-    Nothing -> Unqual i
-    Just m  -> Qual m i
-
-
--- | Lookup something.  Unqualified names are qualified with the current module.
-lookupNamed :: Env -> Name -> Map Name a -> Maybe a
-lookupNamed env x mp = Map.lookup name mp
-  where name = case x of
-                 Unqual i -> topIdentToName env i
-                 _        -> x
-
--- | Add an entry to a name map.
--- If the name is qualified, then also add an unqualified entry.
--- We do this for the constant environment because constant evaluation
--- does not use 'lookupNamed'.
-addNamed :: Name -> a -> Map Name a -> Map Name a
-addNamed x a mp =
-  case x of
-    Unqual _   ->  Map.insert x a mp
-    Qual _ i -> undefined
-
 
 --------------------------------------------------------------------------------
 -- Evaluation of types
@@ -243,14 +208,13 @@ evalTypeDecl env td =
       case tdef of
         IsType x -> addAlias env name (evalType env x)
 
-        IsEnum xs -> env { enumInfo = addNamed name (Map.fromList ys)
-                                                    (enumInfo env)
-                         , cEnv = update (cEnv env) }
+        -- Add the enumeration constants to the constant environemnt.
+        IsEnum xs -> env { cEnv = update (cEnv env) }
           where
-          ys    = [ (x, topIdentToName env x) | x <- xs ]
-          addVal (i,n) = addNamed n (VEnum name i)
           update cenv =
-                cenv { C.envConsts = foldr addVal (C.envConsts cenv) ys }
+                 cenv { C.envConsts = foldr addVal (C.envConsts cenv) xs }
+          addVal i = let nm = identOrigName i
+                     in Map.insert nm (VEnum name nm)
 
         IsStruct xs ->
           env { cEnv = update (cEnv env)
@@ -259,7 +223,7 @@ evalTypeDecl env td =
               }
           where
           update cenv =
-            cenv { C.envStructs = addNamed name fs (C.envStructs cenv) }
+            cenv { C.envStructs = Map.insert name fs (C.envStructs cenv) }
 
           (fs,ds) = unzip (map doField xs)
 
@@ -272,7 +236,7 @@ evalTypeDecl env td =
             )
 
   where
-  name = topIdentToName env (typeName td)
+  name = identOrigName (typeName td)
 
 
 
@@ -286,8 +250,9 @@ evalType env ty =
 
     IntSubrange e1 e2 -> IntSubrange (evalIntExpr env e1) (evalIntExpr env e2)
 
-    -- XXX: Are the locations in the aliased type meaningful?
-    NamedType n   -> case lookupNamed env n (typeAliases env)  of
+    -- XXX: Note that the locations in the expanded type will be those
+    -- of the definition site, not the ones at the use site.
+    NamedType n   -> case Map.lookup (nameOrigName n) (typeAliases env)  of
                        Just t1 -> t1
                        Nothing -> NamedType n
 
@@ -299,10 +264,10 @@ evalType env ty =
 
 
 
--- | Add a new name for the given type.  If the named type is a struct or
--- an enum, then also add appropriate entries to the other maps,
+-- | Add a new name for the given type.  If the named type is a struct,
+-- then also add appropriate entries to the other maps,
 -- so we can do direct look-ups without having to consult the alias map.
-addAlias :: Env -> Name -> Type -> Env
+addAlias :: Env -> OrigName -> Type -> Env
 addAlias env x t =
   case t of
     NamedType n ->
@@ -313,14 +278,12 @@ addAlias env x t =
                       , "*** Name: " ++ showPP n
                       ]
       where
-      checkEnum =
-        do i <- lookupNamed env1 n (enumInfo env)
-           pure env1 { enumInfo = Map.insert x i (enumInfo env1) }
+      checkEnum = pure env1
 
       checkStruct =
         do let cenv = cEnv env
-           i <- Map.lookup n (C.envStructs cenv)    -- we did addNamed
-           let newMap = addNamed x i (C.envStructs cenv)
+           i <- Map.lookup (nameOrigName n) (C.envStructs cenv)
+           let newMap = Map.insert x i (C.envStructs cenv)
            pure env1 { cEnv = cenv { C.envStructs = newMap } }
 
     _ -> env1
@@ -346,8 +309,8 @@ evalConstDef env cd = env { cEnv = newCEnv }
                            , "*** Name: " ++ showPP (constName cd)
                            ]
 
-  newCEnv = cenv { C.envConsts = addNamed name val (C.envConsts cenv) }
-  name    = topIdentToName env (constName cd)
+  newCEnv = cenv { C.envConsts = Map.insert name val (C.envConsts cenv) }
+  name    = identOrigName (constName cd)
 
 
 
@@ -377,6 +340,8 @@ evalExpr env expr =
     _          -> valToExpr env (evalExprToVal env expr)
 
 -- | Convert an evaluated expression back into an ordinary expression.
+-- Note that the resulting expression does not have meaninful position
+-- information.
 valToExpr :: Env -> Value -> Expression
 valToExpr env val =
   case val of
@@ -384,17 +349,9 @@ valToExpr env val =
     VBool b       -> Lit (Bool b)
     VReal r       -> Lit (Real r)
 
-    VEnum e x ->
-      case lookupNamed env e (enumInfo env) of
-        Just vs ->
-          case Map.lookup x vs of
-            Just n  -> Var n
-            Nothing -> panic "valToExpr" $
-                        [ "Unknown value of enum `" ++ showPP e ++ "`:"
-                        , "*** Value: " ++ showPP x ]
-        Nothing -> panic "valToExpr" [ "Unknown enum `" ++ showPP e ++ "`." ]
-
-    VStruct s fs  -> Struct s (fmap (fmap (valToExpr env)) fs)
+    -- we keep enums as variables, leaving representation choice for later.
+    VEnum _ x     -> Var (origNameToName x)
+    VStruct s fs  -> Struct (origNameToName s) (fmap (fmap (valToExpr env)) fs)
 
     VArray  vs    -> Array (map (valToExpr env) vs)
 
@@ -440,7 +397,7 @@ evalNodeDecl env nd =
               , nodeInfo = Map.insert name (nodeProfile nd) (nodeInfo env)
               }
   where
-  name = topIdentToName env (nodeName nd)
+  name    = identOrigName (nodeName nd)
   constPs = [ ConstParam i t | InputConst i t <- nodeInputs (nodeProfile nd) ]
 
 
@@ -450,32 +407,39 @@ evalNode :: Env -> NodeDecl -> [StaticArg] -> Env
 evalNode env nd args =
 
   case nodeDef nd of
-    Nothing -> panic "evalNode" [ "Node without a definition"
+    -- XXX
+    Nothing -> panic "evalNode" [ "Not yet implemented:"
+                                , "*** Node without a definition"
                                 , "*** Name: " ++ showPP (nodeName nd)
                                 ]
     Just body ->
-         envRet2 { readyDecls = DeclareNode newNode
-                                      : readyDecls envRet2
-                         , nodeInfo = addNamed name newProf (nodeInfo envRet2)
-                         }
+         envRet2 { readyDecls = DeclareNode newNode : readyDecls envRet2
+                 , nodeInfo   = Map.insert name newProf (nodeInfo envRet2)
+                 }
       where
-      name      = topIdentToName env (nodeName nd)
-      prof      = nodeProfile nd
+      name      = identOrigName (nodeName nd)
+
+      -- 1. bind the provided static arguments.
       env0      = addStaticParams (nodeStaticInputs nd) args env
-      env1      = shadowBinders env0 [ b | InputBinder b <- nodeInputs prof ]
-      (bs,env2) = evalLocalDecls env1 (nodeLocals body)
-      env3      = shadowBinders (shadowBinders env2 bs) (nodeOutputs prof)
-      env4      = env3 { envNameInstSeed = -77 }
-      -- Shouldn't be used, sanity;
+      newProf   = evalNodeProfile env0 (nodeProfile nd)
 
-      (eqs,newLs,insts,info,newS) = runNameStatic
-                           (curModule env4)
-                           (envNameInstSeed env)
-                           (concat <$> mapM (evalEqn env4) (nodeEqns body))
+      -- 2. evaluate constants in the locals
+      (bs,env1) = evalLocalDecls env0 (nodeLocals body)
 
+      -- 3. "blackhole" the name seed, which should not be used.
+      -- This a strict field, so we can't put a panic there, so instead
+      -- we just make up a very invalid value, which would hopefully be
+      -- easy to spot, in case it get used accidentally.
+      env2      = env1 { envNameInstSeed = -77 }
+
+      -- 4. Evaluate the equations in the body of a node.
+      (eqs,newLs,insts,info,newS) =
+          runNameStatic (envNameInstSeed env)
+                        (concat <$> mapM (evalEqn env2) (nodeEqns body))
+
+      -- Results, updating the *original* environment.
       envRet1 = env { envNameInstSeed = newS
-                    , envCallSiteMap = Map.insert (nodeName nd) info
-                                                  (envCallSiteMap env4)
+                    , envCallSiteMap = Map.insert name info (envCallSiteMap env)
                     }
       envRet2 = addEvaluatedNodeInsts envRet1 insts
 
@@ -485,24 +449,12 @@ evalNode env nd args =
                     , nodeEqns   = eqs
                     }
 
-      newProf   = evalNodeProfile env0 (nodeProfile nd)
       newNode   = nd { nodeStaticInputs = []
                      , nodeProfile = newProf
                      , nodeDef = Just newDef
                     }
 
 
--- | Remove the given identivier from the constant environment,
--- as it is shadowed by a local variable.
-shadowIdent :: Env -> Ident -> Env
-shadowIdent env i = env { cEnv = update (cEnv env) }
-  where
-  update cenv = cenv { C.envConsts = Map.delete (Unqual i) (C.envConsts cenv) }
-
-
--- | Remove a whole bunch of binders.
-shadowBinders :: Env -> [Binder] -> Env
-shadowBinders = foldr (\b e -> shadowIdent e (binderDefines b))
 
 
 -- | Evaluate a binder.have been evaluated already.
@@ -597,7 +549,7 @@ evalNodeInstDecl env nid =
                                                    (nodeTemplateInfo env)
               }
   where
-  name = topIdentToName env (nodeInstName nid)
+  name = identOrigName (nodeInstName nid)
 
 
 -- | Evaluate a node-instance declaration using the given static arguments.
@@ -611,19 +563,19 @@ evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
 
   nameNodeInstDef (NodeInst f as) =
     case as of
-      [] | CallUser (Unqual fu) <- f
-         , Just ni <- Map.lookup fu (nodeArgs env1) -> pure ni
+      [] | CallUser nm <- f
+         , Just ni <- Map.lookup (nameOrigName nm) (nodeArgs env1) -> pure ni
       _  -> do bs <- mapM (evalStaticArg env1) as
                pure (NodeInst f bs)
 
   (newDef,[],insts,info,newS) = runNameStatic
-                                (curModule env1)
                                 (envNameInstSeed env)
                                 (nameNodeInstDef (nodeInstDef nid))
 
   envRet1 = env { envNameInstSeed = newS
-                , envCallSiteMap = Map.insert (nodeInstName nid) info
-                                              (envCallSiteMap env) }
+                , envCallSiteMap =
+                    let nm = identOrigName (nodeInstName nid)
+                    in Map.insert nm info (envCallSiteMap env) }
   envRet2 = addEvaluatedNodeInsts envRet1 insts
 
   -- Note that we leave the name as is because this is the right thing
@@ -643,7 +595,7 @@ evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
 addEvaluatedNodeInst :: Env -> NodeInstDecl -> Env
 addEvaluatedNodeInst env ni
   | expandNodeInsts env = expandNodeInstDecl env ni
-  | otherwise = doAddNodeInstDecl ni env
+  | otherwise           = doAddNodeInstDecl ni env
 
 -- | Add an already evaluated node instance to the environment.
 -- This is where we expand instances, if the flag in the environment is set.
@@ -658,7 +610,7 @@ expandNodeInstDecl env nid =
     [] ->
       case nodeInstDef nid of
         NodeInst (CallUser f) ps@(_ : _) ->
-          case lookupNamed env f (nodeTemplates env) of
+          case Map.lookup (nameOrigName f) (nodeTemplates env) of
             Just nt ->
               case nt of
 
@@ -745,14 +697,15 @@ doAddNodeInstDecl :: NodeInstDecl -> Env -> Env
 doAddNodeInstDecl ni env =
   env { readyDecls = DeclareNodeInst ni : readyDecls env
       , nodeInfo = case getNodeInstProfile env (nodeInstDef ni) of
-                     Just prof -> addNamed name prof (nodeInfo env)
+                     Just prof -> Map.insert name prof (nodeInfo env)
                      Nothing   -> nodeInfo env
       }
-  where name = topIdentToName env (nodeInstName ni)
+  where name = identOrigName (nodeInstName ni)
 
 
 --------------------------------------------------------------------------------
 -- Typing of Node Instances
+-- XXX: This should have happened in the type checker?
 
 {- | Determine the type of a node instance.
 Returns 'Maybe' because in some cases we can't determine the
@@ -763,13 +716,13 @@ getNodeInstProfile env (NodeInst c as) =
   case c of
     CallUser f ->
       case as of
-        [] -> case lookupNamed env f (nodeInfo env) of
+        [] -> case Map.lookup (nameOrigName f) (nodeInfo env) of
                 Just a -> Just a
                 Nothing -> panic "getNodeInstProfile"
                             [ "Unknown profile for node:"
                             , "*** Node name: " ++ showPP f
                             ]
-        _ -> case lookupNamed env f (nodeTemplateInfo env) of
+        _ -> case Map.lookup (nameOrigName f) (nodeTemplateInfo env) of
                Just (ps,lrProf) ->
                  let env1 = addStaticParams ps as env
                  in case lrProf of
@@ -889,7 +842,8 @@ addStaticParam p a env
       TypeParam i ->
         case a of
           TypeArg t ->
-            env { typeAliases = Map.insert (Unqual i) t (typeAliases env) }
+            env { typeAliases = Map.insert (identOrigName i) t
+                                                            (typeAliases env) }
           _ -> panic "addStaticParam"
                  [ "Invalid static parameter:"
                  , "*** Expected: a type for " ++ showPP i
@@ -902,8 +856,9 @@ addStaticParam p a env
           ExprArg e ->
             let cenv   = cEnv env
                 val    = evalExprToVal env e
-            in env { cEnv = cenv { C.envConsts = Map.insert (Unqual i) val
-                                                          (C.envConsts cenv) } }
+            in env { cEnv = cenv { C.envConsts = Map.insert
+                                                  (identOrigName i) val
+                                                  (C.envConsts cenv) } }
           _ -> panic "addStaticParam"
                  [ "Invalid static parameter:"
                  , "*** Expected: a constant for " ++
@@ -914,9 +869,10 @@ addStaticParam p a env
 
       NodeParam _ _ f prof ->
         case a of
-          NodeArg _ ni -> env { nodeArgs = Map.insert f ni (nodeArgs env)
-                              , nodeInfo = Map.insert (Unqual f) prof
-                                                           (nodeInfo env) }
+          NodeArg _ ni ->
+            let nm = identOrigName f
+            in env { nodeArgs = Map.insert nm ni   (nodeArgs env)
+                   , nodeInfo = Map.insert nm prof (nodeInfo env) }
 
           _ -> panic "addStaticParam"
                  [ "Invalid static parameter:"
@@ -941,11 +897,14 @@ data ExprLoc = TopExpr [LHS Expression] | NestedExpr
 evalDynExpr :: ExprLoc -> Env -> Expression -> M Expression
 evalDynExpr eloc env expr =
   case expr of
-    ERange r e      -> ERange r <$> evalDynExpr eloc (inRange r env) e
-    Var x           -> pure $ case Map.lookup x (C.envConsts (cEnv env)) of
-                                Just v  -> valToExpr env v
-                                Nothing -> expr
-    Lit _           -> pure expr
+    ERange r e -> ERange r <$> evalDynExpr eloc (inRange r env) e
+
+    Var x ->
+      pure $ case Map.lookup (nameOrigName x) (C.envConsts (cEnv env)) of
+               Just v  -> valToExpr env v
+               Nothing -> expr
+
+    Lit _ -> pure expr
 
 
     e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
@@ -963,7 +922,7 @@ evalDynExpr eloc env expr =
     -- INVARIANT: the fields in a struct value are in the same order is
     -- in the declaration.
     UpdateStruct s x fs ->
-      case Map.lookup x (C.envConsts (cEnv env)) of
+      case Map.lookup (nameOrigName s) (C.envConsts (cEnv env)) of
         Nothing -> evalUpdExprStruct env s x fs
         Just v  -> evalUpdConstStruct env s v fs
 
@@ -977,7 +936,7 @@ evalDynExpr eloc env expr =
                       ]
 
     Merge i ms ->
-      case Map.lookup (Unqual i) (C.envConsts (cEnv env)) of
+      case Map.lookup (identOrigName i) (C.envConsts (cEnv env)) of
         Just v  -> evalMergeConst env v ms
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
@@ -985,7 +944,7 @@ evalDynExpr eloc env expr =
       do let (cs,es0) =
                 case f of
                   NodeInst (CallUser c) _ ->
-                    case Map.lookup c (nodeInfo env) of
+                    case Map.lookup (nameOrigName c) (nodeInfo env) of
                        Just p  -> inputBindersToArgs (nodeInputs p) es
                        Nothing -> panic "evalDynExpr"
                                     [ "Missing node profile for function."
@@ -1000,8 +959,10 @@ evalDynExpr eloc env expr =
                   (NodeInst c [],[]) ->
                     pure $
                     case c of
-                      CallUser (Unqual i)
-                        | Just ni <- Map.lookup i (nodeArgs env) -> ni
+                      CallUser i
+                        | let known = Map.lookup (nameOrigName i) (nodeArgs env)
+                        , Just ni <- known -> ni
+
                       _ -> NodeInst c []
                   (NodeInst c as, _) ->
                         nameInstance env (NodeInst c (as ++ cs))
@@ -1060,7 +1021,8 @@ nameCallSite env ni es =
 
             -- XXX: we could try to use names derived from the outpus
             -- for more readable Sally code.
-            ns <- replicateM (length outs) (newIdent (range ni))
+            let newId = origNameToIdent <$> newIdent (range ni) Nothing AVal
+            ns <- replicateM (length outs) newId
             let names = map binderDefines (ins ++ outs)
             let nameMap = Map.fromList
                         $ zip names (map isIdent es ++ map Just ns)
@@ -1150,7 +1112,7 @@ evalUpdConstStruct env s v fs =
 evalNewStruct :: Env -> Name -> [Field Expression] -> M Expression
 evalNewStruct env s fs =
   evalNewStructWithDefs env s fs $
-  case Map.lookup s (C.envStructs (cEnv env)) of
+  case Map.lookup (nameOrigName s) (C.envStructs (cEnv env)) of
     Just def  -> def
     Nothing   -> panic "evalNewStruct" [ "Undefined struct type:"
                                      , "*** Name: " ++ showPP s
@@ -1211,15 +1173,14 @@ evalStaticArg env sa =
 --------------------------------------------------------------------------------
 -- Expression Evalutaion Monad
 
-type M = ReaderT RO (StateT RW Id)
+type M = StateT RW Id
 
 runNameStatic ::
-  Maybe ModName {- ^ Qualify generated names with this -} ->
   Int           {- ^ Start generating names using this seed -} ->
   M a           {- ^ This is what we want to do -} ->
   (a, [Binder], [ NodeInstDecl ], Map CallSiteId [LHS Expression], Int)
   -- ^ result, new locals, new instances, call site info, new name seed
-runNameStatic qual seed m
+runNameStatic seed m
   | seed < 0   = panic "runNameStatic"
                     [ "Incorrect use of `envNameInstSeed`"
                     , "*** Negative seed: " ++ show seed
@@ -1228,14 +1189,10 @@ runNameStatic qual seed m
                  , csInfo rw1
                  , nameSeed rw1)
   where
-  (a,rw1) = runId $ runStateT rw $ runReaderT ro m
-  ro      = RO { qualify = qual }
+  (a,rw1) = runId (runStateT rw m)
   rw      = RW { nameSeed = seed, instances = [], funEqns = [], newLocals = []
                , csInfo = Map.empty }
 
-newtype RO = RO
-  { qualify :: Maybe ModName -- ^ Qualify references to generated names
-  }
 
 data RW = RW
   { nameSeed    :: !Int               -- ^ Generate new names
@@ -1258,35 +1215,37 @@ safety & functionality of declarations.
 -}
 addNameInstDecl :: Callable -> [StaticArg] -> M Name
 addNameInstDecl c as =
-  do i <- newIdent (range c)
+  do i <- newIdent (range c) undefined ANode
      addInst NodeInstDecl
                 { nodeInstSafety        = Safe
                 , nodeInstType          = Node
-                , nodeInstName          = i
+                , nodeInstName          = origNameToIdent i
                 , nodeInstStaticInputs  = []
                 , nodeInstProfile       = Nothing
                 , nodeInstDef           = NodeInst c as
                 }
-     identToName i
+     pure (origNameToName i)
 
 
 
 
 -- | Generate a fresh name associated with the given source location.
-newIdent :: SourceRange -> M Ident
-newIdent r = sets $ \s -> let x = nameSeed s
-                              newName = "__no_static_" <> Text.pack (show x)
-                              i = Ident { identRange = r
-                                        , identText = newName
-                                        , identPragmas = []
-                                        , identResolved = error "XXX: todo newIdent"
-                                        }
-                              s1 = s { nameSeed = x + 1 }
-                          in s1 `seq` (i, s1)
+newIdent :: SourceRange -> Maybe ModName -> Thing -> M OrigName
+newIdent r md th = sets $ \s ->
+  let uid     = nameSeed s
+      origI   = Ident { identRange    = r
+                      , identText     = "__no_static"
+                      , identPragmas  = []
+                      , identResolved = Nothing
+                      }
+      origN   = OrigName { rnUID    = uid
+                         , rnModule = md
+                         , rnIdent  = origI
+                         , rnThing  = th
+                         }
 
--- | Convert an identifier to a name, by qualifying it, if neccesary.
-identToName :: Ident -> M Name
-identToName i = undefined
+      s1 = s { nameSeed = uid + 1 }
+  in s1 `seq` (origN, s1)
 
 
 -- | Remember the given instance.

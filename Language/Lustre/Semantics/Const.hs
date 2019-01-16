@@ -64,7 +64,7 @@ evalConst env expr =
     Array es -> sArray =<< mapM (evalConst env) es
 
     Struct s fes ->
-      case Map.lookup (nameOrigName s) (envStructs env) of
+      case Map.lookup name (envStructs env) of
         Nothing -> bad ("Undefined struct type `" ++ show s ++ "`.")
         Just structDef ->
           do fs  <- Map.fromList <$> mapM (evalField env) fes
@@ -73,7 +73,8 @@ evalConst env expr =
                      Just v  -> pure (Field f v)
                      Nothing -> bad ("Missing field `" ++ show f ++ "`.")
              fs1 <- mapM mkField structDef
-             pure (VStruct s fs1)
+             pure (VStruct name fs1)
+      where name = nameOrigName s
 
     UpdateStruct s y fes ->
       do fs <- Map.fromList <$> mapM (evalField env) fes
@@ -82,14 +83,15 @@ evalConst env expr =
            Just uv ->
              case uv of
                VStruct s' fs1
-                  | s == s' ->
-                    pure $ VStruct s'
+                  | s' == name ->
+                    pure $ VStruct name
                              [ Field i v1
                              | Field i v <- fs1
                              , let v1 = Map.findWithDefault v i fs
                              ]
 
                _ -> typeError "struct update" ("a `" ++ show s ++ "`.")
+        where name = nameOrigName s
 
     Select e sel ->
       do s <- evalSel env sel

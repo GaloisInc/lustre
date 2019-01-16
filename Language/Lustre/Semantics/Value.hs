@@ -10,8 +10,8 @@ import Language.Lustre.Pretty
 data Value    = VInt    !Integer
               | VBool   !Bool
               | VReal   !Rational
-              | VEnum   !Name !Ident          -- ^ Type, value
-              | VStruct !Name ![Field Value]  -- ^ Type, fields
+              | VEnum   !OrigName !OrigName       -- ^ Type, value
+              | VStruct !OrigName ![Field Value]  -- ^ Type, fields
               | VArray  ![Value]
                 deriving Show
 
