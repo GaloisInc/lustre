@@ -193,37 +193,14 @@ instance Resolve StaticParam where
       TypeParam p       -> pure (TypeParam (lkpDef ds AType p))
       ConstParam c t    -> ConstParam (lkpDef ds AConst c) <$> resolve t
       NodeParam s f x p ->
-       resolveProfile p $ \sips p1 ->
-          let res = lkpDef ds ANode x
-          in case sips of
-               [] -> pure (NodeParam s f res p1)
-               _  -> reportError (BadStaticParameters (identOrigName res) sips)
+        NodeParam s f (lkpDef ds ANode x) <$> resolveProfile p pure
 
 
-resolveInputBinder :: Set OrigName -> InputBinder ->
-                      ResolveM (Either InputBinder StaticParam)
-resolveInputBinder ds ib =
-  case ib of
-    InputBinder b  -> Left  . InputBinder <$> resolveDef ds b
-    InputConst c t -> Right . ConstParam (lkpDef ds AConst c) <$> resolve t
-
-
-resolveInputBinders :: [InputBinder] ->
-                       ([StaticParam] -> [InputBinder] -> ResolveM a) ->
-                       ResolveM a
-resolveInputBinders is cont = go [] [] is
-  where
-  go ps ins is =
-    case is of
-      [] -> cont (reverse ps) (reverse ins)
-      i : more ->
-        do (~[ds],scope) <- defsOf [i]
-           lr            <- resolveInputBinder ds i
-           let (ps',ins') = case lr of
-                              Left ib -> (ps, ib : ins)
-                              Right p -> (p : ps, ins)
-           extendScope scope (go ps' ins' more)
-
+instance Resolve InputBinder where
+  resolveDef ds ib =
+    case ib of
+      InputBinder b  -> InputBinder  <$> resolveDef ds b
+      InputConst c t -> InputConst (lkpDef ds AConst c) <$> resolve t
 
 instance Resolve Binder where
   resolveDef ds b =
@@ -245,30 +222,30 @@ instance Resolve StaticArg where
       ArgRange r a  -> ArgRange r <$> resolve a
 
 
-resolveProfile :: NodeProfile ->
-                  ([StaticParam] -> NodeProfile -> ResolveM a) ->
-                  ResolveM a
+resolveProfile :: NodeProfile -> (NodeProfile -> ResolveM a) -> ResolveM a
 resolveProfile prof k =
-  resolveInputBinders (nodeInputs prof) $ \ps ins ->
+  resolveOrderedGroup (nodeInputs prof) $ \ins ->
   resolveOrderedGroup (nodeOutputs prof) $ \outs ->
-  k ps NodeProfile { nodeInputs = ins, nodeOutputs = outs }
+  k NodeProfile { nodeInputs = ins, nodeOutputs = outs }
+
+
 
 
 instance Resolve NodeInstDecl where
   resolveDef ds nid =
     inLocalScope $
     resolveOrderedGroup (nodeInstStaticInputs nid) $ \sinps ->
-    let k ps prof = do def <- resolve (nodeInstDef nid)
-                       let nm = lkpDef ds ANode (nodeInstName nid)
-                       pure nid { nodeInstName         = nm
-                                , nodeInstStaticInputs = sinps ++ ps
-                                , nodeInstProfile      = prof
-                                , nodeInstDef          = def
-                                }
+    let k prof = do def <- resolve (nodeInstDef nid)
+                    let nm = lkpDef ds ANode (nodeInstName nid)
+                    pure nid { nodeInstName         = nm
+                             , nodeInstStaticInputs = sinps
+                             , nodeInstProfile      = prof
+                             , nodeInstDef          = def
+                             }
     in
     case nodeInstProfile nid of
-      Nothing   -> k [] Nothing
-      Just prof -> resolveProfile prof $ \ps is -> k ps (Just is)
+      Nothing   -> k Nothing
+      Just prof -> resolveProfile prof (k . Just)
 
 
 instance Resolve NodeInst where
@@ -360,11 +337,11 @@ instance Resolve NodeDecl where
   resolveDef ds nd =
     inLocalScope $
     resolveOrderedGroup (nodeStaticInputs nd) $ \sinps ->
-    resolveProfile (nodeProfile nd)           $ \sps prof ->
+    resolveProfile (nodeProfile nd)           $ \prof ->
     do ctr  <- traverse resolve (nodeContract nd)
        body <- traverse resolve (nodeDef nd)
        pure nd { nodeName         = lkpDef ds ANode (nodeName nd)
-               , nodeStaticInputs = sinps ++ sps
+               , nodeStaticInputs = sinps
                , nodeProfile      = prof
                , nodeContract     = ctr
                , nodeDef          = body
@@ -469,15 +446,12 @@ instance Resolve ContractItem where
 instance Resolve ContractDecl where
   resolveDef ds cd =
     inLocalScope $
-    resolveProfile (cdProfile cd) $ \ps prof ->
-    let res = lkpDef ds AContract (cdName cd)
-    in case ps of
-         [] -> do is <- resolveContractItems (cdItems cd)
-                  pure cd { cdName    = res
-                          , cdProfile = prof
-                          , cdItems   = is
-                          }
-         _ -> reportError (BadStaticParameters (identOrigName res) ps)
+    resolveProfile (cdProfile cd) $ \prof ->
+    do is <- resolveContractItems (cdItems cd)
+       pure cd { cdName    = lkpDef ds AContract (cdName cd)
+               , cdProfile = prof
+               , cdItems   = is
+               }
 
 
 --------------------------------------------------------------------------------
@@ -513,7 +487,6 @@ data ResolveError = InvalidConstantExpression String
                   | AmbiguousName Name OrigName OrigName
                   | RepeatedDefinitions [OrigName]
                   | BadRecursiveDefs [OrigName]
-                  | BadStaticParameters OrigName [StaticParam]
 
 -- | Potential problems, but not fatal.
 data ResolveWarn  = Shadows OrigName OrigName
@@ -757,12 +730,6 @@ instance Pretty ResolveError where
 
       BadRecursiveDefs xs ->
         block "Invalid recursive declarations:" (map ppOrig xs)
-
-      BadStaticParameters x ps ->
-        located (range x)
-          [ "Static parameters are not supported at this location."
-          , block "Parameters:" (map pp ps)
-          ]
 
     where
     block x ys = nested x (bullets ys)
