@@ -1,4 +1,4 @@
-{-# Language OverloadedStrings #-}
+{-# Language OverloadedStrings, DataKinds #-}
 {-| This module removes static arguments and constants.
 Calls to functions with static arguments are lifted to the top-level
 and given an explicit name.
@@ -39,7 +39,6 @@ import Data.Function(on)
 import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
-import Data.Either(partitionEithers)
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
 
@@ -57,7 +56,9 @@ quickNoConst ::
 quickNoConst expand ds = (envCallSiteMap env, reverse (readyDecls env))
   where
   env = evalTopDecls emptyEnv { expandNodeInsts = expand
-                              , nameCallSites   = True } ds
+                              , nameCallSites   = True
+                              , envCurMod       = Nothing
+                              } ds
 
 
 -- | Evaluate a top-level declaration.
@@ -172,6 +173,10 @@ data Env = Env
     {- ^ For each node, maps a range in the source to a call site.
     The call site is identified by the variables storing the results
     of the call. -}
+
+  , envCurMod :: Maybe ModName
+    -- ^ Named instantiations become new top-level declarations,
+    -- which is why we need to know the name of the current module.
   }
 
 inRange :: SourceRange -> Env -> Env
@@ -192,6 +197,7 @@ emptyEnv = Env { cEnv = C.emptyEnv
                , envNameInstSeed = 0
                , envCurRange = Nothing
                , envCallSiteMap = Map.empty
+               , envCurMod = Nothing
                }
 
 --------------------------------------------------------------------------------
@@ -388,7 +394,7 @@ Nodes with static parameters are added to the template map, while "normal"
 nodes are evaluated and added to the declaration list. -}
 evalNodeDecl :: Env -> NodeDecl  -> Env
 evalNodeDecl env nd =
-  case nodeStaticInputs nd ++ constPs of
+  case nodeStaticInputs nd of
     [] -> evalNode env nd []
     ps -> env { nodeTemplates = Map.insert name (DeclareNode nd)
                                                 (nodeTemplates env)
@@ -398,7 +404,6 @@ evalNodeDecl env nd =
               }
   where
   name    = identOrigName (nodeName nd)
-  constPs = [ ConstParam i t | InputConst i t <- nodeInputs (nodeProfile nd) ]
 
 
 -- | Evaluate and instantiate a node with the given static parameters.
@@ -435,6 +440,7 @@ evalNode env nd args =
       -- 4. Evaluate the equations in the body of a node.
       (eqs,newLs,insts,info,newS) =
           runNameStatic (envNameInstSeed env)
+                        (envCurMod env)
                         (concat <$> mapM (evalEqn env2) (nodeEqns body))
 
       -- Results, updating the *original* environment.
@@ -465,8 +471,6 @@ evalBinder env b = b { binderType = evalType env (binderType b)
 
 
 -- | Evaluate the binders in the type of a node.
--- Note that it would appear that the inputs are NOT in scope
--- in the outputs.
 evalNodeProfile :: Env -> NodeProfile -> NodeProfile
 evalNodeProfile env np =
   NodeProfile { nodeInputs  = map (evalInputBinder env) (nodeInputs np)
@@ -558,7 +562,7 @@ evalNodeInst :: Env -> NodeInstDecl -> [StaticArg] -> Env
 evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
   where
   env0 = addStaticParams (nodeInstStaticInputs nid) args env
-  env1 = env0 { envNameInstSeed = -78 } -- Do not use, bogus value for sanity
+  env1 = env0 { envNameInstSeed = -78 } -- Do not use! Bogus value for sanity.
                                         -- (strict, so no error/undefined)
 
   nameNodeInstDef (NodeInst f as) =
@@ -570,6 +574,7 @@ evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
 
   (newDef,[],insts,info,newS) = runNameStatic
                                 (envNameInstSeed env)
+                                (envCurMod env)
                                 (nameNodeInstDef (nodeInstDef nid))
 
   envRet1 = env { envNameInstSeed = newS
@@ -615,13 +620,13 @@ expandNodeInstDecl env nid =
               case nt of
 
                 DeclareNode nd ->
-                  let prof     = nodeProfile nd
-                      (cs,is') = inputBindersToParams (nodeInputs prof)
-                      prof'    = prof { nodeInputs = is' }
+                  let prof  = nodeProfile nd
+                      is    = nodeInputs prof
+                      prof' = prof { nodeInputs = is }
                   in evalNode env nd { nodeName = nodeInstName nid
                                      , nodeProfile = prof'
-                                     , nodeStaticInputs =
-                                          nodeStaticInputs nd ++ cs } ps
+                                     , nodeStaticInputs = nodeStaticInputs nd
+                                     } ps
 
                 DeclareNodeInst nd ->
                   evalNodeInst env nd { nodeInstName = nodeInstName nid } ps
@@ -785,12 +790,15 @@ getNodeInstProfile env (NodeInst c as) =
 
 
             IterBoolRed ->
+              panic "getNodeInstProfile"
+                [ "Not yet implemented, IterBoolRed" ]
+{-
               case as of
                 [ _, _, ExprArg k ] ->
                   let ident x = Ident { identText = x
                                       , identRange = range c
                                       , identPragmas = []
-                                      , identResolved = error "XXX: TODO"
+                                      , identResolved = undefined
                                       }
                       paramI x t = InputBinder (param x t)
                       param x t = Binder { binderDefines = ident x
@@ -802,14 +810,19 @@ getNodeInstProfile env (NodeInst c as) =
                             , nodeOutputs = [ param "b" BoolType ]
                             }
                 _ -> bad
+-}
 
             where
             toArr n x  = x { binderType = ArrayType (binderType x) n }
             toArrI n x =
               case x of
-                InputBinder b  -> InputBinder
-                                  b { binderType = ArrayType (binderType b) n }
-                InputConst i t -> InputConst i (ArrayType t n)
+                InputBinder b ->
+                  InputBinder b { binderType = ArrayType (binderType b) n }
+                InputConst i _ ->
+                   panic "getNodeInstProfile"
+                    [ "Unexpected InputConst"
+                    , "*** Location: " ++ showPP (range i)
+                    ]
             bad = panic "getNodeInstProfile"
                     [ "Unexpecetd iterator instantiation."
                     , "*** Iterator: " ++ showPP it
@@ -986,12 +999,6 @@ evalDynExpr eloc env expr =
       Tuple es    -> Just es
       _           -> Nothing
 
-inputBindersToParams :: [InputBinder] -> ([StaticParam],[InputBinder])
-inputBindersToParams = partitionEithers . map classify
-  where
-  classify ib = case ib of
-                  InputBinder _  -> Right ib
-                  InputConst i t -> Left (ConstParam i t)
 
 inputBindersToArgs ::
   [InputBinder] -> [Expression] -> ([StaticArg],[Expression])
@@ -1173,14 +1180,18 @@ evalStaticArg env sa =
 --------------------------------------------------------------------------------
 -- Expression Evalutaion Monad
 
-type M = StateT RW Id
+type M = WithBase Id [ ReaderT RO
+                     , StateT RW
+                     ]
 
 runNameStatic ::
   Int           {- ^ Start generating names using this seed -} ->
+  Maybe ModName {- ^ What module are we working on at the moment.
+                     'Nothing' means use "global" module -} ->
   M a           {- ^ This is what we want to do -} ->
   (a, [Binder], [ NodeInstDecl ], Map CallSiteId [LHS Expression], Int)
   -- ^ result, new locals, new instances, call site info, new name seed
-runNameStatic seed m
+runNameStatic seed cm m
   | seed < 0   = panic "runNameStatic"
                     [ "Incorrect use of `envNameInstSeed`"
                     , "*** Negative seed: " ++ show seed
@@ -1189,10 +1200,11 @@ runNameStatic seed m
                  , csInfo rw1
                  , nameSeed rw1)
   where
-  (a,rw1) = runId (runStateT rw m)
+  (a,rw1) = runId (runStateT rw (runReaderT cm m))
   rw      = RW { nameSeed = seed, instances = [], funEqns = [], newLocals = []
                , csInfo = Map.empty }
 
+type RO = Maybe ModName
 
 data RW = RW
   { nameSeed    :: !Int               -- ^ Generate new names
@@ -1215,7 +1227,8 @@ safety & functionality of declarations.
 -}
 addNameInstDecl :: Callable -> [StaticArg] -> M Name
 addNameInstDecl c as =
-  do i <- newIdent (range c) undefined ANode
+  do cm <- ask
+     i <- newIdent (range c) cm ANode
      addInst NodeInstDecl
                 { nodeInstSafety        = Safe
                 , nodeInstType          = Node
