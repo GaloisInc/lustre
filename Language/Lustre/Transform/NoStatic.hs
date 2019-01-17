@@ -36,6 +36,7 @@ module Language.Lustre.Transform.NoStatic
   ) where
 
 import Data.Function(on)
+import Data.Either(partitionEithers)
 import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
@@ -394,7 +395,7 @@ Nodes with static parameters are added to the template map, while "normal"
 nodes are evaluated and added to the declaration list. -}
 evalNodeDecl :: Env -> NodeDecl  -> Env
 evalNodeDecl env nd =
-  case nodeStaticInputs nd of
+  case nodeStaticInputs nd ++ constPs of
     [] -> evalNode env nd []
     ps -> env { nodeTemplates = Map.insert name (DeclareNode nd)
                                                 (nodeTemplates env)
@@ -404,6 +405,7 @@ evalNodeDecl env nd =
               }
   where
   name    = identOrigName (nodeName nd)
+  constPs = [ ConstParam i t | InputConst i t <- nodeInputs (nodeProfile nd) ]
 
 
 -- | Evaluate and instantiate a node with the given static parameters.
@@ -620,12 +622,13 @@ expandNodeInstDecl env nid =
               case nt of
 
                 DeclareNode nd ->
-                  let prof  = nodeProfile nd
-                      is    = nodeInputs prof
-                      prof' = prof { nodeInputs = is }
+                  let prof     = nodeProfile nd
+                      (cs,is') = inputBindersToParams (nodeInputs prof)
+                      prof'    = prof { nodeInputs = is' }
                   in evalNode env nd { nodeName = nodeInstName nid
                                      , nodeProfile = prof'
-                                     , nodeStaticInputs = nodeStaticInputs nd
+                                     , nodeStaticInputs =
+                                          nodeStaticInputs nd ++ cs
                                      } ps
 
                 DeclareNodeInst nd ->
@@ -818,11 +821,8 @@ getNodeInstProfile env (NodeInst c as) =
               case x of
                 InputBinder b ->
                   InputBinder b { binderType = ArrayType (binderType b) n }
-                InputConst i _ ->
-                   panic "getNodeInstProfile"
-                    [ "Unexpected InputConst"
-                    , "*** Location: " ++ showPP (range i)
-                    ]
+                InputConst i t -> InputConst i (ArrayType t n)
+
             bad = panic "getNodeInstProfile"
                     [ "Unexpecetd iterator instantiation."
                     , "*** Iterator: " ++ showPP it
@@ -999,6 +999,14 @@ evalDynExpr eloc env expr =
       Tuple es    -> Just es
       _           -> Nothing
 
+
+-- | Identify which of the inputs are really static constant parameters.
+inputBindersToParams :: [InputBinder] -> ([StaticParam],[InputBinder])
+inputBindersToParams = partitionEithers . map classify
+  where
+  classify ib = case ib of
+                  InputBinder _  -> Right ib
+                  InputConst i t -> Left (ConstParam i t)
 
 inputBindersToArgs ::
   [InputBinder] -> [Expression] -> ([StaticArg],[Expression])
