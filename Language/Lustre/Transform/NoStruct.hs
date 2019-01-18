@@ -1,8 +1,8 @@
 {-# Language OverloadedStrings #-}
 {- | The purpose of this module is to eliminate structured data.
 It should be called after constants have been eliminated, as we then
-know that shape of all data. We also assume that function calls have
-been names, see "Language.Lustre.Transform.NoStatic". -}
+know the shape of all data. We also assume that function calls have
+been named, see "Language.Lustre.Transform.NoStatic". -}
 module Language.Lustre.Transform.NoStruct
   (quickNoStruct, StructInfo, StructData(..)
   ) where
@@ -22,11 +22,11 @@ import Language.Lustre.Transform.NoStatic(CallSiteMap,CallSiteId)
 import Language.Lustre.Utils
 import Language.Lustre.Panic
 
-type SimpleCallSiteMap = Map Ident (Map CallSiteId [Ident])
+type SimpleCallSiteMap = Map OrigName (Map CallSiteId [OrigName])
 
 -- XXX: More flexible interface
 quickNoStruct :: (CallSiteMap,[TopDecl]) ->
-                 (Map Ident StructInfo, SimpleCallSiteMap, [TopDecl])
+                 (Map OrigName StructInfo, SimpleCallSiteMap, [TopDecl])
 quickNoStruct (csIn,ds) = ( envCollectedInfo env
                           , envSimpleCallSiteMap env
                           , catMaybes mbDs
@@ -39,7 +39,7 @@ data Env = Env
   { envStructured :: StructInfo
     -- ^ Structure infor for the current node. See "StructInfo"
 
-  , envCollectedInfo :: Map Ident StructInfo
+  , envCollectedInfo :: Map OrigName StructInfo
     -- ^ Struct info for already processed nodes.
 
   , envCallSiteMap :: CallSiteMap
@@ -49,8 +49,7 @@ data Env = Env
   , envSimpleCallSiteMap :: SimpleCallSiteMap
     -- ^ Call site info for already processed nodes.
 
-
-  , envStructs :: Map Name [(Ident,Type)]
+  , envStructs :: Map OrigName [(Ident,Type)]
     -- ^ Definitions for strcut types.
 
   , envCurModule :: Maybe ModName
@@ -124,7 +123,7 @@ The expressions in the map should be in evaluated form, which
 means that the strucutres data is at the "top" and then we have
 variables at the leaves.
 -}
-type StructInfo = Map Ident (StructData Ident)
+type StructInfo = Map OrigName (StructData OrigName)
 
 
 -- | An empty environment.
@@ -138,15 +137,8 @@ emptyEnv = Env
   , envCurModule  = Nothing
   }
 
--- | Lookup a name in the structure expansion environment.
--- Since constants are already eliminated, the only things that might
--- be exandable are local variables, which are never qualified.
-lkpStrName :: Name -> Env -> Maybe (StructData Ident)
-lkpStrName n env =
-  case n of
-    Unqual i -> Map.lookup i (envStructured env)
-    Qual {}  -> Nothing
-
+lkpStrName :: Name -> Env -> Maybe (StructData OrigName)
+lkpStrName n env = Map.lookup (nameOrigName n) (envStructured env)
 
 --------------------------------------------------------------------------------
 -- Evaluation of Top Level Declarations
@@ -160,7 +152,7 @@ evalTopDecl env td =
                               , "*** Declaration: " ++ showPP cd ]
     DeclareNode nd      -> (newEnv, Just (DeclareNode node))
       where (info,simp,node) = evalNode env nd
-            nm          = nodeName nd
+            nm          = identOrigName (nodeName nd)
             newEnv = env { envCollectedInfo =
                                       Map.insert nm info (envCollectedInfo env)
                          , envCallSiteMap = Map.delete nm (envCallSiteMap env)
@@ -182,24 +174,21 @@ addStructDef env td =
 -- | Add a struct definition to the environment. We add an unqialifeid name,
 -- and also a qualified one, if a qualifier was provided in the environemnt.
 doAddStructDef :: Env -> Ident -> [FieldType] -> Env
-doAddStructDef env i fs = env { envStructs = Map.insert (Unqual i) def
-                                           $ addQual
+doAddStructDef env i fs = env { envStructs = Map.insert (identOrigName i) def
                                            $ envStructs env }
   where
-  def     = [ (fieldName f, fieldType f) | f <- fs ]
-  addQual = undefined {-case envCurModule env of
-              Nothing -> id
-              Just m  -> Map.insert (Qual (identRange i) m (identText i)) def-}
+  def = [ (fieldName f, fieldType f) | f <- fs ]
 
 
 -- | Evaluate a node, expanding structured data.
-evalNode :: Env -> NodeDecl -> (StructInfo, Map CallSiteId [Ident], NodeDecl)
+evalNode :: Env -> NodeDecl -> (StructInfo, Map CallSiteId [OrigName], NodeDecl)
 evalNode env nd
   | null (nodeStaticInputs nd) =
     let prof = nodeProfile nd
         (inMap, inBs)   = expandBinders env (map inB (nodeInputs prof))
         (outMap, outBs) = expandBinders env (nodeOutputs prof)
         -- NOTE: it appears that inputs are not in scope in the outputs in Lus.
+        -- XXX: We are not being consistent about this
         newProf = NodeProfile { nodeInputs = map InputBinder inBs
                               , nodeOutputs = outBs
                               }
@@ -209,8 +198,9 @@ evalNode env nd
           case nodeDef nd of
             Nothing -> (info1, Map.empty, Nothing)
             Just body ->
-              let todoCS = Map.findWithDefault Map.empty (nodeName nd)
-                                                         (envCallSiteMap env)
+              let todoCS = Map.findWithDefault Map.empty
+                                  (identOrigName (nodeName nd))
+                                  (envCallSiteMap env)
                   (info, si, body1) = evalNodeBody newEnv todoCS body
               in (info, si, Just body1)
 
@@ -239,7 +229,7 @@ inB ib =
 -- | Evaluate a node's definition.  Expands the local variables,
 -- and rewrites the equations.
 evalNodeBody :: Env -> Map a [LHS Expression] -> NodeBody ->
-                  (StructInfo, Map a [Ident], NodeBody)
+                  (StructInfo, Map a [OrigName], NodeBody)
 evalNodeBody env csTodo body =
   ( newStructInfo
   , simpCS
@@ -266,7 +256,7 @@ expandType env ty =
   case ty of
     TypeRange r t -> (b, map (TypeRange r) ts)
       where (b,ts) = expandType env t
-    NamedType s | Just fs <- Map.lookup s (envStructs env) ->
+    NamedType s | Just fs <- Map.lookup (nameOrigName s) (envStructs env) ->
                       (True, concatMap (snd . expandType env . snd) fs)
     ArrayType t e ->
       ( True
@@ -296,7 +286,7 @@ toNormE env t0 es0 =
   go es ty =
    case ty of
      TypeRange _ t -> go es t
-     NamedType s | Just fs <- Map.lookup s (envStructs env) ->
+     NamedType s | Just fs <- Map.lookup (nameOrigName s) (envStructs env) ->
 
       let (es', outEs) = goMany es (map snd fs)
       in (es', SStruct s [ Field l e | ((l,_) ,e) <- zip fs outEs ])
@@ -318,10 +308,12 @@ toNormE env t0 es0 =
 -- The binders are all evaluated in the same environemnt (i.e., they should
 -- not affect each other).
 expandBinders ::
-  Env -> [Binder] -> (Map Ident (StructData Ident), [Binder])
-expandBinders env bs = (Map.fromList (catMaybes defs), concat newBs)
+  Env -> [Binder] -> (Map OrigName (StructData OrigName), [Binder])
+expandBinders env bs = undefined
+{-(Map.fromList (catMaybes defs), concat newBs)
   where
   (defs,newBs) = unzip (map (expandBinder env) bs)
+-}
 
 
 {- | Expand a binder to a list of binder (non-structured binder are left as is).
@@ -338,20 +330,21 @@ and a mapping:
 
 > x = [ x1, x2, x3 ]
 -}
-expandBinder :: Env -> Binder -> (Maybe (Ident,StructData Ident), [Binder])
+expandBinder ::
+  Env -> Binder -> (Maybe (OrigName,StructData OrigName), [Binder])
 expandBinder env b =
   case expandType env (binderType b) of
     (False,_)  -> (Nothing, [b])
-    (True, ts) -> (Just (binderDefines b, expr), bs)
+    (True, ts) -> (Just (identOrigName (binderDefines b), expr), bs)
       where
-      toBinder x t = Binder { binderDefines = x
+      toBinder x t = Binder { binderDefines = origNameToIdent x
                             , binderType    = t
                             , binderClock   = binderClock b
                             }
 
       bs = zipWith toBinder (nameVariants (binderDefines b)) ts
 
-      expr = toNormE env (binderType b) (map binderDefines bs)
+      expr = toNormE env (binderType b) (map (identOrigName . binderDefines) bs)
 
 {- | Given a base name, generate a bunch of different names.
 Assuming that the original name is unique, the variants should
@@ -359,8 +352,8 @@ also not clash with anything.
 XXX: Strictly speaking, this does not avoid name clashes,
 so in the future we should make up some alternative scheme.
 (the whole naming story could probably use some work). -}
-nameVariants :: Ident -> [Ident]
-nameVariants i = [ i { identText = t } | t <- nameVariantsText (identText i) ]
+nameVariants :: Ident -> [OrigName]
+nameVariants i = undefined -- [ i { identText = t } | t <- nameVariantsText (identText i) ]
 
 -- | Assuming that the original name is unique, the variants should
 -- also not clash with anything.
@@ -399,18 +392,18 @@ evalEqn env eqn =
                     _            -> False
 
 expandLHS :: Env -> LHS Expression -> [ LHS a ]
-expandLHS env lhs = [ LVar i | i <- expandLHS' env lhs ]
+expandLHS env lhs = [ LVar (origNameToIdent i) | i <- expandLHS' env lhs ]
 
 -- | Convert a possible complex LHS, to a simple (i.e., identifier) LHS
 -- on primitive types.
-expandLHS' :: Env -> LHS Expression -> [ Ident ]
+expandLHS' :: Env -> LHS Expression -> [ OrigName ]
 expandLHS' env lhs =
   map exprIdLhs (flatStructData (evalExpr env (lhsToExpr lhs)))
   where
   exprIdLhs e =
     case e of
-      ERange _ e1    -> exprIdLhs e1
-      Var (Unqual i) -> i
+      ERange _ e1 -> exprIdLhs e1
+      Var n       -> nameOrigName n
       _ -> panic "expandLHS" [ "LHS is not an identifier"
                              , "*** Expression: " ++ showPP e ]
 
@@ -507,7 +500,7 @@ evalStructUpdate env s x es =
           SStruct s
             [ Field l (Map.findWithDefault (toExpr v) l fldMap)
                                                       | Field l v <- fs ]
-          where toExpr = fmap (Var . Unqual)
+          where toExpr = fmap (Var . origNameToName)
 
 
         _ -> panic "evalExpr" [ "Unexpected value to update:"
@@ -587,7 +580,7 @@ evalExpr env expr =
 
     Var x -> case lkpStrName x env of
                Nothing -> SLeaf expr
-               Just e  -> fmap (Var . Unqual) e
+               Just e  -> fmap (Var . origNameToName) e
 
     Lit _ -> SLeaf expr
 
