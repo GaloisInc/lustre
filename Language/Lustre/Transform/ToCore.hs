@@ -10,7 +10,6 @@ import qualified Data.Map as Map
 import Data.Semigroup ( (<>) )
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Control.Monad.Fail
 import MonadLib
 
 import qualified Language.Lustre.AST  as P
@@ -91,8 +90,6 @@ evalType ty =
 --------------------------------------------------------------------------------
 type M = StateT St Id
 
-instance MonadFail M where
-    fail = error
 
 runProcessNode :: Map P.Name C.Expr -> M a -> a
 runProcessNode enumCs m = fst $ runId $ runStateT st m
@@ -314,7 +311,7 @@ evalEqn eqn =
             C.Bool True  -> pure []
             _ -> panic ("Constant in " ++ x) [ "*** Constant: " ++ show n ]
          C.Prim {} ->
-           do C.Var i <- nameExpr (C.Atom e1)
+           do ~(C.Var i) <- nameExpr (C.Atom e1)
               f i
               clearEqns
 
