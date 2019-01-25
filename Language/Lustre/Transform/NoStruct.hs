@@ -4,15 +4,16 @@ It should be called after constants have been eliminated, as we then
 know the shape of all data. We also assume that function calls have
 been named, see "Language.Lustre.Transform.NoStatic". -}
 module Language.Lustre.Transform.NoStruct
-  (quickNoStruct, StructInfo, StructData(..)
+  ( NosIn(..), NosOut(..)
+  , SimpleCallSiteMap, StructInfo, StructData(..)
+  , noStruct
   ) where
 
 import Data.Map(Map)
 import qualified Data.Map as Map
-import Data.Text(Text)
 import qualified Data.Text as Text
-import Data.Maybe(fromMaybe, catMaybes)
-import Data.List(genericDrop,genericReplicate,mapAccumL)
+import Data.Maybe(fromMaybe)
+import Data.List(genericDrop,genericReplicate)
 import Data.Semigroup ( (<>) )
 import Text.PrettyPrint((<+>), braces, brackets, parens)
 import MonadLib
@@ -23,22 +24,61 @@ import Language.Lustre.Transform.NoStatic(CallSiteMap,CallSiteId)
 import Language.Lustre.Utils
 import Language.Lustre.Panic
 
+-- | Information needed to perform the no-structure pass.
+data NosIn = NosIn
+  { nosiStructs   :: Map OrigName [(Ident,Type)]
+    -- ^ Structs from other modules
+
+  , nosiCallSites :: CallSiteMap
+    -- ^ Call sites information from the no-static pass
+
+  , nosiSeed      :: Int
+    -- ^ Name seed for fresh names
+  }
+
+data NosOut = NosOut
+  { nosoSeed      :: Int
+    -- ^ New seed, for use in later passes
+
+  , nosoExpanded  :: Map OrigName StructInfo
+    -- ^ Specifies how various identifiers got expanded
+
+  , nosoCallSites :: SimpleCallSiteMap
+    -- ^ Processed call sites.
+  }
+
+runNosM :: NosIn -> NosM a -> (a, NosOut)
+runNosM ni (NosM m) = (a, out)
+  where
+  (a,s) = runId $ runStateT rw $ runReaderT ro m
+
+  ro = RO { roStructs = nosiStructs ni
+          , roCallSiteTodo = nosiCallSites ni
+          }
+  rw = RW { rwNameSeed          = nosiSeed ni
+          , rwCollectedInfo     = Map.empty
+          , rwStructured        = Map.empty
+          , rwSimpleCallSiteMap = Map.empty
+          }
+
+  out = NosOut { nosoSeed       = rwNameSeed s
+               , nosoExpanded   = rwCollectedInfo s
+               , nosoCallSites  = rwSimpleCallSiteMap s
+               }
+
+
+
 type SimpleCallSiteMap = Map OrigName (Map CallSiteId [OrigName])
 
--- XXX: More flexible interface
-quickNoStruct :: (CallSiteMap,[TopDecl]) ->
-                 (Map OrigName StructInfo, SimpleCallSiteMap, [TopDecl])
-quickNoStruct (csIn,ds) = undefined
-{-
-  (env,mbDs) = mapAccumL evalTopDecl emptyEnv { envCallSiteMap = csIn } ds
-
-
- ( envCollectedInfo env
-                          , envSimpleCallSiteMap env
-                          , catMaybes mbDs
-                          )
+noStruct :: NosIn -> [TopDecl] -> ([TopDecl], NosOut)
+noStruct ni ds = runNosM ni (go [] ds)
   where
--}
+  go done todo = case todo of
+                  [] -> pure (reverse done)
+                  d : more -> evalTopDecl d $ \mb ->
+                                case mb of
+                                   Nothing -> go done more
+                                   Just d1 -> go (d1 : done) more
 
 
 data StructData a = SLeaf a
@@ -186,7 +226,7 @@ evalNodeBody csTodo body =
 expandType :: Map OrigName [(Ident,Type)] -> Type -> (Bool, [([SubName],Type)])
 expandType env ty =
   case ty of
-    TypeRange r t -> (b, [ (n,TypeRange r t) | (n,t) <- ts ])
+    TypeRange r t -> (b, [ (n,TypeRange r u) | (n,u) <- ts ])
       where (b,ts) = expandType env t
 
     -- Named types are either structs or enums.
@@ -198,10 +238,10 @@ expandType env ty =
       )
 
     ArrayType t e ->
-      ( True, [ (ArrEl i : n, t)
+      ( True, [ (ArrEl i : n, u)
                 | let done = snd (expandType env t)
                 , i      <- [ 0 .. exprToInteger e - 1 ]
-                , (n,ts) <- done
+                , (n,u) <- done
                 ]
       )
 
@@ -750,7 +790,6 @@ data RW = RW
     -- ^ Call site info for already processed nodes.
   }
 
-
 {- | Contains the expansions for variables of strucutred types.
 For example, if @x : T ^ 3@, then we shoud have a binding
 @x = [ x1, x2, x2 ]@.
@@ -783,8 +822,8 @@ newSubName b (p,t) = NosM $ sets $ \s ->
             }
   in (b1, s { rwNameSeed = 1 + n })
   where
-  newSubText t ps = Text.concat (t : map toText ps)
-  toText p = case p of
+  newSubText u ps = Text.concat (u : map toText ps)
+  toText q = case q of
                ArrEl n    -> Text.pack ("[" ++ show n ++ "]")
                StructEl f -> "." `Text.append` identText f
 
