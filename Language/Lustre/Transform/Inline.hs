@@ -1,4 +1,4 @@
-{-# Language OverloadedStrings #-}
+{-# Language OverloadedStrings, GeneralizedNewtypeDeriving, DataKinds #-}
 
 {- | This module inlines all functions at their call sites.
 Assumptions:
@@ -8,36 +8,33 @@ Assumptions:
   * Equations contan only simple (i.e., 'LVar') 'LHS's.
   * No constants
 -}
-module Language.Lustre.Transform.Inline (quickInlineCalls) where
+module Language.Lustre.Transform.Inline
+  (inlineCalls, InlineIn(..)
+  ) where
 
-import Data.Text(Text)
-import qualified Data.Text as Text
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.List(mapAccumL)
-import Data.Semigroup ( (<>) )
+import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.Utils
 
-
-quickInlineCalls :: [TopDecl] -> (AllRenamings,[TopDecl])
-quickInlineCalls = inlineCalls emptyEnv
-
-data Env = Env
-  { envNodes      :: Map Name NodeDecl
-    -- ^ Definitions for nodes that are in scope.
-
-  , envCurModule  :: Maybe Text
-    -- ^ Use this qualifier for the current module
+data InlineIn = InlineIn
+  { inlineSeed :: !Int        -- ^ Name seed for generating fresh names
+  , inlineEnv  :: [NodeDecl]
+    -- ^ Node delcarations from other module, which have already been linlined.
   }
 
-emptyEnv :: Env
-emptyEnv = Env { envNodes = Map.empty, envCurModule = Nothing }
+
+-- | Inline the calls from the given top declarations.  Resturns information
+-- about how things got renames, as well as new list of declarations.
+inlineCalls :: InlineIn -> [TopDecl] -> (AllRenamings,[TopDecl])
+inlineCalls ini ds = runInM ini (mapM inlineDecl ds)
+
 
 {- The plan:
 
@@ -97,37 +94,18 @@ let
 
 -}
 
--- | An "infinite" list of variations on a name
-nameVariants :: Ident -> [Ident]
-nameVariants i = i : [ i { identText = variant n } | n <- [ 1 :: Integer .. ] ]
-  where
-  base = identText i
-  variant n = base <> "_" <> Text.pack (show n)
-
-
 -- | A set of used up names.  When we generate new names, we look for names
 -- that are not in this set.
 type UsedNames = Set Ident
 
--- | Pick a variant of the given name that does not clash with anything in the
--- environment.  Also add the new name to the set of names to be avoided.
-freshName :: UsedNames -> Ident -> (UsedNames, Ident)
-freshName used i = (newUsed, name)
-  where
-  name : _  = [ j | j <- nameVariants i, not (j `Set.member` used) ]
-  newUsed   = Set.insert name used
-
-
 -- | Change the name of a binder to avoid name clasehs.
-freshBinder :: UsedNames -> Binder -> (UsedNames, Binder)
-freshBinder used b = (newUsed, newBinder)
-  where
-  (newUsed, newName)  = freshName used (binderDefines b)
-  newBinder           = b { binderDefines = newName }
+freshBinder :: UsedNames -> Binder -> InM Binder
+freshBinder used b = do n <- freshName used (binderDefines b)
+                        pure b { binderDefines = n }
 
 
--- | A mapping from old names, to their clash-avoiding versions.
-type Renaming = Map Ident Ident
+-- | A mapping from old names to their clash-avoiding versions.
+type Renaming = Map OrigName OrigName
 
 
 -- | Compute the renaming to be used when instantiating the given node.
@@ -135,12 +113,16 @@ computeRenaming ::
   UsedNames             {- ^ Dont't use these names -} ->
   [LHS Expression]      {- ^ LHS of call site -} ->
   NodeDecl              {- ^ Function being called -} ->
-  (UsedNames, Renaming, [LocalDecl], [Ident])
+  InM (Renaming, [LocalDecl], [OrigName])
   -- ^ new used, renaming of identifiers, new locals to add
   -- Last argument is a "call site id",  which is used for showing traces
   -- (i.e., a kind of inverse)
 computeRenaming used lhs nd =
-  (newUsed, renaming, map LocalVar newBidners, map lhsIdent lhs)
+  do newBinders <- mapM (freshBinder used) oldBinders
+     let renaming = Map.fromList $
+                      zipExact renOut (nodeOutputs prof) lhs ++
+                      zipExact renBind oldBinders newBinders
+     pure (renaming, map LocalVar newBinders, map lhsIdent lhs)
   where
   prof = nodeProfile nd
   def  = case nodeDef nd of
@@ -149,24 +131,21 @@ computeRenaming used lhs nd =
                         [ "The node has no definition."
                         , "*** Node: " ++ showPP nd ]
 
+
+  oldBinders            = map inputBinder (nodeInputs prof) ++
+                          map localBinder (nodeLocals def)
+
   lhsIdent l = case l of
-                 LVar i -> i
+                 LVar i -> identOrigName i
                  _      -> panic "computeRenaming"
                               [ "LHS is not a simple identifier."
                               , "*** LHS: " ++ showPP l ]
 
+  renOut b l            = (identOrigName (binderDefines b),   lhsIdent l)
+  renBind old new       = ( identOrigName (binderDefines old)
+                          , identOrigName (binderDefines new)
+                          )
 
-  oldBinders            = map inputBinder (nodeInputs prof) ++
-                          map localBinder (nodeLocals def)
-  (newUsed,newBidners)  = mapAccumL freshBinder used oldBinders
-
-
-  renOut b l            = (binderDefines b,   lhsIdent l)
-  renBind old new       = (binderDefines old, binderDefines new)
-
-  renaming              = Map.fromList $
-                            zipExact renOut (nodeOutputs prof) lhs ++
-                            zipExact renBind oldBinders newBidners
 
 inputBinder :: InputBinder -> Binder
 inputBinder ib =
@@ -182,7 +161,7 @@ localBinder :: LocalDecl -> Binder
 localBinder l = case l of
                  LocalVar b -> b
                  LocalConst cd ->
-                   panic "computeRenaming"
+                   panic "localBinder"
                      [ "Unexpected local constant."
                      , "Constants should have been eliminated by now."
                      , "*** Constant: " ++ showPP cd
@@ -191,11 +170,10 @@ localBinder l = case l of
 
 
 --------------------------------------------------------------------------------
--- Applying a renaming
+-- Applying a renaming, used when instantiatiating inlined functions.
 
--- | We dont visit constant expressions.
--- There shouldn't be any, and the renaming CURRENTLY should
--- contain any constants
+-- | We don't visit constant expressions, as they should contain no variables
+-- by this stage (i.e., they ought to be constant values).
 class Rename t where
   rename :: Renaming -> t -> t
 
@@ -206,33 +184,35 @@ instance Rename a => Rename (Maybe a) where
   rename su xs = rename su <$> xs
 
 instance Rename Ident where
-  rename su i = Map.findWithDefault i i su
+  rename su i = case Map.lookup (identOrigName i) su of
+                  Just n  -> origNameToIdent n
+                  Nothing -> i
 
 instance Rename Name where
-  rename su x = case x of
-                  Unqual i -> Unqual (rename su i)
-                  _        -> x
+  rename su x = case Map.lookup (nameOrigName x) su of
+                  Just n  -> origNameToName n
+                  Nothing -> x
 
 instance Rename Expression where
   rename su expr =
     case expr of
-      ERange r e -> ERange r (rename su e)
-      Var x      -> Var (rename su x)
-      Lit _      -> expr
+      ERange r e      -> ERange r (rename su e)
+      Var x           -> Var (rename su x)
+      Lit _           -> expr
 
-      e `When` ce -> rename su e `When` rename su ce
+      e `When` ce     -> rename su e `When` rename su ce
 
-      -- These are probably eliminated, but we define them as they make sense
-      Tuple es              -> Tuple (rename su es)
-      Array es              -> Array (rename su es)
-      Select e s            -> Select (rename su e) s
-      Struct x fs           -> Struct x (rename su fs)
-      UpdateStruct x y fs   -> UpdateStruct x (rename su y) (rename su fs)
-      WithThenElse e1 e2 e3 ->
-        WithThenElse e1 (rename su e2)  (rename su e3)
+      Merge i ms      -> Merge (rename su i) (rename su ms)
+      Call ni es      -> Call ni (rename su es)
 
-      Merge i ms -> Merge (rename su i) (rename su ms)
-      Call ni es -> Call ni (rename su es)
+      Tuple {}        -> bad "tuple"
+      Array {}        -> bad "array"
+      Select {}       -> bad "select"
+      Struct {}       -> bad "struct"
+      UpdateStruct {} -> bad "struct update"
+      WithThenElse {} -> bad "with-then-else"
+    where
+    bad x = panic "rename" [ "Unexepected " ++ x ]
 
 instance Rename e => Rename (Field e) where
   rename su (Field l e) = Field l (rename su e)
@@ -247,7 +227,7 @@ instance Rename a => Rename (LHS a) where
   rename su lhs =
     case lhs of
       LVar b      -> LVar (rename su b)
-      LSelect l s -> LSelect (rename su l) s
+      LSelect {}  -> panic "rename" [ "Unexepected LHS select" ]
 
 instance Rename Equation where
   rename su eqn =
@@ -263,24 +243,26 @@ instance Rename Equation where
 -- | Inline the "normal" calls in a node declaration.
 -- We assume that the calls in the definition have been already inlined,
 -- so we don't continue inlining recursively.
-inlineCallsNode :: Env -> NodeDecl -> (Map [Ident] (Name,Renaming), NodeDecl)
-inlineCallsNode env nd =
+inlineCallsNode ::
+  NodeDecl -> InM (Map [OrigName] (OrigName,Renaming), NodeDecl)
+inlineCallsNode nd =
   case nodeDef nd of
-    Nothing -> (Map.empty,nd)
+    Nothing -> pure (Map.empty,nd)
     Just def
       | null (nodeStaticInputs nd) ->
-        let prof = nodeProfile nd
-            used = Set.fromList $ map binderDefines $
-                      map inputBinder (nodeInputs prof) ++
-                      nodeOutputs prof ++
-                      map localBinder (nodeLocals def)
-            (newLocs,newEqs,rens) = renameEqns used (nodeEqns def)
-        in ( rens
-           , nd { nodeDef = Just NodeBody
-                                  { nodeLocals = newLocs ++ nodeLocals def
-                                  , nodeEqns   = newEqs
-                                  } }
-           )
+        do let prof = nodeProfile nd
+               used = Set.fromList $ map binderDefines $
+                         map inputBinder (nodeInputs prof) ++
+                         nodeOutputs prof ++
+                         map localBinder (nodeLocals def)
+           ready <- doneNodes
+           (newLocs,newEqs,rens) <- renameEqns ready used (nodeEqns def)
+           pure ( rens
+                , nd { nodeDef = Just NodeBody
+                                        { nodeLocals = newLocs ++ nodeLocals def
+                                        , nodeEqns   = newEqs
+                                        } }
+                )
 
       | otherwise ->
         panic "inlineCalls" [ "Unexpected static arguments."
@@ -293,29 +275,30 @@ inlineCallsNode env nd =
       Call (NodeInst (CallUser f) []) es -> Just (f,es)
       _             -> Nothing
 
-  renameEqns used eqns =
+  renameEqns ready used eqns =
     case eqns of
-      [] -> ([],[],Map.empty)
+      [] -> pure ([],[],Map.empty)
       eqn : more ->
         case eqn of
           Define ls e
             | Just (f,es) <- isCall e
-            , Just cnd    <- Map.lookup f (envNodes env)
-            , Just def    <- nodeDef cnd ->
-            let prof = nodeProfile cnd
-                (newUsed, su, newLocals,key) = computeRenaming used ls cnd
-                paramDef b p = Define [ LVar (rename su (binderDefines b)) ] p
-                paramDefs    = zipExact paramDef
+            , let fo = nameOrigName f
+            , Just cnd <- Map.lookup fo ready
+            , Just def <- nodeDef cnd ->
+            do let prof = nodeProfile cnd
+               (su, newLocals, key) <- computeRenaming used ls cnd
+               let paramDef b p = Define [LVar (rename su (binderDefines b))] p
+                   paramDefs    = zipExact paramDef
                                         (map inputBinder (nodeInputs prof)) es
-                thisEqns     = updateProps (rename su (nodeEqns def))
-                (otherDefs,otherEqns,rens) = renameEqns newUsed more
-            in ( newLocals ++ otherDefs
-               , paramDefs ++ thisEqns ++ otherEqns
-               , Map.insert key (f,su) rens
-               )
+                   thisEqns     = updateProps (rename su (nodeEqns def))
+               (otherDefs,otherEqns,rens) <- renameEqns ready used more
+               pure ( newLocals ++ otherDefs
+                    , paramDefs ++ thisEqns ++ otherEqns
+                    , Map.insert key (fo,su) rens
+                    )
 
-          _ -> let (otherDefs, otherEqns, rens) = renameEqns used more
-               in (otherDefs, eqn : otherEqns, rens)
+          _ -> do (otherDefs, otherEqns, rens) <- renameEqns ready used more
+                  pure (otherDefs, eqn : otherEqns, rens)
 
   updateProps eqns =
     let asmps = [ e | Assert _ e <- eqns ]
@@ -333,30 +316,73 @@ inlineCallsNode env nd =
                     _            -> eqn
     in map upd eqns
 
-inlineCalls :: Env -> [TopDecl] -> (AllRenamings,[TopDecl])
-inlineCalls env ds =
-  case ds of
-    [] -> (Map.empty,[])
-    DeclareNode nd : more ->
-      let (thisRens,nd1) = inlineCallsNode env nd
-          (allRens,nds)  = inlineCalls (addNodeDecl nd1 env) more
-      in ( Map.insert (nodeName nd) thisRens allRens
-         , DeclareNode nd1 : nds
-         )
-    d : more -> let (allRens, newDs) = inlineCalls env more
-                in (allRens, d : newDs)
-
-addNodeDecl :: NodeDecl -> Env -> Env
-addNodeDecl nd env = env { envNodes = Map.insert (Unqual i) nd
-                                    $ addQual $ envNodes env }
-  where
-  i = nodeName nd
-  addQual = undefined
+inlineDecl :: TopDecl -> InM TopDecl
+inlineDecl d =
+  case d of
+    DeclareNode nd ->
+      do (thisRens,nd1) <- inlineCallsNode nd
+         addNodeDecl thisRens nd1
+         pure (DeclareNode nd1)
+    _ -> pure d
 
 --------------------------------------------------------------------------------
 -- Resugar
 
--- | Maps (node name, call_site as list of ident, name in call, to local name)
-type AllRenamings = Map Ident (Map [Ident] (Name,Renaming))
+-- | Maps (node name, call_site as list of ident, function called, renamed)
+type AllRenamings = Map OrigName (Map [OrigName] (OrigName,Renaming))
+
+--------------------------------------------------------------------------------
+
+newtype InM a = InM { unInM :: StateT RW Id a }
+  deriving (Functor,Applicative,Monad)
+
+data RW = RW
+  { inlinedNodes :: !(Map OrigName NodeDecl)
+    -- ^ Nodes that have been processed already.
+
+  , renamings    :: AllRenamings
+    -- ^ How we renamed things, for propagating answers back.
+
+  , nameSeed     :: !Int
+    -- ^ A seed for generating names, when we need to rename things.
+  }
+
+runInM :: InlineIn -> InM a -> (AllRenamings, a)
+runInM ini m = (renamings s1, a)
+  where
+  (a,s1)    = runId $ runStateT s $ unInM m
+  s         = RW { inlinedNodes = Map.fromList (map entry (inlineEnv ini))
+                 , nameSeed     = inlineSeed ini
+                 , renamings    = Map.empty
+                 }
+  entry nd  = (identOrigName (nodeName nd), nd)
+
+-- | Add an inlined node to the collection of processed nodes.
+addNodeDecl ::
+  Map [OrigName] (OrigName,Renaming) {- ^ Info about inlined vars -} ->
+  NodeDecl {- ^ Inlined function -} ->
+  InM ()
+addNodeDecl rens nd = InM $
+  sets_ $ \s -> s { inlinedNodes = Map.insert i nd (inlinedNodes s)
+                  , renamings = Map.insert i rens (renamings s)  }
+  where i = identOrigName (nodeName nd)
+
+doneNodes :: InM (Map OrigName NodeDecl)
+doneNodes = InM $ inlinedNodes <$> get
+
+{- | Generate a new version of the given identifier, if it is in the set
+of used names. Since the new name is completely fresh, we don't need to
+add it to the set of used names, as the new name is guaranteed not to
+clash with anything. -}
+freshName :: UsedNames -> Ident -> InM Ident
+freshName used i
+  | not (i `Set.member` used) = pure i
+  | otherwise = 
+    do u <- InM $ sets $ \s -> let n = nameSeed s
+                               in (n, s { nameSeed = n + 1 })
+       let newON = (identOrigName i) { rnUID = u }
+       pure i { identResolved = Just newON }
+
+
 
 
