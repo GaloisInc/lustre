@@ -14,7 +14,6 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import Data.Maybe(fromMaybe)
 import Data.List(genericDrop,genericReplicate)
-import Data.Semigroup ( (<>) )
 import Text.PrettyPrint((<+>), braces, brackets, parens)
 import MonadLib
 
