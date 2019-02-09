@@ -5,8 +5,6 @@ module Language.Lustre.Transform.OrderDecls
   , quickOrderTopDecl
   , ScopeInfo(..)
   , InScope
-  , ResolveError(..)
-  , ResolveWarn(..)
   ) where
 
 import Data.Map (Map)
@@ -18,26 +16,19 @@ import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
 import Data.Foldable(traverse_)
 import MonadLib
-import Text.PrettyPrint as PP
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
+import Language.Lustre.Error
+import Language.Lustre.Monad
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Defines
 
 
--- | Resoolve some declaration in an empty scope, starting with seed 0,
--- and discarding the last seed.
+-- | Resoolve some declaration in an empty scope.
 -- Useful to quickly test things, or if we are just doing a once off module.
-quickOrderTopDecl ::
-  [TopDecl] {- ^ Declarations that need resolving -} ->
-  Either ResolveError ([SCC TopDecl], [ResolveWarn])
-    -- ^ Either an error on the left,
-    -- or the resolved declarations and some warnings.
-quickOrderTopDecl ds =
-  case orderTopDecls scp 0 ds of
-    Left err              -> Left err
-    Right (comps,warns,_) -> Right (comps,warns)
+quickOrderTopDecl :: [TopDecl] -> LustreM [TopDecl]
+quickOrderTopDecl ds = orderTopDecls scp ds
   where
   scp = ScopeInfo { resInScope = Map.empty
                   , resModule  = Nothing
@@ -46,21 +37,18 @@ quickOrderTopDecl ds =
 
 orderTopDecls ::
   ScopeInfo {- ^ Information of what's currently in scope -} ->
-  Int       {- ^ A seed for generating fresh names -} ->
   [TopDecl] {- ^ Declarations that need resolving -} ->
-  Either ResolveError
-         ([SCC TopDecl], [ResolveWarn], Int)
-    -- ^ Either an error on the left,
-    -- or the resolved declarations, some warnings, and a new name seed.
+  LustreM [TopDecl]
 
-orderTopDecls sci seed ds = runResolver sci seed (resolveGroup ds pure)
+orderTopDecls sci ds = runResolver sci (resolveGroup someRec ds pure)
 
 {- | Order an unordered set of declarations, in dependency order.
 The result is a dependency-ordered sequence of strongly-connected
 components, and the new names introduced by the declarations -}
 resolveGroup ::
-  (Defines a, Resolve a) => [a] -> ([SCC a] -> ResolveM b) -> ResolveM b
-resolveGroup ds k =
+  (Defines a, Resolve a) =>
+  (SCC a -> ResolveM [a]) -> [a] -> ([a] -> ResolveM b) -> ResolveM b
+resolveGroup check ds k =
   do (namess, scope) <- defsOf ds
      extendScope scope $
       do resolved <- zipWithM resolveWithFree namess ds
@@ -72,7 +60,7 @@ resolveGroup ds k =
              mkNode i (a,us) = (a, i, mapMaybe repFor (Set.toList us))
              comps = stronglyConnComp (zipWith mkNode keys resolved)
 
-         k comps
+         k . concat =<< traverse check comps
 
 
 -- | Resolve a list of declaratons, where the results of each are in scope
@@ -93,29 +81,42 @@ resolveOrderedGroup ds0 k = go [] ds0
 
 
 
--- | Check that none of the given SCC-s are recursive.
+-- | Check that a given SCC is not recursive.
 noRec :: (a -> Ident) {- ^ Pick an identifier to use for the given entry.
                            This is used for error reporting. -} ->
-          [SCC a] ->
-          ResolveM [a]
-noRec nm = traverse check
+          SCC a -> ResolveM [a]
+noRec nm x =
+  case x of
+    AcyclicSCC a -> pure [a]
+    CyclicSCC as -> reportError (BadRecursiveDefs (map (identOrigName . nm) as))
+
+
+{- | Check that only recursive SCCs are ones that feature only templates
+(i.e., node declarations with static parameters).
+The idea that this will auto resolve when we specialize the constants. -}
+someRec :: SCC TopDecl -> ResolveM [TopDecl]
+someRec x =
+  case x of
+    AcyclicSCC a -> pure [a]
+    CyclicSCC cs -> traverse (check cs) cs
   where
-  check x =
-    case x of
-      AcyclicSCC a -> pure a
-      CyclicSCC as -> reportError (BadRecursiveDefs (map (identOrigName . nm) as))
+  check cs d =
+    case d of
+      DeclareNode nd | not (null (nodeStaticInputs nd)) -> pure d
+      DeclareNodeInst nid | not (null (nodeInstStaticInputs nid)) -> pure d
+      _ -> reportError (BadRecursiveDefs (map topDName cs))
+
+  topDName d =
+    identOrigName $
+    case d of
+      DeclareNode nd -> nodeName nd
+      DeclareNodeInst nid -> nodeInstName nid
+      DeclareType td -> typeName td
+      DeclareConst cd -> constName cd
+      DeclareContract cd -> cdName cd
 
 
--- | Resolve an unordered group of declarations,
--- checking that none are recursive.
-resolveNonRecGroup ::
-  (Defines a, Resolve a) =>
-  (a -> Ident)              {- ^ Use this name when reporting errors -} ->
-  [a]                       {- ^ Group of declarations -} ->
-  ([a] -> ResolveM b)       {- ^ Run this continuation in the new scope -} ->
-  ResolveM b
-resolveNonRecGroup isRec xs k =
-  resolveGroup xs $ \comps -> k =<< noRec isRec comps
+
 
 
 
@@ -353,8 +354,8 @@ instance Resolve NodeBody where
     -- This matters if a local variable shadows a global constant.
     -- In that case the, the constant definitions would resolve correctly.
     -- XXX: It is a bit questionable if allowing such definitios is a good idea.
-    resolveNonRecGroup getIdent cs $ \cs1 ->
-    resolveNonRecGroup getIdent vs $ \vs1 ->
+    resolveGroup (noRec getIdent) cs $ \cs1 ->
+    resolveGroup (noRec getIdent) vs $ \vs1 ->
     do eqs <- traverse resolve (nodeEqns nb)
        pure NodeBody { nodeLocals = cs1 ++ vs1, nodeEqns = eqs }
     where
@@ -408,8 +409,8 @@ instance Resolve Contract where
 resolveContractItems :: [ContractItem] -> ResolveM [ContractItem]
 resolveContractItems cits =
   -- The comment on NodeBody also applies here
-  resolveNonRecGroup getIdent cis $ \cs ->
-  resolveNonRecGroup getIdent cvs $ \vs ->
+  resolveGroup (noRec getIdent) cis $ \cs ->
+  resolveGroup (noRec getIdent) cvs $ \vs ->
     do others <- traverse resolve (reverse cothers)
        pure (cs ++ vs ++ others)
   where
@@ -458,7 +459,7 @@ instance Resolve ContractDecl where
 
 newtype ResolveM a = ResolveM { _unResolveM ::
   WithBase Id
-    [ ExceptionT ResolveError -- state persists across exceptions
+    [ ExceptionT ResolverError -- state persists across exceptions
     , ReaderT    ScopeInfo
     , StateT     ResS
     ] a
@@ -476,44 +477,38 @@ data ScopeInfo = ScopeInfo
 -- | The "mutable" part of the resolver monad
 data ResS = ResS
   { resFree     :: !(Set OrigName)       -- ^ Free used variables
-  , resNextName :: !Int                 -- ^ To generate unique names
-  , resWarns    :: ![ResolveWarn]       -- ^ Warnings
+  , resNextName :: !NameSeed             -- ^ To generate unique names
+  , resWarns    :: ![ResolverWarning]    -- ^ Warnings
   }
 
 
--- | Various things that can go wrong when resolving names.
-data ResolveError = InvalidConstantExpression String
-                  | UndefinedName Name
-                  | AmbiguousName Name OrigName OrigName
-                  | RepeatedDefinitions [OrigName]
-                  | BadRecursiveDefs [OrigName]
-
--- | Potential problems, but not fatal.
-data ResolveWarn  = Shadows OrigName OrigName
-
 runResolver ::
   ScopeInfo ->
-  Int ->
   ResolveM a ->
-  Either ResolveError (a,[ResolveWarn],Int)
-runResolver r0 seed (ResolveM m) =
-  case mb of
-    Left err -> Left err
-    Right a  -> Right (a, resWarns finS, resNextName finS)
-  where
-  (mb,finS) = runId $ runStateT s0 $ runReaderT r0 $ runExceptionT m
+  LustreM a
+runResolver r0 (ResolveM m) =
+  do seed <- lustreNameSeed
+     let s0 = ResS { resFree     = Set.empty
+                   , resNextName = seed
+                   , resWarns    = []
+                   }
+         (mb,finS) = runId $ runStateT s0 $ runReaderT r0 $ runExceptionT m
 
-  s0 = ResS { resFree     = Set.empty
-            , resNextName = seed
-            , resWarns    = []
-            }
+     case mb of
+       Left err -> lustreError (ResolverError err)
+       Right a ->
+         do traverse_ (lustreWarning . ResolverWarning) (resWarns finS)
+            lustreSetNameSeed (resNextName finS)
+            pure a
+
+
 
 -- | Report the given error, aborting the analysis.
-reportError :: ResolveError -> ResolveM a
+reportError :: ResolverError -> ResolveM a
 reportError e = ResolveM (raise e)
 
 -- | Record a warning.
-addWarning :: ResolveWarn -> ResolveM ()
+addWarning :: ResolverWarning -> ResolveM ()
 addWarning w = ResolveM $ sets_ $ \s -> s { resWarns = w : resWarns s }
 
 -- | Record a use of the given name.
@@ -703,48 +698,6 @@ lkpDef ds th i = case Set.minView (Set.filter matches ds) of
                                        ]
   where
   matches j = rnThing j == th && identText (rnIdent j) == identText i
-
-
---------------------------------------------------------------------------------
-
-instance Pretty ResolveError where
-  ppPrec _ err =
-    case err of
-
-      InvalidConstantExpression x ->
-        "Construct" <+> backticks (text x) <+>
-          "may not appear in constant expressions."
-
-      UndefinedName x ->
-        located (range x)
-          [ "The name" <+> backticks (pp x) <+> "is undefined." ]
-
-      AmbiguousName x a b ->
-        located (range x)
-            [ "The name" <+> backticks (pp x) <+> "is ambiguous."
-            , block "It may refer to:" [ppOrig a, ppOrig b]
-            ]
-
-      RepeatedDefinitions xs ->
-        block "Multiple declaratoins for the same name:" (map ppOrig xs)
-
-      BadRecursiveDefs xs ->
-        block "Invalid recursive declarations:" (map ppOrig xs)
-
-    where
-    block x ys = nested x (bullets ys)
-    located r xs = block ("At" <+> pp r) xs
-
-ppOrig :: OrigName -> Doc
-ppOrig x = backticks (pp x) PP.<> ","
-                <+> "defined at" <+> pp (identRange (rnIdent x))
-
-
-instance Pretty ResolveWarn where
-  ppPrec _ warn =
-    case warn of
-      Shadows x y ->
-        ppOrig x <+> "shadows" <+> ppOrig y
 
 
 

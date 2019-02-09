@@ -16,6 +16,7 @@ import Data.Foldable(traverse_)
 import MonadLib
 
 import Language.Lustre.AST
+import Language.Lustre.Monad(NameSeed,nameSeedToInt,nextNameSeed)
 
 
 -- | Identifiers groupes by namespace
@@ -37,10 +38,10 @@ defNames = Set.unions . Map.elems
 
 
 getDefs :: Defines a =>
-  a               {- ^ Get definitions of this -} ->
-  Maybe ModName   {- ^ Where are we -} ->
-  Int             {- ^ A seed for unique names -} ->
-  (Defs, Int)     {- ^ Returns definitions and a new name seed -}
+  a                 {- ^ Get definitions of this -} ->
+  Maybe ModName     {- ^ Where are we -} ->
+  NameSeed          {- ^ A seed for unique names -} ->
+  (Defs, NameSeed)  {- ^ Returns definitions and a new name seed -}
 getDefs a mn n0 =
   ( Map.fromListWith Set.union (map one (defThings s))
   , defNextName s
@@ -58,7 +59,7 @@ newtype DefM a = DefM { unDefM ::
     ] a }
   deriving (Functor,Applicative,Monad)
 
-data DefS = DefS { defNextName :: !Int
+data DefS = DefS { defNextName :: !NameSeed
                  , defThings   :: [OrigName]
                  }
 
@@ -70,9 +71,9 @@ addDef x t = DefM $
            info = OrigName { rnModule  = m
                           , rnThing   = t
                           , rnIdent   = x
-                          , rnUID     = n }
+                          , rnUID     = nameSeedToInt n }
        in DefS { defThings   = info : defThings s
-               , defNextName = n + 1
+               , defNextName = nextNameSeed n
                }
 
 

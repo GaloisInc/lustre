@@ -30,7 +30,7 @@ NOTE: We do NOT name calls to primitives that return a single result
 -}
 
 module Language.Lustre.Transform.NoStatic
-  ( quickNoConst
+  ( noConst
   , CallSiteMap
   , CallSiteId, idFromRange, callSiteName
   ) where
@@ -44,22 +44,22 @@ import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
 
 import Language.Lustre.AST
+import Language.Lustre.Monad
 import qualified Language.Lustre.Semantics.Const as C
 import Language.Lustre.Semantics.Value
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Pretty
 
-
-
--- XXX
-quickNoConst ::
-  Bool -> [TopDecl] -> ( CallSiteMap, [TopDecl])
-quickNoConst expand ds = (envCallSiteMap env, reverse (readyDecls env))
-  where
-  env = evalTopDecls emptyEnv { expandNodeInsts = expand
-                              , nameCallSites   = True
-                              , envCurMod       = Nothing
-                              } ds
+-- | Currently assumes an empty environment.
+noConst :: [TopDecl] -> LustreM (CallSiteMap, [TopDecl])
+noConst ds =
+  do seed <- lustreNameSeed
+     let env = evalTopDecls (emptyEnv seed)
+                { expandNodeInsts = True
+                , nameCallSites   = True
+                , envCurMod       = Nothing
+                } ds
+     pure (envCallSiteMap env, reverse (readyDecls env))
 
 
 -- | Evaluate a top-level declaration.
@@ -125,15 +125,12 @@ data Env = Env
     -- ^ Types of the nodes that are in scope.
     -- This is used to determine how to name the call sites.
     -- It is also used to figure out which parameters are constants
-    -- when we call a functino.
+    -- when we call a function.
 
-  , nodeTemplateInfo :: Map OrigName ( [StaticParam]
-                                     , Either NodeProfile NodeInst
-                                     )
-    -- ^ Types for node templates.
-    -- Note that the 'NodeProfile's in the map are NOT evaluated, and should
-    -- be evaluated for each concrete instantiation.
-    -- This is used to determine how to name the call sites.
+  , nodeTemplates :: Map OrigName TopDecl
+    -- ^ Nodes with static parameters, used when we expand definitions.
+    -- These declarations are NOT evaluated, instead we make a new copy
+    -- for each instantiation.
 
   , typeAliases :: Map OrigName Type
     -- ^ Maps type names to evaluated types.
@@ -142,8 +139,28 @@ data Env = Env
     -- We also use this field when we are instantiating a node parameterized
     -- by a type:  the type parameters go in this map, temporarily.
 
-  , nodeTemplates :: Map OrigName TopDecl
-    -- ^ Nodes with static parameters, used when we expand definitions.
+  , envCurMod :: Maybe ModName
+    -- ^ Use this in the original name, when generating fresh top-level names.
+    -- (e.g., for naming instantiate things, or call sites).
+
+  , expandNodeInsts :: Bool
+    {- ^ Should we expand node instances, or leave them named at the
+        top level.  Note that we don't do any sharing at the moment,
+        so multiple identical instantiations would be simply copies
+        of each other.
+        NOTE: Later passes assumes that this is True
+    -}
+
+  , nameCallSites :: Bool
+    {- ^ Should we add explicit equations for each call site?
+       NOTE: Later passes assume that this is True
+    -}
+
+  , envNameInstSeed :: !NameSeed
+    -- ^ For generating names for function instantiations (not-expanded)
+
+  , envCurRange :: Maybe SourceRange
+    -- ^ Whereabouts are we
 
   , readyDecls    :: [TopDecl]
     -- ^ Declarations that we've already processed.
@@ -155,29 +172,14 @@ data Env = Env
     -- that name.  So, we should never have any remaining static
     -- arguments.
 
-  , expandNodeInsts :: Bool
-    {- ^ Should we expand node instances, or leave them named at the
-        top level.  Note that we don't do any sharing at the moment,
-        so multiple identical instantiations would be simply copies
-        of each other. -}
-
-  , nameCallSites :: Bool
-    {- ^ Should we add explicit equations for each call site? -}
-
-  , envNameInstSeed :: !Int
-    -- ^ For generating names for function instantiations (not-expanded)
-
-  , envCurRange :: Maybe SourceRange
-    -- ^ Wherreabouts are we
 
   , envCallSiteMap :: CallSiteMap
     {- ^ For each node, maps a range in the source to a call site.
     The call site is identified by the variables storing the results
-    of the call. -}
+    of the call.  This is useful so that we can propagate results from
+    later passes back to the calls they correspond to.
+    -}
 
-  , envCurMod :: Maybe ModName
-    -- ^ Named instantiations become new top-level declarations,
-    -- which is why we need to know the name of the current module.
   }
 
 inRange :: SourceRange -> Env -> Env
@@ -185,21 +187,43 @@ inRange r env = env { envCurRange = Just r }
 
 
 -- | Does not expand node instances
-emptyEnv :: Env
-emptyEnv = Env { cEnv = C.emptyEnv
-               , nodeInfo = Map.empty
-               , nodeTemplateInfo = Map.empty
-               , typeAliases = Map.empty
-               , nodeTemplates = Map.empty
-               , readyDecls = []
-               , nodeArgs = Map.empty
-               , expandNodeInsts = False
-               , nameCallSites = False
-               , envNameInstSeed = 0
-               , envCurRange = Nothing
-               , envCallSiteMap = Map.empty
-               , envCurMod = Nothing
-               }
+emptyEnv :: NameSeed -> Env
+emptyEnv seed =
+  Env { cEnv = C.emptyEnv
+      , nodeInfo = Map.empty
+      , typeAliases = Map.empty
+      , nodeTemplates = Map.empty
+      , readyDecls = []
+      , nodeArgs = Map.empty
+      , expandNodeInsts = False
+      , nameCallSites = False
+      , envNameInstSeed = seed
+      , envCurRange = Nothing
+      , envCallSiteMap = Map.empty
+      , envCurMod = Nothing
+      }
+
+lookupNodeTemplateInfo ::
+  OrigName -> Env -> Maybe ([StaticParam], Either NodeProfile NodeInst)
+lookupNodeTemplateInfo x env =
+  do temp <- Map.lookup x (nodeTemplates env)
+     case temp of
+       DeclareNode nd -> pure ( nodeStaticInputs nd ++ getConstParams p
+                              , Left p
+                              )
+         where p = nodeProfile nd
+
+       DeclareNodeInst nid ->
+         pure (nodeInstStaticInputs nid, Right (nodeInstDef nid))
+       it -> panic "lookupNodeTemplateInfo"
+               [ "Unexpected template for " ++ showPP x
+               , "*** Declaration:"
+               , showPP it
+               ]
+
+getConstParams :: NodeProfile -> [ StaticParam ]
+getConstParams p = [ ConstParam i t | InputConst i t <- nodeInputs p ]
+
 
 --------------------------------------------------------------------------------
 -- Evaluation of types
@@ -395,17 +419,14 @@ Nodes with static parameters are added to the template map, while "normal"
 nodes are evaluated and added to the declaration list. -}
 evalNodeDecl :: Env -> NodeDecl  -> Env
 evalNodeDecl env nd =
-  case nodeStaticInputs nd ++ constPs of
+  case nodeStaticInputs nd ++ getConstParams (nodeProfile nd) of
     [] -> evalNode env nd []
     ps -> env { nodeTemplates = Map.insert name (DeclareNode nd)
                                                 (nodeTemplates env)
-              , nodeTemplateInfo = Map.insert name (ps, Left (nodeProfile nd))
-                                                   (nodeTemplateInfo env)
               , nodeInfo = Map.insert name (nodeProfile nd) (nodeInfo env)
               }
   where
   name    = identOrigName (nodeName nd)
-  constPs = [ ConstParam i t | InputConst i t <- nodeInputs (nodeProfile nd) ]
 
 
 -- | Evaluate and instantiate a node with the given static parameters.
@@ -437,7 +458,7 @@ evalNode env nd args =
       -- This a strict field, so we can't put a panic there, so instead
       -- we just make up a very invalid value, which would hopefully be
       -- easy to spot, in case it get used accidentally.
-      env2      = env1 { envNameInstSeed = -77 }
+      env2      = env1 { envNameInstSeed = invalidNameSeed 77 }
 
       -- 4. Evaluate the equations in the body of a node.
       (eqs,newLs,insts,info,newS) =
@@ -551,8 +572,6 @@ evalNodeInstDecl env nid =
     [] -> evalNodeInst env nid []
     ps -> env { nodeTemplates = Map.insert name (DeclareNodeInst nid)
                                                 (nodeTemplates env)
-              , nodeTemplateInfo = Map.insert name (ps, Right (nodeInstDef nid))
-                                                   (nodeTemplateInfo env)
               }
   where
   name = identOrigName (nodeInstName nid)
@@ -564,8 +583,9 @@ evalNodeInst :: Env -> NodeInstDecl -> [StaticArg] -> Env
 evalNodeInst env nid args = addEvaluatedNodeInst envRet2 newInst
   where
   env0 = addStaticParams (nodeInstStaticInputs nid) args env
-  env1 = env0 { envNameInstSeed = -78 } -- Do not use! Bogus value for sanity.
-                                        -- (strict, so no error/undefined)
+  env1 = env0 { envNameInstSeed = invalidNameSeed 78 }
+            -- Do not use! Bogus value for sanity.
+            -- (strict, so no error/undefined)
 
   nameNodeInstDef (NodeInst f as) =
     case as of
@@ -730,7 +750,7 @@ getNodeInstProfile env (NodeInst c as) =
                             [ "Unknown profile for node:"
                             , "*** Node name: " ++ showPP f
                             ]
-        _ -> case Map.lookup (nameOrigName f) (nodeTemplateInfo env) of
+        _ -> case lookupNodeTemplateInfo (nameOrigName f) env of
                Just (ps,lrProf) ->
                  let env1 = addStaticParams ps as env
                  in case lrProf of
@@ -954,16 +974,17 @@ evalDynExpr eloc env expr =
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     Call f es ->
-      do let (cs,es0) =
-                case f of
-                  NodeInst (CallUser c) _ ->
-                    case Map.lookup (nameOrigName c) (nodeInfo env) of
-                       Just p  -> inputBindersToArgs (nodeInputs p) es
-                       Nothing -> panic "evalDynExpr"
-                                    [ "Missing node profile for function."
-                                    , "*** Function: " ++ showPP c
-                                    ]
-                  _ -> ([],es)
+      do (cs,es0) <-
+            case f of
+              NodeInst (CallUser c) _ ->
+                let nm = nameOrigName c
+                in case Map.lookup nm (nodeInfo env) of
+                     Just p  -> pure (inputBindersToArgs (nodeInputs p) es)
+                     Nothing -> panic "evalDynExpr"
+                                  [ "Missing node profile for function."
+                                  , "*** Function: " ++ showPP c
+                                  ]
+              _ -> pure ([],es)
          es' <- do  args <- mapM (evalDynExpr NestedExpr env) es0
                     pure $ case args of
                                  [ e ] | Just xs <- isTuple e -> xs
@@ -973,8 +994,8 @@ evalDynExpr eloc env expr =
                     pure $
                     case c of
                       CallUser i
-                        | let known = Map.lookup (nameOrigName i) (nodeArgs env)
-                        , Just ni <- known -> ni
+                        | Just ni <- Map.lookup (nameOrigName i) (nodeArgs env)
+                            -> ni
 
                       _ -> NodeInst c []
                   (NodeInst c as, _) ->
@@ -1193,17 +1214,18 @@ type M = WithBase Id [ ReaderT RO
                      ]
 
 runNameStatic ::
-  Int           {- ^ Start generating names using this seed -} ->
+  NameSeed      {- ^ Start generating names using this seed -} ->
   Maybe ModName {- ^ What module are we working on at the moment.
                      'Nothing' means use "global" module -} ->
   M a           {- ^ This is what we want to do -} ->
-  (a, [Binder], [ NodeInstDecl ], Map CallSiteId [LHS Expression], Int)
+  (a, [Binder], [ NodeInstDecl ], Map CallSiteId [LHS Expression], NameSeed)
   -- ^ result, new locals, new instances, call site info, new name seed
 runNameStatic seed cm m
-  | seed < 0   = panic "runNameStatic"
-                    [ "Incorrect use of `envNameInstSeed`"
-                    , "*** Negative seed: " ++ show seed
-                    ]
+  | not (isValidNameSeed seed) =
+      panic "runNameStatic"
+        [ "Incorrect use of `envNameInstSeed`"
+        , "*** Negative seed: " ++ show seed
+        ]
   | otherwise  = (a, newLocals rw1, reverse (instances rw1)
                  , csInfo rw1
                  , nameSeed rw1)
@@ -1215,7 +1237,7 @@ runNameStatic seed cm m
 type RO = Maybe ModName
 
 data RW = RW
-  { nameSeed    :: !Int               -- ^ Generate new names
+  { nameSeed    :: !NameSeed          -- ^ Generate new names
   , instances   :: [ NodeInstDecl ]   -- ^ Generated declarations
   , newLocals   :: [ Binder ]         -- ^ New locals to declare for 'funEqns'
   , funEqns     :: [ Equation ]       -- ^ Generated named function call sites
@@ -1259,13 +1281,13 @@ newIdent r md th = sets $ \s ->
                       , identPragmas  = []
                       , identResolved = Nothing
                       }
-      origN   = OrigName { rnUID    = uid
+      origN   = OrigName { rnUID    = nameSeedToInt uid
                          , rnModule = md
                          , rnIdent  = origI
                          , rnThing  = th
                          }
 
-      s1 = s { nameSeed = uid + 1 }
+      s1 = s { nameSeed = nextNameSeed uid }
   in s1 `seq` (origN, s1)
 
 

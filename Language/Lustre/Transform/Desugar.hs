@@ -15,8 +15,8 @@ import Language.Lustre.Pretty(pp)
 
 import Language.Lustre.Transform.OrderDecls(orderTopDecls)
 import Language.Lustre.Transform.NoStatic(quickNoConst,CallSiteId)
-import Language.Lustre.Transform.NoStruct(quickNoStruct,StructData(..))
-import Language.Lustre.Transform.Inline(quickInlineCalls)
+import Language.Lustre.Transform.NoStruct
+import Language.Lustre.Transform.Inline
 import Language.Lustre.Transform.ToCore(evalNodeDecl, getEnumInfo)
 
 import Language.Lustre.Panic
@@ -46,6 +46,9 @@ desugarNode decls mbN =
                    Just n -> "*** Name: " ++ show (pp n)
                ]
 
+reportDepError :: ResolveError -> a
+reportDepError = error . show
+
 -- | Computes the node in Core Lustre form given the declaratins from
 -- a single module and the name of a node; returns Nothing if the
 -- named node does not exist.
@@ -55,6 +58,10 @@ desugarNode' ::
   {- ^ Top level function; if empty, look for one tagged with IsMain -} ->
   Maybe (ModelInfo, C.Node)
 desugarNode' decls mbN =
+  do ordered            <- orderTopDecls decls
+     (csInfo, noStatic) <- noConst ordered
+     undefined
+
   do nd <- theNode
      let (varMp,core)  = evalNodeDecl enumInfo nd
          info = ModelInfo
@@ -123,6 +130,7 @@ desugarNode' decls mbN =
     where isMain eqn = case eqn of
                          P.IsMain _ -> True
                          _          -> False
+
 
 --------------------------------------------------------------------------------
 
