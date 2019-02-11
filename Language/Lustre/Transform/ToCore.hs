@@ -1,6 +1,7 @@
 {-# Language FlexibleInstances #-}
 {-# Language OverloadedStrings #-}
 {-# Language TypeSynonymInstances #-}
+-- | Translate siplified Lustre into the Core representation.
 module Language.Lustre.Transform.ToCore
   ( getEnumInfo, evalNodeDecl
   ) where
@@ -14,30 +15,37 @@ import MonadLib
 
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
+import Language.Lustre.Monad
 import Language.Lustre.Panic
 import Language.Lustre.Pretty(showPP)
 
 
 -- | Compute info about enums from some top-level declarations.
-getEnumInfo :: Maybe P.ModName -> [ P.TopDecl ] -> Map P.Name C.Expr
-getEnumInfo mbCur tds = foldr addDefs Map.empty enums
+-- The result maps the original names of enum constructors, to numeric
+-- expressions that should represent them.
+getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> Map P.OrigName C.Expr
+getEnumInfo tds = foldr addDefs Map.empty enums
   where
   enums = [ is | P.DeclareType
                  P.TypeDecl { P.typeDef = Just (P.IsEnum is) } <- tds ]
 
+  -- The constructors of an enum are represented by 0, 1, .. etc
   addDefs is m = foldr addDef m (zipWith mkDef is [ 0 .. ])
 
-  mkDef i n = (i, C.Atom (C.Lit (C.Int n)))
+  mkDef i n = (P.identOrigName i, C.Atom (C.Lit (C.Int n)))
 
-  addDef (i,n) = Map.insert (P.Unqual i) n . addQual i n
-
-  addQual i x = undefined
+  addDef (i,n) = Map.insert i n
 
 
 -- | Translate a node to core form, given information about enumerations.
 -- We also return a mapping from original name to core names for translating
 -- models back.
-evalNodeDecl :: Map P.Name C.Expr -> P.NodeDecl -> (Map P.Ident C.Ident, C.Node)
+evalNodeDecl ::
+  Map P.OrigName C.Expr {- ^ Enum constructor -> expr to represent it -} ->
+  P.NodeDecl          {- ^ Simplified source Lustre -} ->
+  LustreM (Map P.OrigName C.Ident, C.Node)
+    -- ^ Mapping from original names to core names, 
+    -- and a node translate to Core notation.
 evalNodeDecl enumCs nd
   | null (P.nodeStaticInputs nd)
   , Just def <- P.nodeDef nd =
@@ -88,16 +96,17 @@ evalType ty =
                          ]
 
 --------------------------------------------------------------------------------
-type M = StateT St Id
+type M = StateT St LustreM
 
 
-runProcessNode :: Map P.Name C.Expr -> M a -> a
-runProcessNode enumCs m = fst $ runId $ runStateT st m
+runProcessNode :: Map P.OrigName C.Expr -> M a -> LustreM a
+runProcessNode enumCs m =
+  do (a,_finS) <- runStateT st m
+     pure a
   where
   st = St { stLocalTypes = Map.empty
           , stSrcLocalTypes = Map.empty
           , stGlobEnumCons = enumCs
-          , stNameSeed = 1
           , stEqns = []
           , stAssertNames = []
           , stPropertyNames = []
@@ -109,16 +118,13 @@ data St = St
     -- ^ Types of local translated variables.
     -- These may change as we generate new equations.
 
-  , stSrcLocalTypes :: Map P.Ident C.CType
+  , stSrcLocalTypes :: Map P.OrigName C.CType
     -- ^ Types of local variables from the source.
     -- These shouldn't change.
 
-  , stGlobEnumCons  :: Map P.Name C.Expr
+  , stGlobEnumCons  :: Map P.OrigName C.Expr
     -- ^ Definitions for enum constants.
     -- Currently we assume that these would be int constants.
-
-  , stNameSeed :: !Int
-    -- ^ Used to generate names when we name sub-expressions
 
   , stEqns :: [C.Eqn]
     -- ^ Generated equations naming subcomponents.
@@ -133,7 +139,7 @@ data St = St
     -- ^ The names of the equatiosn corresponding to properties.
 
 
-  , stVarMap :: Map P.Ident C.Ident
+  , stVarMap :: Map P.OrigName C.Ident
     {- ^ Remembers what names we used for values in the core.
     This is so that when we can parse traces into their original names. -}
   }
@@ -147,7 +153,7 @@ getPropertyNames :: M [(P.PropName,C.Ident)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
-getEnumCons :: M (Map P.Name C.Expr)
+getEnumCons :: M (Map P.OrigName C.Expr)
 getEnumCons = stGlobEnumCons <$> get
 
 -- | Get the collection of local types.
@@ -155,7 +161,7 @@ getLocalTypes :: M (Map C.Ident C.CType)
 getLocalTypes = stLocalTypes <$> get
 
 -- | Get the types of the untranslated locals.
-getSrcLocalTypes :: M (Map P.Ident C.CType)
+getSrcLocalTypes :: M (Map P.OrigName C.CType)
 getSrcLocalTypes = stSrcLocalTypes <$> get
 
 -- | Record the type of a local.
@@ -166,18 +172,17 @@ addBinder :: C.Binder -> M ()
 addBinder (i C.::: t) = addLocal i t
 
 -- | Add a type for a declared local.
-addSrcLocal :: P.Ident -> C.CType -> M ()
+addSrcLocal :: P.OrigName -> C.CType -> M ()
 addSrcLocal x t = sets_ $ \s ->
   s { stSrcLocalTypes = Map.insert x t (stSrcLocalTypes s)
-    , stGlobEnumCons  = Map.delete (P.Unqual x) (stGlobEnumCons s)
+    , stGlobEnumCons  = Map.delete x (stGlobEnumCons s)
     }
 
 -- | Generate a fresh name with the given stemp
 newIdentFrom :: Text -> M C.Ident
-newIdentFrom stem = sets $ \s ->
-  let x = stNameSeed s
-      i = C.Ident (stem <> Text.pack (show x))
-  in (i, s { stNameSeed = 1 + stNameSeed s })
+newIdentFrom stem =
+  do x <- inBase newInt
+     pure (C.Ident (stem <> Text.pack (show x)))
 
 
 
@@ -229,11 +234,11 @@ addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 
 -- | Remember that a source variable got mapped to the given core variable.
-rememberMapping :: P.Ident -> C.Ident -> M ()
+rememberMapping :: P.OrigName -> C.Ident -> M ()
 rememberMapping x y =
   sets_ $ \s -> s { stVarMap = Map.insert x y (stVarMap s) }
 
-getVarMap :: M (Map P.Ident C.Ident)
+getVarMap :: M (Map P.OrigName C.Ident)
 getVarMap = stVarMap <$> get
 
 --------------------------------------------------------------------------------
@@ -261,10 +266,11 @@ evalBinder b =
                    C.Lit (C.Bool True) -> pure i1
                    _ -> pure (C.Prim C.Eq [ i1,e1 ])
      let t = evalType (P.binderType b) `C.On` c
-     addSrcLocal (P.binderDefines b) t
-     let x = P.binderDefines b
-         i = evalIdent x
-     rememberMapping x i
+     let xi = P.binderDefines b
+         i  = evalIdent xi
+         xo = P.identOrigName xi
+     addSrcLocal xo t
+     rememberMapping xo i
      pure (i C.::: t)
 
 -- | Translate an equation.
@@ -283,7 +289,7 @@ evalEqn eqn =
         [ P.LVar x ] ->
             do e1  <- evalExpr e
                tys <- getSrcLocalTypes
-               let t = case Map.lookup x tys of
+               let t = case Map.lookup (P.identOrigName x) tys of
                          Just ty -> ty
                          Nothing ->
                             panic "evalEqn" [ "Defining unknown variable:"
@@ -350,7 +356,7 @@ evalExpr expr =
 
     P.Var i ->
       do cons <- getEnumCons
-         case Map.lookup i cons of
+         case Map.lookup (P.nameOrigName i) cons of
            Just e -> pure e
            Nothing ->
              case i of
