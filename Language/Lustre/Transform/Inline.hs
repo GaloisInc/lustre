@@ -8,7 +8,7 @@ Assumptions:
   * Equations contan only simple (i.e., 'LVar') 'LHS's.
   * No constants
 -}
-module Language.Lustre.Transform.Inline (inlineCalls) where
+module Language.Lustre.Transform.Inline (inlineCalls, AllRenamings) where
 
 import Data.Set (Set)
 import qualified Data.Set as Set
