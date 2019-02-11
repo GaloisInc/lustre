@@ -1,4 +1,4 @@
-{-# Language OverloadedStrings #-}
+{-# Language OverloadedStrings, GeneralizedNewtypeDeriving, DataKinds #-}
 module Language.Lustre.TypeCheck.Monad where
 
 import Data.Set(Set)
@@ -10,12 +10,15 @@ import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
+import Language.Lustre.Monad (LustreM, LustreError(..))
+import qualified Language.Lustre.Monad as L
 import Language.Lustre.Panic
 
-runTC :: M a -> Either Doc a
-runTC (M m) = case runM m ro0 rw0 of
-                Left err -> Left err
-                Right (a,_) -> Right a
+-- | XXX: Parameterize so that we can startin in a non-empty environment.
+runTC :: M a -> LustreM a
+runTC m =
+  do (a,_finS) <- runStateT rw0 $ runReaderT ro0 $ unM m
+     pure a
   where
   ro0 = RO { roConstants  = Map.empty
            , roUserNodes  = Map.empty
@@ -27,17 +30,15 @@ runTC (M m) = case runM m ro0 rw0 of
            , roUnsafe     = False
            }
 
-  rw0 = RW { rwNextClockVar = 0
-           , rwClockVarSubst = Map.empty
-           , rwNextTVar = 0
+  rw0 = RW { rwClockVarSubst = Map.empty
            , rwTyVarSubst = Map.empty
            , rwCtrs = []
            }
 
 data Constraint = Subtype Type Type
-                | Arith1 Doc Type Type      -- op ^ in, out
+                | Arith1 Doc Type Type      -- ^ op, in, out
                 | Arith2 Doc Type Type Type -- ^ op, in1, in2, out
-                | CmpEq Doc Type Type       -- ^ op in1, in2
+                | CmpEq  Doc Type Type      -- ^ op, in1, in2
                 | CmpOrd Doc Type Type      -- ^ op, in1, in2
 
 -- | A single clock expression.
@@ -64,22 +65,12 @@ data CType      = CType { cType :: Type, cClock :: IClock }
 
 
 
-newtype M a = M { unM :: ReaderT RO
-                        (StateT  RW
-                        (ExceptionT Doc
-                         Id)) a }
-
-instance Functor M where
-  fmap f (M m) = M (fmap f m)
-
-instance Applicative M where
-  pure a        = M (pure a)
-  M mf <*> M ma = M (mf <*> ma)
-
-instance Monad M where
-  M ma >>= k    = M (ma >>= unM . k)
-
-
+newtype M a = M { unM ::
+  WithBase LustreM
+    [ ReaderT RO
+    , StateT  RW
+    ] a
+  } deriving (Functor,Applicative,Monad)
 
 data RO = RO
   { roConstants   :: Map OrigName (SourceRange, Type)
@@ -95,9 +86,7 @@ data RO = RO
 data IdentMode = InputIdent | NonInputIdent
 
 data RW = RW
-  { rwNextClockVar   :: !Int
-  , rwClockVarSubst  :: Map CVar IClock
-  , rwNextTVar       :: !Int
+  { rwClockVarSubst  :: Map CVar IClock
   , rwTyVarSubst     :: Map TVar Type   -- ^ tv equals
   , rwCtrs           :: [(Maybe SourceRange, Constraint)]
                         -- ^ delayed constraints
@@ -111,11 +100,11 @@ data NamedType = StructTy (Map Ident Type)  -- ^ The Ident's are just labels
 
 reportError :: Doc -> M a
 reportError msg =
-  M (do rs <- roCurRange <$> ask
-        let msg1 = case rs of
-                     [] -> msg
-                     l : _  -> "Type error at:" <+> pp l $$ msg
-        raise msg1)
+  M $ do rs <- roCurRange <$> ask
+         let msg1 = case rs of
+                      [] -> msg
+                      l : _  -> "Type error at:" <+> pp l $$ msg
+         inBase $ L.reportError $ TCError msg1
 
 notYetImplemented :: Doc -> M a
 notYetImplemented f =
@@ -294,8 +283,7 @@ checkUnsafeOk msg =
        [ "Unsafe call to:" <+> msg ]
 
 newClockVar :: M IClock
-newClockVar = M $ do n <- sets $ \rw -> let next = rwNextClockVar rw
-                                        in (next, rw { rwNextClockVar = next+1})
+newClockVar = M $ do n <- inBase L.newInt
                      pure (ClockVar (CVar n))
 
 
@@ -319,8 +307,7 @@ zonkClock c =
 
 
 newTVar :: M Type
-newTVar = M $ do n <- sets $ \rw -> let next = rwNextTVar rw
-                                    in (next, rw { rwNextTVar = next+1 })
+newTVar = M $ do n <- inBase L.newInt
                  pure (TVar (TV n))
 
 -- | Assumes that the type is tidied.  Note that tidying is shallow,

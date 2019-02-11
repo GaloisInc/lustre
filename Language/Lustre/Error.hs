@@ -12,6 +12,7 @@ import Language.Lustre.Pretty
 
 data LustreError =
     ResolverError ResolverError
+  | TCError Doc   -- ^ XXX
     deriving Show
 
 instance Exception LustreError

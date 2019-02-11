@@ -19,8 +19,7 @@ import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
-import Language.Lustre.Error
-import Language.Lustre.Monad (LustreM)
+import Language.Lustre.Monad (LustreM, LustreError(..),LustreWarning(..))
 import qualified Language.Lustre.Monad as L
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Defines

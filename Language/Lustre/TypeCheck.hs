@@ -6,12 +6,11 @@ import qualified Data.Set as Set
 import Control.Monad(when,unless,zipWithM_)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
-import Data.Graph(SCC(..))
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
-import Language.Lustre.Transform.OrderDecls
 import Language.Lustre.Panic
+import Language.Lustre.Monad(LustreM)
 import Language.Lustre.TypeCheck.Monad
 import Language.Lustre.TypeCheck.Constraint
 
@@ -20,21 +19,14 @@ type TypeError = Doc
 type TypeWarn  = Doc
 
 
-quickCheckDecls :: [TopDecl] -> Either TypeError ()
-quickCheckDecls ds =
-  case quickOrderTopDecl ds of
-    Left err           -> Left (pp err)
-    Right (ds1,_warns) -> runTC (go ds1) -- XXX: Don't ignore warnings
+-- | Assumes that the declarations are in dependency order.
+quickCheckDecls :: [TopDecl] -> LustreM ()
+quickCheckDecls ds = runTC (go ds)
   where
   go xs = case xs of
             [] -> pure ()
-            x : more -> checkTopDeclSCC x (go more)
+            x : more -> checkTopDecl x (go more)
 
-checkTopDeclSCC :: SCC TopDecl -> M a -> M a
-checkTopDeclSCC sc m =
-  case sc of
-    AcyclicSCC a -> checkTopDecl a m
-    CyclicSCC _  -> notYetImplemented "recursive nodes" -- XXX
 
 checkTopDecl :: TopDecl -> M a -> M a
 checkTopDecl td m =

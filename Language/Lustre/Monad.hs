@@ -11,6 +11,8 @@ module Language.Lustre.Monad
   , reportError
   , addWarning
   , getWarnings
+  , LustreError(..)
+  , LustreWarning(..)
 
     -- ** Access to the Name Seed
   , getNameSeed
