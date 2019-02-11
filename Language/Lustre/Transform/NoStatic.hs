@@ -53,7 +53,7 @@ import Language.Lustre.Pretty
 -- | Currently assumes an empty environment.
 noConst :: [TopDecl] -> LustreM (CallSiteMap, [TopDecl])
 noConst ds =
-  do seed <- lustreNameSeed
+  do seed <- getNameSeed
      let env = evalTopDecls (emptyEnv seed)
                 { expandNodeInsts = True
                 , nameCallSites   = True

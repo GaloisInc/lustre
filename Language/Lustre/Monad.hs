@@ -1,17 +1,26 @@
 {-# Language DataKinds, GeneralizedNewtypeDeriving #-}
+{-# Language MultiParamTypeClasses #-}
 -- | "Global" monad for Lustre processing.
 module Language.Lustre.Monad
   ( -- * The Lustre monad
-    lustreRun
+    runLustre
   , LustreConf(..)
   , LustreM
-  , lustreError
-  , lustreWarning
-  , lustreWarnings
-  , lustreNameSeed
-  , lustreSetNameSeed
-  , lustreSetVerbose
-  , lustreLog
+
+    -- ** Errors and Warnings
+  , reportError
+  , addWarning
+  , getWarnings
+
+    -- ** Access to the Name Seed
+  , getNameSeed
+  , setNameSeed
+  , newInt
+
+    -- ** Logging
+  , setVerbose
+  , logMessage
+
     -- * Name seeds
   , NameSeed
   , nextNameSeed
@@ -37,6 +46,9 @@ newtype LustreM a = LustreM
         , StateT     GlobalLustreState
         ] a
   } deriving (Functor,Applicative,Monad)
+
+instance BaseM LustreM LustreM where
+  inBase = id
 
 
 data GlobalLustreEnv = GlobalLustreEnv
@@ -82,8 +94,8 @@ data LustreConf = LustreConf
 
 -- | Execute a Lustre computation.
 -- May throw `LustreError`
-lustreRun :: LustreConf -> LustreM a -> IO a
-lustreRun conf m =
+runLustre :: LustreConf -> LustreM a -> IO a
+runLustre conf m =
   do let env = GlobalLustreEnv { luLogHandle = lustreLogHandle conf }
          st  = GlobalLustreState
                  { luNameSeed = case lustreInitialNameSeed conf of
@@ -98,36 +110,37 @@ lustreRun conf m =
        Right a  -> pure a
 
 -- | Log something, if we are verbose.
-lustreLog :: String -> LustreM ()
-lustreLog msg =
+logMessage :: String -> LustreM ()
+logMessage msg =
   LustreM $ do verb <- luVerbose <$> get
                when verb $
                   do h <- luLogHandle <$> ask
                      inBase (hPutStrLn h msg)
 
-lustreSetVerbose :: Bool -> LustreM ()
-lustreSetVerbose b = LustreM $ sets_ $ \s -> s { luVerbose = b }
+-- | Set verbosity. 'True' means enable logging.  Affect `lustreLog`.
+setVerbose :: Bool -> LustreM ()
+setVerbose b = LustreM $ sets_ $ \s -> s { luVerbose = b }
 
 -- | Abort further computation with the given error.
-lustreError :: LustreError -> LustreM a
-lustreError e = LustreM (raise e)
+reportError :: LustreError -> LustreM a
+reportError e = LustreM (raise e)
 
 -- | Record a warning.
-lustreWarning :: LustreWarning -> LustreM ()
-lustreWarning w =
+addWarning :: LustreWarning -> LustreM ()
+addWarning w =
   LustreM $ sets_ $ \s -> s { luWarnings = w : luWarnings s }
 
 -- | Get the warnings collected so far.
-lustreWarnings :: LustreM [LustreWarning]
-lustreWarnings = LustreM $ luWarnings <$> get
+getWarnings :: LustreM [LustreWarning]
+getWarnings = LustreM $ luWarnings <$> get
 
 -- | Get the current name seed.
-lustreNameSeed :: LustreM NameSeed
-lustreNameSeed = LustreM $ luNameSeed <$> get
+getNameSeed :: LustreM NameSeed
+getNameSeed = LustreM $ luNameSeed <$> get
 
 -- | Set the current name seed to something.
-lustreSetNameSeed :: NameSeed -> LustreM ()
-lustreSetNameSeed newSeed =
+setNameSeed :: NameSeed -> LustreM ()
+setNameSeed newSeed =
   LustreM $ sets_ $ \s ->
     let oldSeed = luNameSeed s
     in if nameSeedToInt oldSeed > nameSeedToInt newSeed
@@ -138,4 +151,15 @@ lustreSetNameSeed newSeed =
                 ]
          else s { luNameSeed = newSeed }
 
+
+-- | Use the name see to generate a new int.
+newInt :: LustreM Int
+newInt =
+  do seed <- getNameSeed
+     unless (isValidNameSeed seed) $
+       panic "newName" [ "Attempt ot generate a new name in invald context."
+                       , "*** Name seed hint: " ++ show seed
+                       ]
+     setNameSeed (nextNameSeed seed)
+     pure (nameSeedToInt seed)
 

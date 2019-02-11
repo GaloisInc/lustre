@@ -16,7 +16,7 @@ import Data.Foldable(traverse_)
 import MonadLib
 
 import Language.Lustre.AST
-import Language.Lustre.Monad(NameSeed,nameSeedToInt,nextNameSeed)
+import Language.Lustre.Monad
 
 
 -- | Identifiers groupes by namespace
@@ -40,41 +40,29 @@ defNames = Set.unions . Map.elems
 getDefs :: Defines a =>
   a                 {- ^ Get definitions of this -} ->
   Maybe ModName     {- ^ Where are we -} ->
-  NameSeed          {- ^ A seed for unique names -} ->
-  (Defs, NameSeed)  {- ^ Returns definitions and a new name seed -}
-getDefs a mn n0 =
-  ( Map.fromListWith Set.union (map one (defThings s))
-  , defNextName s
-  )
+  LustreM Defs
+getDefs a mn =
+  do (_,defs) <- runStateT [] $ runReaderT mn $ unDefM $ defines a
+     pure (Map.fromListWith Set.union (map one defs))
   where
   one i = (thingNS (rnThing i), Set.singleton i)
-  s0    = DefS { defNextName = n0, defThings = [] }
-  (_,s) = runM (unDefM (defines a)) mn s0
-
 
 newtype DefM a = DefM { unDefM ::
-  WithBase Id
+  WithBase LustreM
     [ ReaderT (Maybe ModName)
-    , StateT DefS
+    , StateT  [OrigName]
     ] a }
   deriving (Functor,Applicative,Monad)
 
-data DefS = DefS { defNextName :: !NameSeed
-                 , defThings   :: [OrigName]
-                 }
 
 addDef :: Ident -> Thing -> DefM ()
 addDef x t = DefM $
   do m <- ask
-     sets_ $ \s ->
-       let n    = defNextName s
-           info = OrigName { rnModule  = m
-                          , rnThing   = t
-                          , rnIdent   = x
-                          , rnUID     = nameSeedToInt n }
-       in DefS { defThings   = info : defThings s
-               , defNextName = nextNameSeed n
-               }
+     n <- inBase newInt
+     sets_ $ \is -> OrigName { rnModule  = m
+                             , rnThing   = t
+                             , rnIdent   = x
+                             , rnUID     = n } : is
 
 
 class Defines t where

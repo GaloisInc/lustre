@@ -20,7 +20,8 @@ import MonadLib
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Error
-import Language.Lustre.Monad
+import Language.Lustre.Monad (LustreM)
+import qualified Language.Lustre.Monad as L
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Defines
 
@@ -458,9 +459,8 @@ instance Resolve ContractDecl where
 --------------------------------------------------------------------------------
 
 newtype ResolveM a = ResolveM { _unResolveM ::
-  WithBase Id
-    [ ExceptionT ResolverError -- state persists across exceptions
-    , ReaderT    ScopeInfo
+  WithBase LustreM
+    [ ReaderT    ScopeInfo
     , StateT     ResS
     ] a
   } deriving (Functor,Applicative,Monad)
@@ -475,10 +475,8 @@ data ScopeInfo = ScopeInfo
   }
 
 -- | The "mutable" part of the resolver monad
-data ResS = ResS
-  { resFree     :: !(Set OrigName)       -- ^ Free used variables
-  , resNextName :: !NameSeed             -- ^ To generate unique names
-  , resWarns    :: ![ResolverWarning]    -- ^ Warnings
+newtype ResS = ResS
+  { resFree     :: Set OrigName       -- ^ Free used variables
   }
 
 
@@ -487,29 +485,19 @@ runResolver ::
   ResolveM a ->
   LustreM a
 runResolver r0 (ResolveM m) =
-  do seed <- lustreNameSeed
-     let s0 = ResS { resFree     = Set.empty
-                   , resNextName = seed
-                   , resWarns    = []
-                   }
-         (mb,finS) = runId $ runStateT s0 $ runReaderT r0 $ runExceptionT m
-
-     case mb of
-       Left err -> lustreError (ResolverError err)
-       Right a ->
-         do traverse_ (lustreWarning . ResolverWarning) (resWarns finS)
-            lustreSetNameSeed (resNextName finS)
-            pure a
+  do let s0 = ResS { resFree = Set.empty }
+     (a,_finS) <- runStateT s0 $ runReaderT r0 m
+     pure a
 
 
 
 -- | Report the given error, aborting the analysis.
 reportError :: ResolverError -> ResolveM a
-reportError e = ResolveM (raise e)
+reportError e = ResolveM $ inBase $ L.reportError $ ResolverError e
 
 -- | Record a warning.
 addWarning :: ResolverWarning -> ResolveM ()
-addWarning w = ResolveM $ sets_ $ \s -> s { resWarns = w : resWarns s }
+addWarning w = ResolveM $ inBase $ L.addWarning $ ResolverWarning w
 
 -- | Record a use of the given name.
 addUse :: OrigName -> ResolveM ()
@@ -534,8 +522,7 @@ defsOf as =
 
   defsOfOne a = ResolveM $
     do l <- resModule <$> ask
-       sets $ \s -> let (d,n) = getDefs a l (resNextName s)
-                    in (d, s { resNextName = n })
+       inBase (getDefs a l)
 
 -- | Extend the current scope for the duration of the given computation.
 -- The new entries shadow the existing ones.
