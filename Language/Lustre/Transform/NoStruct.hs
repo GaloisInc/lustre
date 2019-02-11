@@ -20,6 +20,7 @@ import MonadLib
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Transform.NoStatic(CallSiteMap,CallSiteId)
+import Language.Lustre.Monad
 import Language.Lustre.Utils
 import Language.Lustre.Panic
 
@@ -36,48 +37,42 @@ data NosIn = NosIn
   }
 
 data NosOut = NosOut
-  { nosoSeed      :: Int
-    -- ^ New seed, for use in later passes
-
-  , nosoExpanded  :: Map OrigName StructInfo
+  { nosoExpanded  :: Map OrigName StructInfo
     -- ^ Specifies how various identifiers got expanded
 
   , nosoCallSites :: SimpleCallSiteMap
     -- ^ Processed call sites.
   }
 
-runNosM :: NosIn -> NosM a -> (a, NosOut)
-runNosM ni (NosM m) = (a, out)
+runNosM :: NosIn -> NosM a -> LustreM (a, NosOut)
+runNosM ni (NosM m) =
+  do (a,s) <- runStateT rw $ runReaderT ro m
+     let out = NosOut { nosoExpanded   = rwCollectedInfo s
+                      , nosoCallSites  = rwSimpleCallSiteMap s
+                      }
+     pure (a, out)
   where
-  (a,s) = runId $ runStateT rw $ runReaderT ro m
-
   ro = RO { roStructs = nosiStructs ni
           , roCallSiteTodo = nosiCallSites ni
           }
-  rw = RW { rwNameSeed          = nosiSeed ni
-          , rwCollectedInfo     = Map.empty
+  rw = RW { rwCollectedInfo     = Map.empty
           , rwStructured        = Map.empty
           , rwSimpleCallSiteMap = Map.empty
           }
-
-  out = NosOut { nosoSeed       = rwNameSeed s
-               , nosoExpanded   = rwCollectedInfo s
-               , nosoCallSites  = rwSimpleCallSiteMap s
-               }
 
 
 
 type SimpleCallSiteMap = Map OrigName (Map CallSiteId [OrigName])
 
-noStruct :: NosIn -> [TopDecl] -> ([TopDecl], NosOut)
+noStruct :: NosIn -> [TopDecl] -> LustreM ([TopDecl], NosOut)
 noStruct ni ds = runNosM ni (go [] ds)
   where
   go done todo = case todo of
-                  [] -> pure (reverse done)
-                  d : more -> evalTopDecl d $ \mb ->
-                                case mb of
-                                   Nothing -> go done more
-                                   Just d1 -> go (d1 : done) more
+                   [] -> pure (reverse done)
+                   d : more -> evalTopDecl d $ \mb ->
+                                 case mb of
+                                    Nothing -> go done more
+                                    Just d1 -> go (d1 : done) more
 
 
 data StructData a = SLeaf a
@@ -761,9 +756,10 @@ evalSlice s = ArraySlice { arrayStart = exprToInteger (arrayStart s)
 
 --------------------------------------------------------------------------------
 
-newtype NosM a = NosM { unNosM :: WithBase Id [ ReaderT RO
-                                              , StateT  RW
-                                              ] a }
+newtype NosM a = NosM { unNosM :: WithBase LustreM
+                                     [ ReaderT RO
+                                     , StateT  RW
+                                     ] a }
   deriving (Functor,Applicative,Monad)
 
 data RO = RO
@@ -776,10 +772,7 @@ data RO = RO
   }
 
 data RW = RW
-  { rwNameSeed          :: !Int
-    -- ^ A seed for generating unique names.
-
-  , rwCollectedInfo     :: !(Map OrigName StructInfo)
+  { rwCollectedInfo     :: !(Map OrigName StructInfo)
     -- ^ Struct info for already processed nodes.
 
   , rwStructured        :: !StructInfo
@@ -802,24 +795,22 @@ type StructInfo = Map OrigName (StructData OrigName)
 
 -- | Make a new binder, naming a sub-component of the given binder.
 newSubName :: Binder -> ([SubName],Type) -> NosM Binder
-newSubName b (p,t) = NosM $ sets $ \s ->
-  let n       = rwNameSeed s
-      oldName = binderDefines b
-      newText = newSubText (identText oldName) p
-      newName = OrigName
-                  { rnUID     = n
-                  , rnModule  = Nothing
-                  , rnIdent   = oldName { identText     = newText
-                                        , identResolved = Nothing }
-                  , rnThing   = AVal
-                  }
+newSubName b (p,t) = NosM $
+  do n <- inBase newInt
+     let oldName = binderDefines b
+         newText = newSubText (identText oldName) p
+         newName = OrigName
+                     { rnUID     = n
+                     , rnModule  = Nothing
+                     , rnIdent   = oldName { identText     = newText
+                                           , identResolved = Nothing }
+                     , rnThing   = AVal
+                     }
 
-      b1 = Binder
-            { binderDefines = origNameToIdent newName
-            , binderType    = t
-            , binderClock   = binderClock b
-            }
-  in (b1, s { rwNameSeed = 1 + n })
+     pure Binder { binderDefines = origNameToIdent newName
+                 , binderType    = t
+                 , binderClock   = binderClock b
+                 }
   where
   newSubText u ps = Text.concat (u : map toText ps)
   toText q = case q of

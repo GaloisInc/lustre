@@ -19,7 +19,8 @@ import MonadLib
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
-import Language.Lustre.Monad (LustreM, LustreError(..),LustreWarning(..))
+import Language.Lustre.Monad (LustreM, LustreError(..), ResolverError(..)
+                             , LustreWarning(..), ResolverWarning(..))
 import qualified Language.Lustre.Monad as L
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Defines
@@ -491,11 +492,11 @@ runResolver r0 (ResolveM m) =
 
 
 -- | Report the given error, aborting the analysis.
-reportError :: ResolverError -> ResolveM a
+reportError :: L.ResolverError -> ResolveM a
 reportError e = ResolveM $ inBase $ L.reportError $ ResolverError e
 
 -- | Record a warning.
-addWarning :: ResolverWarning -> ResolveM ()
+addWarning :: L.ResolverWarning -> ResolveM ()
 addWarning w = ResolveM $ inBase $ L.addWarning $ ResolverWarning w
 
 -- | Record a use of the given name.
