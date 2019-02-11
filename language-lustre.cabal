@@ -25,6 +25,7 @@ library
                        Language.Lustre.Core,
                        Language.Lustre.Utils,
                        Language.Lustre.ModelState,
+                       Language.Lustre.Driver,
 
                        Language.Lustre.TypeCheck,
                        Language.Lustre.TypeCheck.Constraint,

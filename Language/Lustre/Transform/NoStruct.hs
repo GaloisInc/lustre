@@ -31,9 +31,6 @@ data NosIn = NosIn
 
   , nosiCallSites :: CallSiteMap
     -- ^ Call sites information from the no-static pass
-
-  , nosiSeed      :: Int
-    -- ^ Name seed for fresh names
   }
 
 data NosOut = NosOut

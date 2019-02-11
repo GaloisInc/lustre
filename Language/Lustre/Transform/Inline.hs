@@ -8,9 +8,7 @@ Assumptions:
   * Equations contan only simple (i.e., 'LVar') 'LHS's.
   * No constants
 -}
-module Language.Lustre.Transform.Inline
-  (inlineCalls, InlineIn(..)
-  ) where
+module Language.Lustre.Transform.Inline (inlineCalls) where
 
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -19,20 +17,16 @@ import qualified Data.Map as Map
 import MonadLib
 
 import Language.Lustre.AST
+import Language.Lustre.Monad
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.Utils
 
-data InlineIn = InlineIn
-  { inlineSeed :: !Int        -- ^ Name seed for generating fresh names
-  , inlineEnv  :: [NodeDecl]
-    -- ^ Node delcarations from other module, which have already been linlined.
-  }
-
-
 -- | Inline the calls from the given top declarations.  Resturns information
 -- about how things got renames, as well as new list of declarations.
-inlineCalls :: InlineIn -> [TopDecl] -> (AllRenamings,[TopDecl])
+inlineCalls :: [NodeDecl] {- ^ Already inline decls from environment -} ->
+               [TopDecl]  {- ^ More decls to process -} ->
+               LustreM (AllRenamings,[TopDecl])
 inlineCalls ini ds = runInM ini (mapM inlineDecl ds)
 
 
@@ -333,7 +327,7 @@ type AllRenamings = Map OrigName (Map [OrigName] (OrigName,Renaming))
 
 --------------------------------------------------------------------------------
 
-newtype InM a = InM { unInM :: StateT RW Id a }
+newtype InM a = InM { unInM :: StateT RW LustreM a }
   deriving (Functor,Applicative,Monad)
 
 data RW = RW
@@ -342,17 +336,14 @@ data RW = RW
 
   , renamings    :: AllRenamings
     -- ^ How we renamed things, for propagating answers back.
-
-  , nameSeed     :: !Int
-    -- ^ A seed for generating names, when we need to rename things.
   }
 
-runInM :: InlineIn -> InM a -> (AllRenamings, a)
-runInM ini m = (renamings s1, a)
+runInM :: [NodeDecl] -> InM a -> LustreM (AllRenamings, a)
+runInM ini m =
+  do (a,s1) <- runStateT s $ unInM m
+     pure (renamings s1, a)
   where
-  (a,s1)    = runId $ runStateT s $ unInM m
-  s         = RW { inlinedNodes = Map.fromList (map entry (inlineEnv ini))
-                 , nameSeed     = inlineSeed ini
+  s         = RW { inlinedNodes = Map.fromList (map entry ini)
                  , renamings    = Map.empty
                  }
   entry nd  = (identOrigName (nodeName nd), nd)
@@ -377,9 +368,8 @@ clash with anything. -}
 freshName :: UsedNames -> Ident -> InM Ident
 freshName used i
   | not (i `Set.member` used) = pure i
-  | otherwise = 
-    do u <- InM $ sets $ \s -> let n = nameSeed s
-                               in (n, s { nameSeed = n + 1 })
+  | otherwise =
+    do u <- InM (inBase newInt)
        let newON = (identOrigName i) { rnUID = u }
        pure i { identResolved = Just newON }
 
