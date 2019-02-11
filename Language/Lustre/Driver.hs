@@ -16,6 +16,8 @@ quickDeclsToCore :: [TopDecl] -> LustreM todo
 quickDeclsToCore ds =
   do ds1 <- quickOrderTopDecl ds
      quickCheckDecls ds1 -- XXX: only if enabled
+                         -- XXX: Currently parts of TC assume that constats
+                         -- have been evaluated?
      (csMap,ds2) <- noConst ds1
      let nosIn = NosIn
                    { nosiStructs   = Map.empty
