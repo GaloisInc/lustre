@@ -41,13 +41,13 @@ data NosOut = NosOut
     -- ^ Processed call sites.
   }
 
-runNosM :: NosIn -> NosM a -> LustreM (a, NosOut)
+runNosM :: NosIn -> NosM a -> LustreM (NosOut, a)
 runNosM ni (NosM m) =
   do (a,s) <- runStateT rw $ runReaderT ro m
      let out = NosOut { nosoExpanded   = rwCollectedInfo s
                       , nosoCallSites  = rwSimpleCallSiteMap s
                       }
-     pure (a, out)
+     pure (out, a)
   where
   ro = RO { roStructs = nosiStructs ni
           , roCallSiteTodo = nosiCallSites ni
@@ -61,7 +61,7 @@ runNosM ni (NosM m) =
 
 type SimpleCallSiteMap = Map OrigName (Map CallSiteId [OrigName])
 
-noStruct :: NosIn -> [TopDecl] -> LustreM ([TopDecl], NosOut)
+noStruct :: NosIn -> [TopDecl] -> LustreM (NosOut, [TopDecl])
 noStruct ni ds = runNosM ni (go [] ds)
   where
   go done todo = case todo of

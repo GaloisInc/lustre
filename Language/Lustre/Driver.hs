@@ -21,7 +21,7 @@ quickDeclsToCore ds =
                    { nosiStructs   = Map.empty
                    , nosiCallSites = csMap
                    }
-     (ds3,nosOut) <- noStruct nosIn ds2
+     (nosOut,ds3) <- noStruct nosIn ds2
      (rens,ds4)   <- inlineCalls [] ds3
      undefined
 
