@@ -35,7 +35,11 @@ runFromFile file =
   do a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
-         do (_,nd) <- runLustre conf (quickNodeToCore Nothing ds)
+         do (ws,nd) <- runLustre conf $
+                         do (_,nd) <- quickNodeToCore Nothing ds
+                            warns  <- getWarnings
+                            pure (warns,nd)
+            mapM_ showWarn ws
             runNodeIO nd
        _ -> hPutStrLn stderr "We don't support packages for the moment."
    `catches`
@@ -44,6 +48,7 @@ runFromFile file =
      ]
   where
   showErr e = hPrint stderr (pp e)
+  showWarn w = hPrint stderr (pp w)
 
 
 runNodeIO :: Node -> IO ()

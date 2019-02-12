@@ -7,6 +7,7 @@ module Language.Lustre.Transform.OrderDecls
   , InScope
   ) where
 
+import Data.Text(Text)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set(Set)
@@ -466,7 +467,7 @@ newtype ResolveM a = ResolveM { _unResolveM ::
   } deriving (Functor,Applicative,Monad)
 
 -- | What's in scope for each module.
-type InScope = Map (Maybe ModName) (Map NameSpace OrigName)
+type InScope = Map (Maybe ModName) (Map NameSpace (Map Text OrigName))
 
 -- | The "scoped" part of the resolver monad
 data ScopeInfo = ScopeInfo
@@ -515,10 +516,15 @@ defsOf as =
      mo  <- ResolveM (resModule <$> ask)
      pure (map defNames ds, Map.singleton mo mp)
   where
-  check xs =
-    case Set.minView xs of
-      Just (a,more) | Set.null more -> pure a
-      _ -> reportError (RepeatedDefinitions (Set.toList xs))
+  check xs = fmap Map.fromList
+           $ mapM isOne
+           $ Map.elems
+           $ Map.fromListWith (++)
+             [ ((rnModule x, origNameTextName x), [x]) | x <- Set.toList xs ]
+
+  isOne xs = case xs of
+               [a] -> pure (origNameTextName a, a)
+               _   -> reportError (RepeatedDefinitions xs)
 
   defsOfOne a = ResolveM $
     do l <- resModule <$> ask
@@ -530,7 +536,7 @@ extendScope :: InScope -> ResolveM a -> ResolveM a
 extendScope ds (ResolveM m) =
   do ro <- ResolveM ask
      let new = shadowScope ds (resInScope ro)
-     traverse_ (traverse_ reportShadow) (gotShadowed new)
+     traverse_ (traverse_ (traverse_ reportShadow)) (gotShadowed new)
      a <- ResolveM (local ro { resInScope = newScope new } m)
      -- remove uses of the locally added variables as they are not free
      let isHere x = isJust $ do is <- Map.lookup (rnModule x) ds
@@ -555,14 +561,15 @@ extendScope ds (ResolveM m) =
 
     where
     mb = do ids <- Map.lookup (rnModule old) ds
-            Map.lookup (thingNS (rnThing old)) ids
+            nms <- Map.lookup (thingNS (rnThing old)) ids
+            Map.lookup (origNameTextName old) nms
 
 
 
 -- | Extend the definitions in the second scope with the first.
 -- New entries in the same namespace "shadow" existing ones.
 shadowScope :: InScope -> InScope -> WithShadows InScope
-shadowScope = joinWith joinThings
+shadowScope = joinWith (joinWith joinThings)
   where
   joinWith :: (Ord k, Ord k1) =>
                 ShadowFun (Map k v) -> ShadowFun (Map k1 (Map k v))
@@ -574,11 +581,20 @@ shadowScope = joinWith joinThings
 
   noShadow m = fmap (\a -> WS { newScope = a, gotShadowed = Map.empty }) m
 
-  joinThings :: ShadowFun (Map NameSpace OrigName)
+  joinThings :: ShadowFun (Map Text OrigName)
   joinThings as bs =
     WS { newScope    = Map.union as bs
        , gotShadowed = Map.intersectionWith (\_ old -> old) as bs
        }
+
+
+{-
+  joinThings :: ShadowFun (Map NameSpace (Set OrigName))
+  joinThings as bs =
+    WS { newScope    = Map.unionWith Set.union as bs
+       , gotShadowed = Map.intersectionWith (\_ old -> old) as bs
+       }
+-}
 
 
 data WithShadows a = WS { newScope :: a, gotShadowed :: a }
@@ -648,10 +664,13 @@ resolveIdent = resolveIdentIn Nothing
 inferIdentIn :: Maybe ModName -> Ident -> ResolveM Ident
 inferIdentIn mb i =
   do mb1 <- lkpIdent mb AConst i
-     mb2 <- lkpIdent mb AVal  i
+     mb2 <- lkpIdent mb AVal   i
      case (mb1,mb2) of
        (Nothing, Nothing) -> reportError (UndefinedName (asName mb i))
-       (Just p, Just q)   -> reportError (AmbiguousName (asName mb i) p q)
+       (Just p, Just q)
+          | p /= q    -> reportError (AmbiguousName (asName mb i) p q)
+          | otherwise -> do addUse p
+                            pure i { identResolved = Just p }
        (Just rn,Nothing)  -> do addUse rn
                                 pure i { identResolved = Just rn }
        (Nothing, Just rn) -> do addUse rn
@@ -671,9 +690,8 @@ lkpIdent :: Maybe ModName -> Thing -> Ident -> ResolveM (Maybe OrigName)
 lkpIdent loc th i =
   do scope <- ResolveM (resInScope <$> ask)
      pure $ do defs   <- Map.lookup loc scope
-               nm     <- Map.lookup (thingNS th) defs
-               guard (identText i == identText (rnIdent nm))
-               pure nm
+               nms    <- Map.lookup (thingNS th) defs
+               Map.lookup (identText i) nms
 
 -- | Resolve a name in a defining position.
 lkpDef :: Set OrigName -> Thing -> Ident -> Ident

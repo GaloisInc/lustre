@@ -84,6 +84,7 @@ instance Pretty ResolverError where
 ppOrig :: OrigName -> Doc
 ppOrig x = backticks (pp x) PP.<> ","
                 <+> "defined at" <+> pp (identRange (rnIdent x))
+                <+> parens ("unqiue" <+> pp (rnUID x))
 
 
 instance Pretty ResolverWarning where

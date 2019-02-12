@@ -144,6 +144,10 @@ origNameToIdent d = (rnIdent d) { identResolved = Just d }
 origNameToName :: OrigName -> Name
 origNameToName = Unqual . origNameToIdent
 
+-- | The textual name of an original name, without module.
+origNameTextName :: OrigName -> Text
+origNameTextName n = identText (rnIdent n)
+
 instance HasRange OrigName where
   range = range . rnIdent
 
