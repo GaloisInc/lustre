@@ -1,3 +1,4 @@
+{-# Language OverloadedStrings #-}
 module Language.Lustre.Parser.Monad
   ( Parser
   , parseStartingAt
@@ -11,9 +12,11 @@ module Language.Lustre.Parser.Monad
 import Control.Monad(liftM,ap)
 import Control.Exception (Exception)
 import Data.Text(Text)
-import AlexTools(prevPos, startPos)
+import AlexTools(prevPos, startPos, prettySourcePosLong)
+import Text.PrettyPrint
 
 import Language.Lustre.Parser.Lexer
+import Language.Lustre.Pretty
 import Language.Lustre.Panic
 
 newtype Parser a = Parser ([Lexeme Token] ->
@@ -92,4 +95,9 @@ happyError = Parser $ \ls ->
            t : _ -> Just $ sourceFrom $ lexemeRange t
 
 
+instance Pretty ParseError where
+  ppPrec _ (ParseError mb) =
+    case mb of
+      Nothing -> "Parser error at the end of the input."
+      Just x  -> text (prettySourcePosLong x ++ ": Parse error.")
 

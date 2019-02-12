@@ -37,6 +37,22 @@ data ResolverWarning =
 
 --------------------------------------------------------------------------------
 
+instance Pretty LustreError where
+  ppPrec n err =
+    case err of
+      ResolverError re -> ppPrec n re
+      TCError d        -> d
+      BadEntryPoint xs ->
+        case xs of
+          [] -> "Failed to find an entry point, please use %MAIN"
+          _  -> nested "Found multiple entry points:"
+                       (vcat (map pp xs))
+
+instance Pretty LustreWarning where
+  ppPrec n warn =
+    case warn of
+      ResolverWarning rw -> ppPrec n rw
+
 instance Pretty ResolverError where
   ppPrec _ err =
     case err of

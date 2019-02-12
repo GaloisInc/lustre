@@ -3,16 +3,18 @@ module Main(main) where
 
 import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
-import System.IO(stdout,stderr,hFlush,hPutStrLn)
+import Control.Exception(catches,Handler(..))
+import System.IO(stdout,stderr,hFlush,hPutStrLn,hPrint)
 import System.Environment
 import qualified Data.Map as Map
 
 import Language.Lustre.AST(Program(..))
 import Language.Lustre.Core
 import Language.Lustre.Semantics.Core
-import Language.Lustre.Parser(parseProgramFromFileLatin1)
+import Language.Lustre.Parser(parseProgramFromFileLatin1, ParseError)
 import Language.Lustre.Driver
 import Language.Lustre.Monad
+import Language.Lustre.Pretty(pp)
 
 
 conf :: LustreConf
@@ -36,6 +38,12 @@ runFromFile file =
          do (_,nd) <- runLustre conf (quickNodeToCore Nothing ds)
             runNodeIO nd
        _ -> hPutStrLn stderr "We don't support packages for the moment."
+   `catches`
+     [ Handler $ \e -> showErr (e :: ParseError)
+     , Handler $ \e -> showErr (e :: LustreError)
+     ]
+  where
+  showErr e = hPrint stderr (pp e)
 
 
 runNodeIO :: Node -> IO ()
