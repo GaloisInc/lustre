@@ -3,8 +3,9 @@ module Main(main) where
 
 import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
-import Control.Exception(catches,Handler(..))
-import System.IO(stdout,stderr,hFlush,hPutStrLn,hPrint)
+import Control.Exception(catches,Handler(..),throwIO,catch)
+import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint,hIsTerminalDevice)
+import System.IO.Error(isEOFError)
 import System.Environment
 import qualified Data.Map as Map
 
@@ -54,8 +55,9 @@ runFromFile file =
 runNodeIO :: Node -> IO ()
 runNodeIO node = do print (ppNode node)
                     go (1::Integer) s0
+                  `catch` \e -> if isEOFError e then pure () else throwIO e
   where
-  (s0,step) = initNode node Nothing
+  (s0,step)   = initNode node Nothing
 
   getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 
@@ -67,18 +69,23 @@ runNodeIO node = do print (ppNode node)
   showOut s x = print (ppIdent x <+> "=" <+> ppValue (evalVar s x))
 
   getInput b@(_ ::: t `On` _) =
-    do putStr (show (ppBinder b <+> " = "))
-       hFlush stdout
+    do term <- hIsTerminalDevice stdin
+       let msg = show (ppBinder b <+> " = ")
+       echo <- if term then putStr msg >> hFlush stdout >> pure Nothing
+                       else pure (Just msg)
        case t of
-         TInt  -> doGet b VInt
-         TReal -> doGet b VReal
-         TBool -> doGet b VBool
+         TInt  -> doGet echo b VInt
+         TReal -> doGet echo b VReal
+         TBool -> doGet echo b VBool
 
-  doGet :: Read a => Binder -> (a -> Value) -> IO (Ident,Value)
-  doGet b@(x ::: t) con =
+  doGet :: Read a => Maybe String -> Binder -> (a -> Value) -> IO (Ident,Value)
+  doGet msg b@(x ::: t) con =
     do txt <- getLine
        case readMaybe txt of
-         Just ok -> pure (x, con ok)
+         Just ok -> do case msg of
+                          Nothing -> pure ()
+                          Just m  -> putStr (m ++ txt ++ "\n") >> hFlush stdout
+                       pure (x, con ok)
          Nothing -> do putStrLn ("Invalid " ++ show (ppCType t))
                        getInput b
 
