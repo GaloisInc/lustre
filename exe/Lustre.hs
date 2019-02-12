@@ -4,7 +4,8 @@ module Main(main) where
 import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
 import Control.Exception(catches,Handler(..),throwIO,catch)
-import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint,hIsTerminalDevice)
+import Control.Monad(unless)
+import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint,hGetEcho)
 import System.IO.Error(isEOFError)
 import System.Environment
 import qualified Data.Map as Map
@@ -61,31 +62,28 @@ runNodeIO node = do print (ppNode node)
 
   getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 
-  go n s      = do s1 <- step s <$> getInputs
-                   putStrLn ("--- Step " ++ show n ++ " ---")
+  go n s      = do putStrLn ("--- Step " ++ show n ++ " ---")
+                   s1 <- step s <$> getInputs
                    mapM_ (showOut s1) (nOutputs node)
                    go (n+1) s1
 
   showOut s x = print (ppIdent x <+> "=" <+> ppValue (evalVar s x))
 
   getInput b@(_ ::: t `On` _) =
-    do term <- hIsTerminalDevice stdin
-       let msg = show (ppBinder b <+> " = ")
-       echo <- if term then putStr msg >> hFlush stdout >> pure Nothing
-                       else pure (Just msg)
+    do putStr (show (ppBinder b <+> " = "))
+       hFlush stdout
        case t of
-         TInt  -> doGet echo b VInt
-         TReal -> doGet echo b VReal
-         TBool -> doGet echo b VBool
+         TInt  -> doGet b VInt
+         TReal -> doGet b VReal
+         TBool -> doGet b VBool
 
-  doGet :: Read a => Maybe String -> Binder -> (a -> Value) -> IO (Ident,Value)
-  doGet msg b@(x ::: t) con =
+  doGet :: Read a => Binder -> (a -> Value) -> IO (Ident,Value)
+  doGet b@(x ::: t) con =
     do txt <- getLine
+       echoOn <- hGetEcho stdin
+       unless echoOn $ putStrLn txt
        case readMaybe txt of
-         Just ok -> do case msg of
-                          Nothing -> pure ()
-                          Just m  -> putStr (m ++ txt ++ "\n") >> hFlush stdout
-                       pure (x, con ok)
+         Just ok -> pure (x, con ok)
          Nothing -> do putStrLn ("Invalid " ++ show (ppCType t))
                        getInput b
 
