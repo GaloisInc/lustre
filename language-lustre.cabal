@@ -36,7 +36,6 @@ library
                        Language.Lustre.Transform.NoStruct,
                        Language.Lustre.Transform.Inline,
                        Language.Lustre.Transform.ToCore,
-                       Language.Lustre.Transform.Desugar,
 
                        Language.Lustre.Semantics.Const,
                        Language.Lustre.Semantics.Value,
@@ -56,6 +55,7 @@ executable lustre
   hs-source-dirs: exe
   main-is: Lustre.hs
   build-depends: base, containers, pretty, language-lustre
+  ghc-options:         -Wall
 
 
 

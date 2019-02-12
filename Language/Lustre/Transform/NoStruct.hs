@@ -75,7 +75,7 @@ noStruct ni ds = runNosM ni (go [] ds)
 data StructData a = SLeaf a
                   | SArray [StructData a]
                   | STuple [StructData a]
-                  | SStruct Name [Field (StructData a)]
+                  | SStruct OrigName [Field (StructData a)]
 
 instance Functor StructData where
   fmap f st =
@@ -265,7 +265,8 @@ toNormE env t0 es0 =
      NamedType s | Just fs <- Map.lookup (nameOrigName s) env ->
 
       let (es', outEs) = goMany es (map snd fs)
-      in (es', SStruct s [ Field l e | ((l,_) ,e) <- zip fs outEs ])
+      in (es', SStruct (nameOrigName s)
+                  [ Field l e | ((l,_) ,e) <- zip fs outEs ])
 
      ArrayType t e ->
        let (es', outEs) = goMany es (genericReplicate (exprToInteger e) t)
@@ -455,7 +456,7 @@ evalBin f e1 e2 =
 
 -- | Evaluate a struct update
 evalStructUpdate ::
-  Name {- type -} -> Name -> [Field Expression] -> NosM (StructData Expression)
+  OrigName {- type -} -> Name -> [Field Expression] -> NosM (StructData Expression)
 evalStructUpdate s x es =
   do mb <- lkpStrName x
      case mb of
@@ -512,7 +513,7 @@ selectFromArray vs s =
                      ]
 
 -- | Select an item from a struct.
-selectFromStruct :: Pretty a => Name -> [Field a] -> Selector Integer -> a
+selectFromStruct :: Pretty a => OrigName -> [Field a] -> Selector Integer -> a
 selectFromStruct ty fs s =
     case s of
 
@@ -561,8 +562,8 @@ evalExpr expr =
     Tuple es -> STuple <$> traverse evalExpr es
     Array es -> SArray <$> traverse evalExpr es
 
-    Struct s fs         -> SStruct s <$> traverse evalField fs
-    UpdateStruct s x es -> evalStructUpdate s x es
+    Struct s fs         -> SStruct (nameOrigName s) <$> traverse evalField fs
+    UpdateStruct s x es -> evalStructUpdate (nameOrigName s) x es
 
     Select e sel ->
       do e1 <- evalExpr e
@@ -650,7 +651,7 @@ evalField (Field l e) = Field l <$> evalExpr e
 
 --------------------------------------------------------------------------------
 
-data Shape = ArrayShape Int | StructShape Name [Ident] | TupleShape Int
+data Shape = ArrayShape Int | StructShape OrigName [Ident] | TupleShape Int
               deriving Eq
 
 instance Pretty Shape where

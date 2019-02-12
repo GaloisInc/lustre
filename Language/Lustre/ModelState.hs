@@ -19,18 +19,18 @@ import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
-import Language.Lustre.Transform.Desugar (ModelInfo(..), ModelFunInfo(..))
+import Language.Lustre.Driver(ModelInfo(..), ModelFunInfo(..))
 import qualified Language.Lustre.Semantics.Core as L
 import qualified Language.Lustre.Semantics.Value as V
 import Language.Lustre.Panic(panic)
 
 -- | A state for a core lustre program.
 type S            = Map CoreIdent CoreValue
-type CoreIdent    = C.Ident   -- ^ Identifier in the core syntax
-type CoreValue    = L.Value   -- ^ Value for a core expression
+type CoreIdent    = C.Ident     -- ^ Identifier in the core syntax
+type CoreValue    = L.Value     -- ^ Value for a core expression
 
-type SourceIdent  = P.Ident   -- ^ Identifier in the source syntax
-type SourceValue  = V.Value   -- ^ Value for full Lustre
+type SourceIdent  = P.OrigName -- ^ Identifier in the source syntax
+type SourceValue  = V.Value    -- ^ Value for full Lustre
 
 --------------------------------------------------------------------------------
 
@@ -69,7 +69,7 @@ locTop :: ModelInfo -> Maybe Loc
 locTop mi =
   do let top = infoTop mi
      fi <- Map.lookup top (infoNodes mi)
-     nd <- Map.lookup top (infoSource mi)
+     let nd = mfiSource fi
      pure Loc { lModel = mi
               , lFunInfo = fi
               , lSubst = Map.empty
@@ -83,14 +83,11 @@ locTop mi =
 enterCall :: Loc -> CallSiteId -> Maybe Loc
 enterCall l cs =
   do let mf = lFunInfo l
-     xs       <- Map.lookup cs (mfiCallSites mf)
-     (fnm,su) <- Map.lookup xs (mfiInlined mf)
-     f <- case fnm of
-            P.Unqual i -> pure i
-            P.Qual {} -> panic "enterCall" ["Unsupported qualified name."]
+     xs     <- Map.lookup cs (mfiCallSites mf)
+     (f,su) <- Map.lookup xs (mfiInlined mf)
      let mi = lModel l
      fi <- Map.lookup f (infoNodes mi)
-     nd <- Map.lookup f (infoSource mi)
+     let nd = mfiSource fi
      let vars = nodeVars nd
          su1  = fmap (\i -> Map.findWithDefault i i (lSubst l)) su
      pure l { lFunInfo = fi
@@ -190,5 +187,5 @@ nodeVars nd = Vars { vIns = fromB [ b | P.InputBinder b <- P.nodeInputs prof ]
   locs = case P.nodeDef nd of
            Nothing -> []
            Just d -> [ b | P.LocalVar b <- P.nodeLocals d ]
-  fromB = map P.binderDefines
+  fromB = map (P.identOrigName . P.binderDefines)
 

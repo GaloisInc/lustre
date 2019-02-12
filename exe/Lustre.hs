@@ -8,11 +8,18 @@ import System.Environment
 import qualified Data.Map as Map
 
 import Language.Lustre.AST(Program(..))
-import Language.Lustre.TypeCheck
 import Language.Lustre.Core
 import Language.Lustre.Semantics.Core
 import Language.Lustre.Parser(parseProgramFromFileLatin1)
-import Language.Lustre.Transform.Desugar
+import Language.Lustre.Driver
+import Language.Lustre.Monad
+
+
+conf :: LustreConf
+conf = LustreConf
+  { lustreInitialNameSeed = Nothing
+  , lustreLogHandle       = stdout
+  }
 
 main :: IO ()
 main =
@@ -26,9 +33,8 @@ runFromFile file =
   do a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
-         case quickCheckDecls ds of
-           Left err -> hPutStrLn stderr (show err)
-           Right _  -> runNodeIO (snd (desugarNode ds Nothing))
+         do (_,nd) <- runLustre conf (quickNodeToCore Nothing ds)
+            runNodeIO nd
        _ -> hPutStrLn stderr "We don't support packages for the moment."
 
 
