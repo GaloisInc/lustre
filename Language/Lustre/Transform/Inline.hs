@@ -10,8 +10,6 @@ Assumptions:
 -}
 module Language.Lustre.Transform.Inline (inlineCalls, AllRenamings) where
 
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
 import MonadLib
@@ -88,14 +86,11 @@ let
 
 -}
 
--- | A set of used up names.  When we generate new names, we look for names
--- that are not in this set.
-type UsedNames = Set Ident
 
 -- | Change the name of a binder to avoid name clasehs.
-freshBinder :: UsedNames -> Binder -> InM Binder
-freshBinder used b = do n <- freshName used (binderDefines b)
-                        pure b { binderDefines = n }
+freshBinder :: Binder -> InM Binder
+freshBinder b = do n <- freshName (binderDefines b)
+                   pure b { binderDefines = n }
 
 
 -- | A mapping from old names to their clash-avoiding versions.
@@ -104,15 +99,14 @@ type Renaming = Map OrigName OrigName
 
 -- | Compute the renaming to be used when instantiating the given node.
 computeRenaming ::
-  UsedNames             {- ^ Dont't use these names -} ->
   [LHS Expression]      {- ^ LHS of call site -} ->
   NodeDecl              {- ^ Function being called -} ->
   InM (Renaming, [LocalDecl], [OrigName])
   -- ^ new used, renaming of identifiers, new locals to add
   -- Last argument is a "call site id",  which is used for showing traces
   -- (i.e., a kind of inverse)
-computeRenaming used lhs nd =
-  do newBinders <- mapM (freshBinder used) oldBinders
+computeRenaming lhs nd =
+  do newBinders <- mapM freshBinder oldBinders
      let renaming = Map.fromList $
                       zipExact renOut (nodeOutputs prof) lhs ++
                       zipExact renBind oldBinders newBinders
@@ -244,13 +238,8 @@ inlineCallsNode nd =
     Nothing -> pure (Map.empty,nd)
     Just def
       | null (nodeStaticInputs nd) ->
-        do let prof = nodeProfile nd
-               used = Set.fromList $ map binderDefines $
-                         map inputBinder (nodeInputs prof) ++
-                         nodeOutputs prof ++
-                         map localBinder (nodeLocals def)
-           ready <- doneNodes
-           (newLocs,newEqs,rens) <- renameEqns ready used (nodeEqns def)
+        do ready <- doneNodes
+           (newLocs,newEqs,rens) <- renameEqns ready (nodeEqns def)
            pure ( rens
                 , nd { nodeDef = Just NodeBody
                                         { nodeLocals = newLocs ++ nodeLocals def
@@ -269,7 +258,7 @@ inlineCallsNode nd =
       Call (NodeInst (CallUser f) []) es -> Just (f,es)
       _             -> Nothing
 
-  renameEqns ready used eqns =
+  renameEqns ready eqns =
     case eqns of
       [] -> pure ([],[],Map.empty)
       eqn : more ->
@@ -280,18 +269,18 @@ inlineCallsNode nd =
             , Just cnd <- Map.lookup fo ready
             , Just def <- nodeDef cnd ->
             do let prof = nodeProfile cnd
-               (su, newLocals, key) <- computeRenaming used ls cnd
+               (su, newLocals, key) <- computeRenaming ls cnd
                let paramDef b p = Define [LVar (rename su (binderDefines b))] p
                    paramDefs    = zipExact paramDef
                                         (map inputBinder (nodeInputs prof)) es
                    thisEqns     = updateProps (rename su (nodeEqns def))
-               (otherDefs,otherEqns,rens) <- renameEqns ready used more
+               (otherDefs,otherEqns,rens) <- renameEqns ready more
                pure ( newLocals ++ otherDefs
                     , paramDefs ++ thisEqns ++ otherEqns
                     , Map.insert key (fo,su) rens
                     )
 
-          _ -> do (otherDefs, otherEqns, rens) <- renameEqns ready used more
+          _ -> do (otherDefs, otherEqns, rens) <- renameEqns ready more
                   pure (otherDefs, eqn : otherEqns, rens)
 
   updateProps eqns =
@@ -361,17 +350,12 @@ addNodeDecl rens nd = InM $
 doneNodes :: InM (Map OrigName NodeDecl)
 doneNodes = InM $ inlinedNodes <$> get
 
-{- | Generate a new version of the given identifier, if it is in the set
-of used names. Since the new name is completely fresh, we don't need to
-add it to the set of used names, as the new name is guaranteed not to
-clash with anything. -}
-freshName :: UsedNames -> Ident -> InM Ident
-freshName used i
-  | not (i `Set.member` used) = pure i
-  | otherwise =
-    do u <- InM (inBase newInt)
-       let newON = (identOrigName i) { rnUID = u }
-       pure i { identResolved = Just newON }
+{- | Generate a new version of the given identifier. -}
+freshName :: Ident -> InM Ident
+freshName i =
+  do u <- InM (inBase newInt)
+     let newON = (identOrigName i) { rnUID = u }
+     pure i { identResolved = Just newON }
 
 
 
