@@ -123,13 +123,13 @@ checkNodeDecl nd k =
 checkNodeBody :: NodeBody -> M ()
 checkNodeBody nb = addLocals (nodeLocals nb)
   where
-  -- XXX: check for duplicate constant declarations.
   -- XXX: after checking that equations are OK individually,
   -- we should check that the LHS define proper values
-  -- (e.g., no missing parts of structs/arrays etc)
+  -- (e.g., no missing parts of structs/arrays etc, no repeated declarations)
   -- XXX: we also need to check that all outputs were defined.
+  --      (although partial specs are also OK sometimes?)
   -- XXX: also check that that all locals have definitions
-  -- XXX: also check that there aren't any extra equations.
+  --      (again, partial specs ok?)
   -- XXX: also, we should check that equations don't use values
   -- that are not yet defined (e.g., x = x, not OK, but x = pre x is OK)
   addLocals ls =
@@ -140,7 +140,7 @@ checkNodeBody nb = addLocals (nodeLocals nb)
 checkLocalDecl :: LocalDecl -> M a -> M a
 checkLocalDecl ld m =
   case ld of
-    LocalVar b   -> checkBinder b NonInputIdent m
+    LocalVar b   -> checkBinder b m
     LocalConst c -> checkConstDef c m
 
 
@@ -171,20 +171,20 @@ checkConstDef c m =
 checkInputBinder :: InputBinder -> M a -> M a
 checkInputBinder ib m =
   case ib of
-    InputBinder b -> checkBinder b InputIdent m
+    InputBinder b -> checkBinder b m
     InputConst i t ->
       do checkType t
          withConst i t m
 
-checkBinder :: Binder -> IdentMode -> M a -> M a
-checkBinder b mo m =
+checkBinder :: Binder -> M a -> M a
+checkBinder b m =
   do c <- case binderClock b of
             Nothing -> pure BaseClock
             Just e  -> do _c <- checkClockExpr e
                           pure (KnownClock e)
      checkType (binderType b)
      let ty = CType { cType = binderType b, cClock = c }
-     withLocal (binderDefines b) mo ty m
+     withLocal (binderDefines b) ty m
 
 checkInputBinders :: [InputBinder] -> M a -> M a
 checkInputBinders bs m =
@@ -197,7 +197,7 @@ checkOutputBinders :: [Binder] -> M a -> M a
 checkOutputBinders bs m =
   case bs of
     [] -> m
-    b : more -> checkBinder b NonInputIdent (checkOutputBinders more m)
+    b : more -> checkBinder b (checkOutputBinders more m)
 
 
 

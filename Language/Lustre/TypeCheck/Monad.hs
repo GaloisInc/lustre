@@ -75,7 +75,7 @@ newtype M a = M { unM ::
 data RO = RO
   { roConstants   :: Map OrigName (SourceRange, Type)
   , roUserNodes   :: Map OrigName (SourceRange, Safety,NodeType,NodeProfile)
-  , roIdents      :: Map OrigName (SourceRange, IdentMode, CType)
+  , roIdents      :: Map OrigName (SourceRange, CType)
   , roTypeNames   :: Map OrigName (SourceRange, NamedType) -- no type vars here
   , roOnlyInputs  :: Bool
   , roCurRange    :: [SourceRange]
@@ -83,7 +83,6 @@ data RO = RO
   , roUnsafe      :: Bool
   }
 
-data IdentMode = InputIdent | NonInputIdent
 
 data RW = RW
   { rwClockVarSubst  :: Map CVar IClock
@@ -142,12 +141,7 @@ lookupLocal i =
      case Map.lookup orig (roIdents ro) of
        Nothing -> panic "lookupLocal"
                             [ "Undefined identifier: " ++ showPP i ]
-       Just (_,mo,t) ->
-         case mo of
-           NonInputIdent | roOnlyInputs ro ->
-             reportError $ "Local variable" <+> backticks (pp i) <+>
-                           "is not an input."
-           _ -> pure t
+       Just (_,t) -> pure t
 
 
 lookupConst :: Name -> M Type
@@ -230,12 +224,12 @@ withConst x t (M m) =
      M (local ro { roConstants = Map.insert nm (range x,t) cs } m)
 
 
-withLocal :: Ident -> IdentMode -> CType -> M a -> M a
-withLocal i mo t (M m) =
+withLocal :: Ident -> CType -> M a -> M a
+withLocal i t (M m) =
   M $ do ro <- ask
          let is = roIdents ro
              nm = identOrigName i
-         local ro { roIdents = Map.insert nm (range i, mo, t) is } m
+         local ro { roIdents = Map.insert nm (range i, t) is } m
 
 withNode :: Ident -> (Safety, NodeType, NodeProfile) -> M a -> M a
 withNode x (a,b,c) (M m) =
@@ -252,11 +246,11 @@ withNamedType x t (M m) =
                                                (roTypeNames ro) } m
 
 
-withLocals :: [(Ident,IdentMode,CType)] -> M a -> M a
+withLocals :: [(Ident,CType)] -> M a -> M a
 withLocals xs k =
   case xs of
     []              -> k
-    (x,mo,t) : more -> withLocal x mo t (withLocals more k)
+    (x,t) : more -> withLocal x t (withLocals more k)
 
 allowTemporal :: Bool -> M a -> M a
 allowTemporal b (M m) = M (mapReader upd m)
