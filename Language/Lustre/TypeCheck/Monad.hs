@@ -151,7 +151,7 @@ lookupIdentMaybe i =
          pure $
            do (_,mo,t) <- Map.lookup i (roIdents ro)
               case mo of
-                NonInputIdent | roOnlyInputs ro -> Nothing
+                -- NonInputIdent | roOnlyInputs ro -> Nothing
                 _ -> Just t
 
 lookupIdent :: Ident -> M CType
