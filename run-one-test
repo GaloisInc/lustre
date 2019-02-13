@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cabal v2-run --verbose=0 exe:lustre $1 $1.stdin
+

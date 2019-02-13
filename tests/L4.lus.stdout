@@ -1,0 +1,3 @@
+Multiple declaratoins for the same name:
+  • `x`, defined at 4:9--4:9 (unqiue 3)
+  • `x`, defined at 3:9--3:9 (unqiue 2)
