@@ -3,11 +3,11 @@ module Main(main) where
 
 import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
-import Control.Exception(Exception,catches,Handler(..),throwIO,catch)
-import Control.Monad(unless,when)
+import Control.Exception(catches,Handler(..),throwIO,catch)
+import Control.Monad(when)
 import Data.IORef(newIORef,readIORef,atomicModifyIORef')
-import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint,hGetEcho
-                , openFile, Handle, IOMode(..), hGetContents )
+import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint
+                , openFile, IOMode(..), hGetContents )
 import System.IO.Error(isEOFError)
 import System.Environment
 import qualified Data.Map as Map
