@@ -1,0 +1,19 @@
+/* Check ordering */
+
+
+function f(x : int) returns (y : int)
+  var c : int;
+  var d : int;
+let
+  --%MAIN;
+  c,d = g (x,x);
+  y = c + d;
+tel
+
+function g(a : int; b : int) returns (c : int; d : int)
+let
+  c = a - b;
+  d = a + b;
+tel
+
+

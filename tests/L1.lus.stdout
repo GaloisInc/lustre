@@ -1,0 +1,16 @@
+Up to date
+node (a : int, b : int)
+  returns (c)
+  assumes ()
+  shows ()
+let
+  c = Add(a, b)
+tel
+--- Step 1 ---
+a : int  = 1
+b : int  = 2
+c = 3
+--- Step 2 ---
+a : int  = 3
+b : int  = 4
+c = 7

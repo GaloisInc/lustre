@@ -1,0 +1,10 @@
+
+function f (a : int; b : int) returns (c : int)
+let
+  --%MAIN
+  c = a + b;
+tel
+
+
+
+

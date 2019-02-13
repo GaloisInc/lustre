@@ -3,9 +3,11 @@ module Main(main) where
 
 import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
-import Control.Exception(catches,Handler(..),throwIO,catch)
-import Control.Monad(unless)
-import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint,hGetEcho)
+import Control.Exception(Exception,catches,Handler(..),throwIO,catch)
+import Control.Monad(unless,when)
+import Data.IORef(newIORef,readIORef,atomicModifyIORef')
+import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint,hGetEcho
+                , openFile, Handle, IOMode(..), hGetContents )
 import System.IO.Error(isEOFError)
 import System.Environment
 import qualified Data.Map as Map
@@ -29,11 +31,12 @@ main :: IO ()
 main =
   do args <- getArgs
      case args of
-       [f] -> runFromFile f
-       _   -> hPutStrLn stderr "USAGE: lustre FILE"
+       [f]   -> runFromFile f Nothing
+       [f,i] -> runFromFile f (Just i)
+       _     -> hPutStrLn stderr "USAGE: lustre FILE [INPUT_FILE]"
 
-runFromFile :: FilePath -> IO ()
-runFromFile file =
+runFromFile :: FilePath -> Maybe FilePath -> IO ()
+runFromFile file mbIn =
   do a <- parseProgramFromFileLatin1 file
      case a of
        ProgramDecls ds ->
@@ -42,7 +45,8 @@ runFromFile file =
                             warns  <- getWarnings
                             pure (warns,nd)
             mapM_ showWarn ws
-            runNodeIO nd
+            sIn <- newIn mbIn
+            runNodeIO sIn nd
        _ -> hPutStrLn stderr "We don't support packages for the moment."
    `catches`
      [ Handler $ \e -> showErr (e :: ParseError)
@@ -53,21 +57,45 @@ runFromFile file =
   showWarn w = hPrint stderr (pp w)
 
 
-runNodeIO :: Node -> IO ()
-runNodeIO node = do print (ppNode node)
-                    go (1::Integer) s0
-                  `catch` \e -> if isEOFError e then pure () else throwIO e
+data In = In
+  { hasMore   :: IO Bool
+  , nextToken :: IO String
+  , echo      :: Bool
+  }
+
+newIn :: Maybe FilePath -> IO In
+newIn mb =
+  do (h,e) <- case mb of
+                Nothing -> pure (stdin,False)
+                Just f  -> do h <- openFile f ReadMode
+                              pure (h,True)
+     ws0 <- words <$> hGetContents h
+     r  <- newIORef ws0
+     pure In { hasMore = not . null <$> readIORef r
+             , nextToken = atomicModifyIORef' r $ \ws -> case ws of
+                                                           [] -> ([],"")
+                                                           w : more -> (more,w)
+             , echo = e
+             }
+
+runNodeIO :: In -> Node -> IO ()
+runNodeIO sIn node =
+  do print (ppNode node)
+     go (1::Integer) s0
+   `catch` \e -> if isEOFError e then pure () else throwIO e
   where
   (s0,step)   = initNode node Nothing
 
-  getInputs   = Map.fromList <$> mapM getInput (nInputs node)
-
-  go n s      = do putStrLn ("--- Step " ++ show n ++ " ---")
-                   s1 <- step s <$> getInputs
+  go n s = do more <- hasMore sIn
+              when more $
+                do putStrLn ("--- Step " ++ show n ++ " ---")
+                   s1  <- step s <$> getInputs
                    mapM_ (showOut s1) (nOutputs node)
                    go (n+1) s1
 
   showOut s x = print (ppIdent x <+> "=" <+> ppValue (evalVar s x))
+
+  getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 
   getInput b@(_ ::: t `On` _) =
     do putStr (show (ppBinder b <+> " = "))
@@ -79,13 +107,10 @@ runNodeIO node = do print (ppNode node)
 
   doGet :: Read a => Binder -> (a -> Value) -> IO (Ident,Value)
   doGet b@(x ::: t) con =
-    do txt <- getLine
-       echoOn <- hGetEcho stdin
-       unless echoOn $ putStrLn txt
+    do txt <- nextToken sIn
+       when (echo sIn) (putStrLn txt)
        case readMaybe txt of
          Just ok -> pure (x, con ok)
          Nothing -> do putStrLn ("Invalid " ++ show (ppCType t))
                        getInput b
-
-
 

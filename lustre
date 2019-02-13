@@ -50,8 +50,7 @@ case $COMMAND in
       else TESTS=$*
     fi
     $BIN/test-runner --ext=.lus \
-                     --exe=cabal \
-                     -F v2-run -F -v0 -F exe:lustre -F -- \
+                     --exe=./run-one-test \
                      $TESTS
     ;;
 

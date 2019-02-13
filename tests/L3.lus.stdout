@@ -1,0 +1,32 @@
+Up to date
+node (x.x : int, x.y : bool)
+  returns (y)
+  assumes ()
+  shows ()
+let
+  y = ITE(x.y, x.x, 0)
+tel
+--- Step 1 ---
+x.x : int  = 1
+x.y : bool  = True
+y = 1
+--- Step 2 ---
+x.x : int  = 2
+x.y : bool  = False
+y = 0
+--- Step 3 ---
+x.x : int  = 3
+x.y : bool  = True
+y = 3
+--- Step 4 ---
+x.x : int  = 4
+x.y : bool  = False
+y = 0
+--- Step 5 ---
+x.x : int  = 5
+x.y : bool  = False
+y = 0
+--- Step 6 ---
+x.x : int  = 6
+x.y : bool  = True
+y = 6
