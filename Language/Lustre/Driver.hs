@@ -95,7 +95,7 @@ findNode mb ds =
 
   -- XXX: assumes all declaration in the same file.
   locId = sourceIndex . sourceFrom . P.identRange . P.nodeName
-  later x y = compare (locId x) (locId y)
+  later x y = compare (locId y) (locId x)
 
 --------------------------------------------------------------------------------
 -- | Information for mapping traces back to source Lustre
