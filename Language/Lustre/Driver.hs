@@ -4,8 +4,9 @@ module Language.Lustre.Driver where
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.List(foldl')
+import Data.List(foldl',sortBy)
 import Data.Text(Text)
+import AlexTools(sourceFrom,sourceIndex)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
@@ -70,11 +71,14 @@ findNode ::
   [P.TopDecl] {- ^ Simplified declarations -} ->
   LustreM P.NodeDecl
 findNode mb ds =
-  case [ nd | P.DeclareNode nd <- ds, selected nd ] of
+  case [ nd | nd <- nodes, selected nd ] of
     [nd] -> pure nd
+    [] | nd : _ <- sortBy later nodes -> pure nd
     nds  -> reportError $ BadEntryPoint
                                 [ P.identOrigName (P.nodeName nd) | nd <- nds ]
   where
+  nodes = [ nd | P.DeclareNode nd <- ds ]
+
   selected =
     case mb of
       Nothing -> hasMain
@@ -89,6 +93,9 @@ findNode mb ds =
                  P.IsMain _ -> True
                  _          -> False
 
+  -- XXX: assumes all declaration in the same file.
+  locId = sourceIndex . sourceFrom . P.identRange . P.nodeName
+  later x y = compare (locId x) (locId y)
 
 --------------------------------------------------------------------------------
 -- | Information for mapping traces back to source Lustre
