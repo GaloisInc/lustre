@@ -345,7 +345,8 @@ evalClockExprAtom (P.WhenClock _ e1 i) =
 
 -- | Translate a source to a core identifier.
 evalIdent :: P.Ident -> C.Ident
-evalIdent i = C.Ident (P.identText i)
+evalIdent i = C.Ident (Text.append (P.identText i) uni)
+  where uni = Text.pack ("_" ++ show (P.rnUID (P.identOrigName i)))
 
 
 -- | Evaluate a source expression to a core expression.
