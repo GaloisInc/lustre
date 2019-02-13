@@ -61,12 +61,16 @@ evalNodeDecl enumCs nd
          asts <- getAssertNames
          props <- getPropertyNames
          varMp <- getVarMap
+         eqs <- case C.orderedEqns (concat eqnss) of
+                 Left rs -> panic "evalNodeDecl" [ "recursive eqns"
+                                                 , "TODO: report properly" ]
+                 Right as -> pure as
          pure (varMp
               , C.Node { C.nInputs   = ins
                      , C.nOutputs  = [ i | i C.::: _ <- outs ]
                      , C.nAssuming = asts
                      , C.nShows    = props
-                     , C.nEqns     = concat eqnss
+                     , C.nEqns     = eqs
                      })
 
   | otherwise = panic "evalNodeDecl"
