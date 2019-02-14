@@ -47,7 +47,7 @@ $hexdigit       = [0-9a-fA-F]
                 | (@num16        "." @digs16?) @exp16?
                 | ("0x" @digs16? "." @digs16) @exp16?
 
-@line_comment    = "--"[^\%].*
+@line_comment    = "--"[^\%].* | "--"
 @special_comment = "--%"($letter|$digit)*
 @not_star        = \n | ~\*
 
