@@ -1,23 +1,23 @@
-node (x : int)
-  returns (y)
+node (x_2 : int)
+  returns (y_3)
   assumes ()
   shows ()
 let
-  a = x
-  b = x
-  c = Sub(a, b)
-  d = Add(a, b)
-  y = Add(c, d)
+  a_16 = x_2
+  b_17 = x_2
+  c_4 = Sub(a_16, b_17)
+  d_5 = Add(a_16, b_17)
+  y_3 = Add(c_4, d_5)
 tel
 --- Step 1 ---
-x : int  = 1
-y = 2
+x_2 : int  = 1
+y_3 = 2
 --- Step 2 ---
-x : int  = 2
-y = 4
+x_2 : int  = 2
+y_3 = 4
 --- Step 3 ---
-x : int  = 3
-y = 6
+x_2 : int  = 3
+y_3 = 6
 --- Step 4 ---
-x : int  = 4
-y = 8
+x_2 : int  = 4
+y_3 = 8
