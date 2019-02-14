@@ -31,7 +31,7 @@ module Language.Lustre.Monad
   ) where
 
 
-import System.IO(Handle,hPutStrLn)
+import System.IO(Handle,hPutStrLn,hFlush)
 import MonadLib
 import Control.Exception(throwIO)
 
@@ -116,7 +116,8 @@ logMessage msg =
   LustreM $ do verb <- luVerbose <$> get
                when verb $
                   do h <- luLogHandle <$> ask
-                     inBase (hPutStrLn h msg)
+                     inBase $ do hPutStrLn h msg
+                                 hFlush h
 
 -- | Set verbosity. 'True' means enable logging.  Affect `lustreLog`.
 setVerbose :: Bool -> LustreM ()
