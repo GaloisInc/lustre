@@ -5,7 +5,7 @@ module Language.Lustre.Semantics.BuiltIn
     sInt, sReal, sBool
 
     -- ** Coercions
-  , sReal2Int, sInt2Real
+  , sReal2Int, sInt2Real, sReal2IntFloor
 
     -- ** Logical operators
   , sNot, sAnd, sOr, sXor, sImplies, sBoolRed
@@ -62,6 +62,14 @@ sReal2Int v =
   case v of
     VReal x -> sInt (truncate x)
     _       -> typeError "real2int" "a `real`"
+
+sReal2IntFloor :: Value -> EvalM Value
+sReal2IntFloor v =
+  case v of
+    VReal x -> sInt (floor x)
+    _       -> typeError "real2intFloor" "a `real`"
+
+
 
 sInt2Real :: Value -> EvalM Value
 sInt2Real v =

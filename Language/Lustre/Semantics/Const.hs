@@ -109,6 +109,7 @@ evalConst env expr =
                Neg       -> sNeg v
                IntCast   -> sReal2Int v
                RealCast  -> sInt2Real v
+               FloorCast -> sReal2IntFloor v
 
                Pre       -> bad "`pre` is not a constant"
                Current   -> bad "`current` is not a constant"

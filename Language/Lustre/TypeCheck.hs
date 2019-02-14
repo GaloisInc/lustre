@@ -538,12 +538,16 @@ checkOp1 op e ty =
               ensure (Arith1 "-" t (cType ty))
 
     IntCast ->
-      do checkExpr1 e ty { cType = IntType }
-         ensure (Subtype RealType (cType ty))
-
-    RealCast ->
       do checkExpr1 e ty { cType = RealType }
          ensure (Subtype IntType (cType ty))
+
+    FloorCast ->
+      do checkExpr1 e ty { cType = RealType }
+         ensure (Subtype IntType (cType ty))
+
+    RealCast ->
+      do checkExpr1 e ty { cType = IntType }
+         ensure (Subtype RealType (cType ty))
 
 
 -- | Types of binary operators.

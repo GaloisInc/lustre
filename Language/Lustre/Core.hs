@@ -53,7 +53,7 @@ data Expr     = Atom Atom
                 deriving Show
 
 data Op       = Not | Neg
-              | IntCast | RealCast
+              | IntCast | RealCast | FloorCast
               | And | Or | Xor | Implies
               | Eq | Neq | Lt | Leq | Gt | Geq
               | Mul | Mod | Div | Add | Sub | Power
@@ -243,6 +243,7 @@ instance TypeOf Atom where
                  ret x = x `On` c
              in case op of
                   IntCast    -> ret TInt
+                  FloorCast  -> ret TInt
                   RealCast   -> ret TReal
 
                   Not        -> ret TBool
