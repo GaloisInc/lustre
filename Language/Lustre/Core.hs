@@ -33,6 +33,9 @@ type Clock    = Atom
 data CType    = Type `On` Clock
                 deriving Show
 
+typeOfCType :: CType -> Type
+typeOfCType (t `On` _) = t
+
 data Binder   = Ident ::: CType
                 deriving Show
 
@@ -203,6 +206,15 @@ instance Pretty Node where
 
 --------------------------------------------------------------------------------
 -- Computing the the type of an expression.
+
+
+-- | Compute the typing environment for a node.
+nodeEnv :: Node -> Map Ident CType
+nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++ map fromE (nEqns nd)
+  where
+  fromB (x ::: t) = (x,t)
+  fromE (b := _)  = fromB b
+
 
 class TypeOf t where
   -- | Get the type of something well-formed (panics if not).
