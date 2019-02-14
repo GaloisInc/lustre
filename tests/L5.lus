@@ -1,0 +1,6 @@
+node test(x : real) returns (y : int; z : int)
+let
+  y = int x;
+  z = floor x;
+tel
+

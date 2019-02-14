@@ -1,0 +1,24 @@
+node (x_1 : real)
+  returns (y_2, z_3)
+  assumes ()
+  shows ()
+let
+  y_2 = IntCast(x_1)
+  z_3 = FloorCast(x_1)
+tel
+--- Step 1 ---
+x_1 : real  = 2.5
+y_2 = 2
+z_3 = 2
+--- Step 2 ---
+x_1 : real  = 3.5
+y_2 = 3
+z_3 = 3
+--- Step 3 ---
+x_1 : real  = -2.5
+y_2 = -2
+z_3 = -3
+--- Step 4 ---
+x_1 : real  = -3.5
+y_2 = -3
+z_3 = -4
