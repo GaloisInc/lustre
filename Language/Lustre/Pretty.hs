@@ -264,6 +264,7 @@ instance Pretty Expression where
                               Not      -> 7
                               IntCast  -> 12
                               RealCast -> 12
+                              FloorCast -> 12
                               Neg      -> 13
                               Pre      -> 13
                               Current  -> 13
@@ -402,6 +403,7 @@ instance Pretty Op1 where
       Pre       -> "pre"
       Current   -> "current"
       IntCast   -> "int"
+      FloorCast -> "floor"
       RealCast  -> "real"
 
 instance Pretty Op2 where

@@ -100,6 +100,7 @@ import Language.Lustre.Panic
   '*'         { Lexeme { lexemeRange = $$, lexemeToken = TokStar } }
   '**'        { Lexeme { lexemeRange = $$, lexemeToken = TokStarStar } }
   '/'         { Lexeme { lexemeRange = $$, lexemeToken = TokDiv } }
+  'floor'     { Lexeme { lexemeRange = $$, lexemeToken = TokKwFloor } }
 
 
   'step'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwStep } }
@@ -167,7 +168,7 @@ import Language.Lustre.Panic
 %left     '*' '/' '%' 'mod' 'div'
 %left     '**'
 %nonassoc 'when'
-%nonassoc 'int' 'real'
+%nonassoc 'int' 'real' 'floor'
 %nonassoc UMINUS 'pre' 'current'
 %left     '^' '.'
 %right    '['
@@ -481,6 +482,7 @@ expression :: { Expression }
   | 'current' expression              { toE1 Current  $1 $2 }
   | 'int'     expression              { toE1 IntCast  $1 $2 }
   | 'real'    expression              { toE1 RealCast $1 $2 }
+  | 'floor'   expression              { toE1 FloorCast $1 $2 }
 
   | expression 'when' clockExpr       { $1 `When` $3        }
   | expression 'fby' expression       { toE2 $1 $2 Fby     $3 }

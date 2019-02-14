@@ -128,7 +128,7 @@ $white+         { return [] }
 "int"               { lexeme TokKwInt }
 "real"              { lexeme TokKwReal }
 "bool"              { lexeme TokKwBool }
-"floor"             { lexeme TokKwInt }         -- jkind
+"floor"             { lexeme TokKwFloor }         -- jkind
 "subrange"          { lexeme TokKwSubrange }    -- jkind
 "of"                { lexeme TokKwOf }          -- jkind
 
@@ -243,6 +243,7 @@ data Token =
   | TokKwInt
   | TokKwReal
   | TokKwBool
+  | TokKwFloor
 
   | TokKwStep
   | TokKwFby

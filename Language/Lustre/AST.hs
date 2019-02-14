@@ -305,6 +305,7 @@ data Op1 = Not          -- bool -> bool
          | Pre          -- a -> a
          | Current      -- a -> a
          | IntCast      -- real -> int
+         | FloorCast    -- real -> int
          | RealCast     -- int -> real
                   deriving (Show, Eq, Ord)
 

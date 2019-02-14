@@ -529,6 +529,10 @@ checkOp1 op e ty =
       do checkExpr1 e ty { cType = RealType }
          ensure (Subtype IntType (cType ty))
 
+    FloorCast ->
+      do checkExpr1 e ty { cType = RealType }
+         ensure (Subtype IntType (cType ty))
+
     RealCast ->
       do checkExpr1 e ty { cType = IntType }
          ensure (Subtype RealType (cType ty))
