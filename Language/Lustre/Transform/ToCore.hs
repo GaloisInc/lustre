@@ -199,15 +199,11 @@ clearEqns = sets $ \s -> (stEqns s, s { stEqns = [] })
 nameExpr :: C.Expr -> M C.Atom
 nameExpr expr =
   do tys <- getLocalTypes
-     case C.typeOf tys expr of
-       Just t ->
-          do i <- newIdentFrom stem
-             addEqn (i C.::: t C.:= expr)
-             pure (C.Var i)
-       Nothing -> panic "nameExpr" [ "Failed to compute the type of:"
-                                   , "*** Expression: " ++ showPP expr
-                                   , "*** Types: " ++ show tys
-                                   ]
+     let t = C.typeOf tys expr
+     i <- newIdentFrom stem
+     addEqn (i C.::: t C.:= expr)
+     pure (C.Var i)
+
   where
   stem = case expr of
            C.Atom a -> case a of
