@@ -169,6 +169,12 @@ evalPrimOp op vs =
          [ VReal r ]  -> VInt (truncate r)
          _            -> bad "1 real"
 
+     FloorCast ->
+       case vs of
+         [ VNil ]     -> VNil
+         [ VReal r ]  -> VInt (floor r)
+         _            -> bad "1 real"
+
      RealCast ->
        case vs of
          [ VNil ]   -> VNil

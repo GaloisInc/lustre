@@ -421,6 +421,7 @@ evalExpr expr =
                             P.Pre      -> pure (C.Pre v)
                             P.Current  -> pure (C.Current v)
                             P.IntCast  -> prim C.IntCast
+                            P.FloorCast -> prim C.FloorCast
                             P.RealCast -> prim C.RealCast
                    _ -> bad "unary operator"
 
