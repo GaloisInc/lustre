@@ -11,6 +11,7 @@ import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint
 import System.IO.Error(isEOFError)
 import System.Environment
 import qualified Data.Map as Map
+import Numeric(readSigned,readFloat)
 
 import Language.Lustre.AST(Program(..))
 import Language.Lustre.Core
@@ -100,17 +101,25 @@ runNodeIO sIn node =
   getInput b@(_ ::: t `On` _) =
     do putStr (show (ppBinder b <+> " = "))
        hFlush stdout
-       case t of
-         TInt  -> doGet b VInt
-         TReal -> doGet b VReal
-         TBool -> doGet b VBool
+       doGet b
 
-  doGet :: Read a => Binder -> (a -> Value) -> IO (Ident,Value)
-  doGet b@(x ::: t) con =
+  doGet :: Binder -> IO (Ident,Value)
+  doGet b@(x ::: t) =
     do txt <- nextToken sIn
        when (echo sIn) (putStrLn txt)
-       case readMaybe txt of
-         Just ok -> pure (x, con ok)
+       case parseVal (typeOfCType t) txt of
+         Just ok -> pure (x, ok)
          Nothing -> do putStrLn ("Invalid " ++ show (ppCType t))
                        getInput b
+
+parseVal :: Type -> String -> Maybe Value
+parseVal t s =
+  case t of
+    TBool -> VBool <$> readMaybe s
+    TInt  -> VInt  <$> readMaybe s
+    TReal -> case readSigned readFloat s of
+               [(n,"")] -> Just (VReal n)
+               _        -> Nothing
+
+
 
