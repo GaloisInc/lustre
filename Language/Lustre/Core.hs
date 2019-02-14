@@ -16,6 +16,7 @@ import qualified Text.PrettyPrint as PP
 
 import Language.Lustre.AST (Literal(..),PropName(..))
 import Language.Lustre.Pretty
+import Language.Lustre.Panic(panic)
 
 data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
@@ -31,6 +32,9 @@ type Clock    = Atom
 -- | Type on a boolean clock.
 data CType    = Type `On` Clock
                 deriving Show
+
+typeOfCType :: CType -> Type
+typeOfCType (t `On` _) = t
 
 data Binder   = Ident ::: CType
                 deriving Show
@@ -203,13 +207,22 @@ instance Pretty Node where
 --------------------------------------------------------------------------------
 -- Computing the the type of an expression.
 
+
+-- | Compute the typing environment for a node.
+nodeEnv :: Node -> Map Ident CType
+nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++ map fromE (nEqns nd)
+  where
+  fromB (x ::: t) = (x,t)
+  fromE (b := _)  = fromB b
+
+
 class TypeOf t where
-  typeOf :: Map Ident CType -> t -> Maybe CType
+  -- | Get the type of something well-formed (panics if not).
+  typeOf :: Map Ident CType -> t -> CType
 
 -- XXX: These seem to have "polymorphic clocks"
 instance TypeOf Literal where
   typeOf _ lit =
-    Just $
     case lit of
       Int _  -> base TInt
       Real _ -> base TReal
@@ -219,43 +232,45 @@ instance TypeOf Literal where
 instance TypeOf Atom where
   typeOf env atom =
     case atom of
-      Var x -> Map.lookup x env
+      Var x -> case Map.lookup x env of
+                 Just t -> t
+                 Nothing -> panic "typeOf" ["Undefined variable: " ++ showPP x]
       Lit l -> typeOf env l
       Prim op as  ->
         case as of
           a : _ ->
-            do (t `On` c) <- typeOf env a
-               let ret x = Just (x `On` c)
-               case op of
-                 IntCast    -> ret TInt
-                 RealCast   -> ret TReal
+             let t `On` c = typeOf env a
+                 ret x = x `On` c
+             in case op of
+                  IntCast    -> ret TInt
+                  RealCast   -> ret TReal
 
-                 Not        -> ret TBool
-                 And        -> ret TBool
-                 Or         -> ret TBool
-                 Xor        -> ret TBool
-                 Implies    -> ret TBool
-                 Eq         -> ret TBool
-                 Neq        -> ret TBool
-                 Lt         -> ret TBool
-                 Leq        -> ret TBool
-                 Gt         -> ret TBool
-                 Geq        -> ret TBool
-                 AtMostOne  -> ret TBool
-                 Nor        -> ret TBool
+                  Not        -> ret TBool
+                  And        -> ret TBool
+                  Or         -> ret TBool
+                  Xor        -> ret TBool
+                  Implies    -> ret TBool
+                  Eq         -> ret TBool
+                  Neq        -> ret TBool
+                  Lt         -> ret TBool
+                  Leq        -> ret TBool
+                  Gt         -> ret TBool
+                  Geq        -> ret TBool
+                  AtMostOne  -> ret TBool
+                  Nor        -> ret TBool
 
-                 Neg        -> ret t
-                 Mul        -> ret t
-                 Mod        -> ret t
-                 Div        -> ret t
-                 Add        -> ret t
-                 Sub        -> ret t
-                 Power      -> ret t
+                  Neg        -> ret t
+                  Mul        -> ret t
+                  Mod        -> ret t
+                  Div        -> ret t
+                  Add        -> ret t
+                  Sub        -> ret t
+                  Power      -> ret t
 
-                 ITE        -> case as of
-                                 _ : b : _ -> typeOf env b
-                                 _ -> Nothing
-          _ -> Nothing
+                  ITE        -> case as of
+                                  _ : b : _ -> typeOf env b
+                                  _ -> panic "typeOf" ["Malformed ITE"]
+          _ -> panic "typeOf" ["0 arity prim: " ++ showPP op]
 
 
 
@@ -266,12 +281,12 @@ instance TypeOf Expr where
       Atom a      -> typeOf env a
       a :-> _     -> typeOf env a
       Pre a       -> typeOf env a
-      a `When` b  -> do t `On` _ <- typeOf env a
-                        pure (t `On` b)
-      Current a   -> do t `On` c  <- typeOf env a
-                        _ `On` c1 <- typeOf env c
-                        pure (t `On` c1)
-      Merge c b _ -> do _ `On` c1 <- typeOf env c
-                        t `On` _  <- typeOf env b
-                        pure (t `On` c1)
+      a `When` b  -> let t `On` _ = typeOf env a
+                     in t `On` b
+      Current a   -> let t `On` c  = typeOf env a
+                         _ `On` c1 = typeOf env c
+                      in t `On` c1
+      Merge c b _ -> let _ `On` c1 = typeOf env c
+                         t `On` _  = typeOf env b
+                      in t `On` c1
 
