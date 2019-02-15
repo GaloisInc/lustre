@@ -59,6 +59,7 @@ noConst ds =
                 , nameCallSites   = True
                 , envCurMod       = Nothing
                 } ds
+     setNameSeed (envNameInstSeed env)
      pure (envCallSiteMap env, reverse (readyDecls env))
 
 
