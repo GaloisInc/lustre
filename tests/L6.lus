@@ -1,0 +1,5 @@
+function divtest(x : int; y : int) returns (q : int; r : int)
+let
+  q = x div y;
+  r = x mod y;
+tel

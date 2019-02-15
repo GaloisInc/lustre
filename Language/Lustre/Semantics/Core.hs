@@ -12,6 +12,7 @@ import Text.PrettyPrint(integer,double,text,Doc)
 import Language.Lustre.Panic
 import Language.Lustre.Pretty
 import Language.Lustre.Core
+import Language.Lustre.Semantics.BuiltIn(eucledean_div_mod)
 
 data Value    = VInt    !Integer
               | VBool   !Bool
@@ -287,15 +288,19 @@ evalPrimOp op vs =
        case vs of
          [ VNil, _ ]           -> VNil
          [ _, VNil ]           -> VNil
-         [ VInt x, VInt y ]    -> VInt (quot x y)
-         [ VReal x, VReal y ]   -> VReal (x / y)
+         [ VInt x, VInt y ]    -> case eucledean_div_mod x y of
+                                    Just (q,_) -> VInt q
+                                    Nothing    -> VNil -- ?
+         [ VReal x, VReal y ]  -> VReal (x / y)
          _                     -> bad "2 numbers"
 
      Mod ->
        case vs of
          [ VNil, _ ]           -> VNil
          [ _, VNil ]           -> VNil
-         [ VInt x, VInt y ]    -> VInt (rem x y)
+         [ VInt x, VInt y ]    -> case eucledean_div_mod x y of
+                                    Just (_,r) -> VInt r
+                                    Nothing    -> VNil -- ?
          _                     -> bad "2 ints"
 
      Power ->

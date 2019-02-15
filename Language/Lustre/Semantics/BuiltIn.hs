@@ -14,7 +14,7 @@ module Language.Lustre.Semantics.BuiltIn
   , sEq, sNeq, sLt, sGt, sLeq, sGeq, sITE
 
     -- ** Arithmetic
-  , sNeg, sAdd, sSub, sMul, sDiv, sMod, sPow
+  , sNeg, sAdd, sSub, sMul, sDiv, sMod, sPow, eucledean_div_mod
 
     -- * Data structures
   , sArray, sReplicate, sConcat, sSelectIndex, sSelectSlice
@@ -125,9 +125,10 @@ sMul = sOp2 $ \u v ->
 
 sDiv = sOp2 $ \u v ->
   case (u,v) of
-    (VInt x, VInt y)
-       | y /= 0    -> sInt (div x y)
-       | otherwise -> crash "div" "Division by 0"
+    (VInt x, VInt y) ->
+      case eucledean_div_mod x y of
+        Just (q,_) -> sInt q
+        Nothing    -> crash "div" "Division by 0"
     (VReal x, VReal y)
        | y /= 0    -> sReal (x / y)
        | otherwise -> crash "div" "Division by 0"
@@ -136,9 +137,10 @@ sDiv = sOp2 $ \u v ->
 
 sMod = sOp2 $ \u v ->
   case (u,v) of
-    (VInt x, VInt y)
-       | y /= 0    -> sInt (mod x y)
-       | otherwise -> crash "mod" "Division by 0"
+    (VInt x, VInt y) ->
+       case eucledean_div_mod x y of
+         Just (_,r) -> sInt r
+         Nothing    -> crash "mod" "Division by 0"
     _ -> typeError "mod" "`(int,Int)`"
 
 sAdd = sOp2 $ \u v ->
@@ -234,4 +236,16 @@ sSelectSlice sl v =
 
 
 
+eucledean_div_mod :: Integer -> Integer -> Maybe (Integer,Integer)
+eucledean_div_mod x y =
+  do q <- doDiv x y
+     let r = x - q * y
+     pure (q, r)
+  where
+  doDiv a b = case compare b 0 of
+                LT -> Just (negate (doDivPos a (negate b)))
+                EQ -> Nothing
+                GT -> Just (doDivPos a b)
+
+  doDivPos a b = floor (toRational a / toRational b)
 
