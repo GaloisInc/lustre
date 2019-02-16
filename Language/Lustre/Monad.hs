@@ -28,6 +28,9 @@ module Language.Lustre.Monad
   , nameSeedToInt
   , invalidNameSeed
   , isValidNameSeed
+
+    -- * Configuration
+  , lustreTCEnabled
   ) where
 
 
@@ -54,6 +57,7 @@ instance BaseM LustreM LustreM where
 
 data GlobalLustreEnv = GlobalLustreEnv
   { luLogHandle :: !Handle
+  , luTCEnabled :: !Bool
   }
 
 
@@ -91,13 +95,16 @@ isValidNameSeed (NameSeed x) = x >= 0
 data LustreConf = LustreConf
   { lustreInitialNameSeed :: Maybe NameSeed
   , lustreLogHandle       :: !Handle
+  , lustreNoTC            :: Bool
   }
 
 -- | Execute a Lustre computation.
 -- May throw `LustreError`
 runLustre :: LustreConf -> LustreM a -> IO a
 runLustre conf m =
-  do let env = GlobalLustreEnv { luLogHandle = lustreLogHandle conf }
+  do let env = GlobalLustreEnv { luLogHandle = lustreLogHandle conf
+                               , luTCEnabled = not (lustreNoTC conf)
+                               }
          st  = GlobalLustreState
                  { luNameSeed = case lustreInitialNameSeed conf of
                                   Nothing -> NameSeed 0
@@ -165,3 +172,6 @@ newInt =
      setNameSeed (nextNameSeed seed)
      pure (nameSeedToInt seed)
 
+
+lustreTCEnabled :: LustreM Bool
+lustreTCEnabled = LustreM (luTCEnabled <$> ask)

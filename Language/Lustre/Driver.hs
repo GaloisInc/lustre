@@ -7,6 +7,7 @@ import qualified Data.Set as Set
 import Data.List(foldl',sortBy)
 import Data.Text(Text)
 import AlexTools(sourceFrom,sourceIndex)
+import Control.Monad(when)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
@@ -44,9 +45,8 @@ quickDeclsSimp ds =
   do ds1 <- quickOrderTopDecl ds
      let enums = getEnumInfo ds1
 
-     quickCheckDecls ds1 -- XXX: only if enabled
-                         -- XXX: Currently parts of TC assume that constats
-                         -- have been evaluated?
+     tcOn <- lustreTCEnabled
+     when tcOn (quickCheckDecls ds1)
      (csMap,ds2) <- noConst ds1
      let nosIn = NosIn
                    { nosiStructs   = Map.empty

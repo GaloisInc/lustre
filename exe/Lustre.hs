@@ -26,6 +26,7 @@ conf :: LustreConf
 conf = LustreConf
   { lustreInitialNameSeed = Nothing
   , lustreLogHandle       = stdout
+  , lustreNoTC            = True
   }
 
 main :: IO ()
