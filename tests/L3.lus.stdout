@@ -1,31 +1,31 @@
-node (x.x_6 : int, x.y_7 : bool)
+node (x.x_4 : int, x.y_5 : bool)
   returns (y_3)
   assumes ()
   shows ()
 let
-  y_3 = ITE(x.y_7, x.x_6, 0)
+  y_3 = ITE(x.y_5, x.x_4, 0)
 tel
 --- Step 1 ---
-x.x_6 : int  = 1
-x.y_7 : bool  = True
+x.x_4 : int  = 1
+x.y_5 : bool  = True
 y_3 = 1
 --- Step 2 ---
-x.x_6 : int  = 2
-x.y_7 : bool  = False
+x.x_4 : int  = 2
+x.y_5 : bool  = False
 y_3 = 0
 --- Step 3 ---
-x.x_6 : int  = 3
-x.y_7 : bool  = True
+x.x_4 : int  = 3
+x.y_5 : bool  = True
 y_3 = 3
 --- Step 4 ---
-x.x_6 : int  = 4
-x.y_7 : bool  = False
+x.x_4 : int  = 4
+x.y_5 : bool  = False
 y_3 = 0
 --- Step 5 ---
-x.x_6 : int  = 5
-x.y_7 : bool  = False
+x.x_4 : int  = 5
+x.y_5 : bool  = False
 y_3 = 0
 --- Step 6 ---
-x.x_6 : int  = 6
-x.y_7 : bool  = True
+x.x_4 : int  = 6
+x.y_5 : bool  = True
 y_3 = 6

@@ -3,10 +3,10 @@ node (x_2 : int)
   assumes ()
   shows ()
 let
-  a_16 = x_2
-  b_17 = x_2
-  c_4 = Sub(a_16, b_17)
-  d_5 = Add(a_16, b_17)
+  a_10 = x_2
+  b_11 = x_2
+  c_4 = Sub(a_10, b_11)
+  d_5 = Add(a_10, b_11)
   y_3 = Add(c_4, d_5)
 tel
 --- Step 1 ---
