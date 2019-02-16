@@ -1,13 +1,15 @@
 module Language.Lustre.Utils where
 
 import Language.Lustre.Panic
+import Language.Lustre.Pretty
 
 -- | Like 'zipWith' except panic if the lists have different lenghts.
-zipExact :: (a -> b -> c) -> [a] -> [b] -> [c]
-zipExact f as bs =
-  case (as, bs) of
-    ([],[])           -> []
-    (x : xs, y : ys)  -> f x y : zipExact f xs ys
-    ([], _)           -> panic "zipExact" [ "More on the right." ]
-    _                 -> panic "zipExact" [ "More on the left."  ]
+zipExact :: (Pretty a, Pretty b) => (a -> b -> c) -> [a] -> [b] -> [c]
+zipExact f xs ys
+  | length xs == length ys = zipWith f xs ys
+  | otherwise = panic "zipExact"
+                  $ "MISMATCH"
+                  : "--- LHS: ---"
+                  : map showPP xs
+                  ++ ("--- RHS: ---" : map showPP ys)
 
