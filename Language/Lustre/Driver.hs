@@ -30,14 +30,20 @@ quickNodeToCore mb ds =
   do (info,ds1) <- quickDeclsSimp ds
      nodeToCore mb info ds1
 
+data Env = Env
+  { envNodes :: Map P.OrigName ModelFunInfo
+  , envEnums :: Map P.OrigName C.Expr
+  }
 
 -- | Process a bunch of declarations in preparation for translating to core.
 -- This function works only on standalone declarations, not accounting
 -- for a broader context.
 quickDeclsSimp :: [P.TopDecl] ->
-                  LustreM (Map P.OrigName ModelFunInfo, [P.TopDecl])
+                  LustreM (Env, [P.TopDecl])
 quickDeclsSimp ds =
   do ds1 <- quickOrderTopDecl ds
+     let enums = getEnumInfo ds1
+
      quickCheckDecls ds1 -- XXX: only if enabled
                          -- XXX: Currently parts of TC assume that constats
                          -- have been evaluated?
@@ -48,18 +54,20 @@ quickDeclsSimp ds =
                    }
      (nosOut,ds3) <- noStruct nosIn ds2
      (rens,ds4)   <- inlineCalls [] ds3
-     pure (mfiMap ds1 nosOut rens, ds4)
+     pure (Env { envNodes = mfiMap ds1 nosOut rens
+               , envEnums = enums
+               }
+          , ds4)
 
 nodeToCore ::
   Maybe Text {- ^ Node to translate -} ->
-  Map P.OrigName ModelFunInfo {- ^ Info about simplified nodes -} ->
+  Env        {- ^ Info about the environment -} ->
   [P.TopDecl]                 {- ^ Simplified top decls -} ->
   LustreM (ModelInfo, C.Node)
-nodeToCore mb mfi ds =
+nodeToCore mb env ds =
   do nd           <- findNode mb ds
-     let enumInfo = getEnumInfo ds  -- XXX: Can be done once
-     (varMp,core) <- evalNodeDecl enumInfo nd
-     pure (ModelInfo { infoNodes = mfi
+     (varMp,core) <- evalNodeDecl (envEnums env) nd
+     pure (ModelInfo { infoNodes = envNodes env
                      , infoTop   = P.identOrigName (P.nodeName nd)
                      , infoCore  = varMp
                      }
