@@ -348,7 +348,7 @@ evalEqn eqn =
          ls <- concat <$> traverse expandLHS lhs
          pure (case es of
                  [e1] | isCall e1 -> [ Define ls e1 ]
-                 _ -> zipExact def ls es)
+                 _ | otherwise -> zipExact def ls es)
 
       where
       def l a = Define [l] a
@@ -608,6 +608,14 @@ evalExpr expr =
              -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
              (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2]) ->
                evalBin (bin r Fby) e1 e2
+
+             -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
+             (NodeInst (CallPrim r (Op2 FbyArr)) [], [e1,e2]) ->
+               evalBin (bin r FbyArr) e1 e2
+
+             -- pre [x,y] ~~~> [pre x, pre y]
+             (NodeInst (CallPrim _ (Op1 Pre)) [], [e]) -> pre <$> e
+                  where pre a = Call f [a]
 
              -- if a then [x1,x2] else [y1,y2]  ~~>
              -- [ if a then x1 else y1, if a then x2 else y2 ]
