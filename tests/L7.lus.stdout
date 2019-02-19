@@ -1,0 +1,34 @@
+node (x_4 : int)
+  returns (y_5)
+  assumes ()
+  shows ()
+let
+  y_5 = ITE(Gt(x_4, 5), 0, 1)
+tel
+--- Step 1 ---
+x_4 : int  = 7
+y_5 = 0
+--- Step 2 ---
+x_4 : int  = 7
+y_5 = 0
+--- Step 3 ---
+x_4 : int  = 5
+y_5 = 1
+--- Step 4 ---
+x_4 : int  = 5
+y_5 = 1
+--- Step 5 ---
+x_4 : int  = 10
+y_5 = 0
+--- Step 6 ---
+x_4 : int  = 10
+y_5 = 0
+--- Step 7 ---
+x_4 : int  = 6
+y_5 = 0
+--- Step 8 ---
+x_4 : int  = 6
+y_5 = 0
+--- Step 9 ---
+x_4 : int  = 11
+y_5 = 0

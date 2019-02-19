@@ -1,0 +1,6 @@
+type T = enum { A, B };
+
+function f(x : int) returns (y : T)
+let
+  y = if (x > 5) then A else B;
+tel

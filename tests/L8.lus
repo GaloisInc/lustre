@@ -1,0 +1,8 @@
+type S = struct { x : int; y : int };
+
+node f (i : int) returns (x : S)
+let
+  x = S { x = 0; y = 0 } -> S { x = (pre x).x + i; y = (pre x).y };
+tel
+
+

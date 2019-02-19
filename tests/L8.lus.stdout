@@ -1,0 +1,30 @@
+node (i_2 : int)
+  returns (x.x_4, x.y_5)
+  assumes ()
+  shows ()
+let
+  _pre_x.x_4_6 = pre x.x_4
+  _pre_x.y_5_7 = pre x.y_5
+  x.x_4 = 0 -> Add(_pre_x.x_4_6, i_2)
+  x.y_5 = 0 -> _pre_x.y_5_7
+tel
+--- Step 1 ---
+i_2 : int  = 1
+x.x_4 = 0
+x.y_5 = 0
+--- Step 2 ---
+i_2 : int  = 2
+x.x_4 = 2
+x.y_5 = 0
+--- Step 3 ---
+i_2 : int  = 3
+x.x_4 = 5
+x.y_5 = 0
+--- Step 4 ---
+i_2 : int  = 4
+x.x_4 = 9
+x.y_5 = 0
+--- Step 5 ---
+i_2 : int  = 5
+x.x_4 = 14
+x.y_5 = 0
