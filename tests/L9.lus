@@ -1,0 +1,5 @@
+function fibs(a : int) returns (x : int)
+  var y : int;
+let
+  x,y = (0,1) -> (pre y, pre x + pre y);
+tel
