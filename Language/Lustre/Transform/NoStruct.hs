@@ -649,7 +649,10 @@ evalExpr env expr =
           evalBin (bin r FbyArr) e1 e2
 
         -- pre [x,y] ~~~> [pre x, pre y]
-        (NodeInst (CallPrim _ (Op1 Pre)) [], [e]) -> pre <$> e
+        (NodeInst (CallPrim _ (Op1 Pre)) [], args) ->
+            case args of
+              [e] -> pre <$> e
+              _   -> STuple [ pre <$> e | e <- args ]
              where pre a = Call f [a]
 
         -- if a then [x1,x2] else [y1,y2]  ~~>
