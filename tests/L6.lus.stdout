@@ -1,28 +1,28 @@
-node (x_1 : int, y_2 : int)
-  returns (q_3, r_4)
+node (x : int, y : int)
+  returns (q, r)
   assumes ()
   shows ()
 let
-  q_3 = Div(x_1, y_2)
-  r_4 = Mod(x_1, y_2)
+  q = Div(x, y)
+  r = Mod(x, y)
 tel
 --- Step 1 ---
-x_1 : int  = 7
-y_2 : int  = 3
-q_3 = 2
-r_4 = 1
+x : int  = 7
+y : int  = 3
+q = 2
+r = 1
 --- Step 2 ---
-x_1 : int  = 7
-y_2 : int  = -3
-q_3 = -2
-r_4 = 1
+x : int  = 7
+y : int  = -3
+q = -2
+r = 1
 --- Step 3 ---
-x_1 : int  = -7
-y_2 : int  = 3
-q_3 = -3
-r_4 = 2
+x : int  = -7
+y : int  = 3
+q = -3
+r = 2
 --- Step 4 ---
-x_1 : int  = -7
-y_2 : int  = -3
-q_3 = 3
-r_4 = 2
+x : int  = -7
+y : int  = -3
+q = 3
+r = 2

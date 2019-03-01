@@ -11,6 +11,7 @@ import Text.PrettyPrint(integer,double,text,Doc)
 
 import Language.Lustre.Panic
 import Language.Lustre.Pretty
+import Language.Lustre.Name(Ident)
 import Language.Lustre.Core
 import Language.Lustre.Semantics.BuiltIn(eucledean_div_mod)
 

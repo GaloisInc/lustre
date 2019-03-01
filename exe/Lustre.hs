@@ -13,6 +13,7 @@ import System.Environment
 import qualified Data.Map as Map
 import Numeric(readSigned,readFloat)
 
+import Language.Lustre.Name(Ident)
 import Language.Lustre.AST(Program(..))
 import Language.Lustre.Core
 import Language.Lustre.Semantics.Core
@@ -95,14 +96,16 @@ runNodeIO sIn node =
                    mapM_ (showOut s1) (nOutputs node)
                    go (n+1) s1
 
-  showOut s x = print (ppIdent x <+> "=" <+> ppValue (evalVar s x))
+  showOut s x = print (pp x <+> "=" <+> ppValue (evalVar s x))
 
   getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 
   getInput b@(_ ::: t `On` _) =
-    do putStr (show (ppBinder b <+> " = "))
+    do putStr (show (ppBinder ppinfo b <+> " = "))
        hFlush stdout
        doGet b
+
+  ppinfo = nodePPInfo node
 
   doGet :: Binder -> IO (Ident,Value)
   doGet b@(x ::: t) =
@@ -110,7 +113,7 @@ runNodeIO sIn node =
        when (echo sIn) (putStrLn txt)
        case parseVal (typeOfCType t) txt of
          Just ok -> pure (x, ok)
-         Nothing -> do putStrLn ("Invalid " ++ show (ppCType t))
+         Nothing -> do putStrLn ("Invalid " ++ show (ppCType ppinfo t))
                        getInput b
 
 parseVal :: Type -> String -> Maybe Value

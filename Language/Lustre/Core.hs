@@ -2,8 +2,6 @@
 module Language.Lustre.Core
   (module Language.Lustre.Core, Literal(..)) where
 
-import Data.Text(Text)
-import qualified Data.Text as Text
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Set(Set)
@@ -15,11 +13,14 @@ import Text.PrettyPrint( Doc, text, (<+>)
 import qualified Text.PrettyPrint as PP
 
 import Language.Lustre.AST (Literal(..),PropName(..))
+import Language.Lustre.Name
 import Language.Lustre.Pretty
 import Language.Lustre.Panic(panic)
 
+{-
 data Ident    = Ident Text
                 deriving (Show,Eq,Ord)
+-}
 
 -- XXX: Support for integer ranges.
 -- This would be useful to model enums, as well as "subrange [x,y] of int"
@@ -118,11 +119,19 @@ orderedEqns eqns
 --------------------------------------------------------------------------------
 -- Pretty Printing
 
-ppIdent :: Ident -> Doc
-ppIdent (Ident x) = text (Text.unpack x)
+
+type PPInfo = Set Ident -- These idents are safe and no need to show unique
+
+noInfo :: PPInfo
+noInfo = Set.empty
 
 ppPrim :: Op -> Doc
 ppPrim = text . show
+
+ppIdent :: PPInfo -> Ident -> Doc
+ppIdent info i
+  | i `Set.member` info = pp i
+  | otherwise = pp (identText i) PP.<> "_" PP.<> PP.int (identUID i)
 
 ppType :: Type -> Doc
 ppType ty =
@@ -131,53 +140,67 @@ ppType ty =
     TReal -> text "real"
     TBool -> text "bool"
 
-ppCType :: CType -> Doc
-ppCType (t `On` c) =
+ppCType :: PPInfo -> CType -> Doc
+ppCType env (t `On` c) =
   case c of
     Lit (Bool True) -> ppType t
-    _ -> ppType t <+> "when" <+> ppAtom c
+    _ -> ppType t <+> "when" <+> ppAtom env c
 
-ppBinder :: Binder -> Doc
-ppBinder (x ::: t) = ppIdent x <+> text ":" <+> ppCType t
+ppBinder :: PPInfo -> Binder -> Doc
+ppBinder env (x ::: t) = ppIdent env x <+> text ":" <+> ppCType env t
 
-ppAtom :: Atom -> Doc
-ppAtom atom =
+ppAtom :: PPInfo -> Atom -> Doc
+ppAtom env atom =
   case atom of
     Lit l -> pp l
-    Var x -> ppIdent x
-    Prim f as   -> ppPrim f PP.<> ppTuple (map ppAtom as)
+    Var x -> ppIdent env x
+    Prim f as   -> ppPrim f PP.<> ppTuple (map (ppAtom env) as)
 
-ppExpr :: Expr -> Doc
-ppExpr expr =
+ppExpr :: PPInfo -> Expr -> Doc
+ppExpr env expr =
   case expr of
-    Atom a      -> ppAtom a
-    a :-> b     -> ppAtom a <+> text "->" <+> ppAtom b
-    Pre a       -> text "pre" <+> ppAtom a
-    a `When` b  -> ppAtom a <+> text "when" <+> ppAtom b
-    Current a   -> text "current" <+> ppAtom a
-    Merge a b c -> text "merge" <+> ppAtom a <+> ppAtom b <+> ppAtom c
+    Atom a      -> ppAtom env a
+    a :-> b     -> ppAtom env a <+> text "->" <+> ppAtom env b
+    Pre a       -> text "pre" <+> ppAtom env a
+    a `When` b  -> ppAtom env a <+> text "when" <+> ppAtom env b
+    Current a   -> text "current" <+> ppAtom env a
+    Merge a b c ->
+      text "merge" <+> ppAtom env a <+> ppAtom env b <+> ppAtom env c
 
 
 ppTuple :: [Doc] -> Doc
 ppTuple ds = parens (hsep (punctuate comma ds))
 
-ppEqn :: Eqn -> Doc
-ppEqn (x ::: t := e) =
-  ppIdent x <+> "=" <+> ppExpr e -- <+> "//" <+> ppCType t
+ppEqn :: PPInfo -> Eqn -> Doc
+ppEqn env (x ::: t := e) =
+  ppIdent env x <+> "=" <+> ppExpr env e -- <+> "//" <+> ppCType env t
 
 ppNode :: Node -> Doc
 ppNode node =
-  text "node" <+> ppTuple (map ppBinder (nInputs node))
-  $$ nest 2 (  text "returns" <+> ppTuple (map ppIdent (nOutputs node))
-            $$ text "assumes" <+> ppTuple (map (ppIdent.snd) (nAssuming node))
-            $$ text "shows" <+> ppTuple (map (ppIdent.snd) (nShows node))
+  text "node" <+> ppTuple (map (ppBinder env) (nInputs node))
+  $$ nest 2 (  text "returns" <+> ppTuple (map (ppIdent env) (nOutputs node))
+            $$ text "assumes" <+> ppTuple (map (ppIdent env . snd)
+                                                (nAssuming node))
+            $$ text "shows" <+> ppTuple (map (ppIdent env .snd) (nShows node))
             )
   $$ text "let"
-  $$ nest 2 (vcat (map ppEqn (nEqns node)))
+  $$ nest 2 (vcat (map (ppEqn env) (nEqns node)))
   $$ text "tel"
+  where env = nodePPInfo node
 
-instance Pretty Ident where
-  ppPrec _ = ppIdent
+nodePPInfo :: Node -> PPInfo
+nodePPInfo node =
+  Set.fromList
+    [ i | [i] <- Map.elems $ Map.fromListWith (++)
+                           $ map binderInfo
+                           $ nInputs node ++
+                             [ b | b := _ <- nEqns node ]
+    ]
+
+  where
+  binderInfo (x ::: _) = (identText x, [x])
+
+
 
 instance Pretty Op where
   ppPrec _ = ppPrim
@@ -186,19 +209,19 @@ instance Pretty Type where
   ppPrec _ = ppType
 
 instance Pretty CType where
-  ppPrec _ = ppCType
+  ppPrec _ = ppCType noInfo
 
 instance Pretty Binder where
-  ppPrec _ = ppBinder
+  ppPrec _ = ppBinder noInfo
 
 instance Pretty Atom where
-  ppPrec _ = ppAtom
+  ppPrec _ = ppAtom noInfo
 
 instance Pretty Expr where
-  ppPrec _ = ppExpr
+  ppPrec _ = ppExpr noInfo
 
 instance Pretty Eqn where
-  ppPrec _ = ppEqn
+  ppPrec _ = ppEqn noInfo
 
 instance Pretty Node where
   ppPrec _ = ppNode

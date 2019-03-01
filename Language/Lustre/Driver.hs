@@ -11,6 +11,7 @@ import Control.Monad(when)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
+import Language.Lustre.Name
 import Language.Lustre.Monad
 import Language.Lustre.Transform.OrderDecls
 import Language.Lustre.TypeCheck
@@ -114,7 +115,7 @@ data ModelInfo = ModelInfo
   , infoTop     :: P.OrigName
     -- ^ Name for top node
 
-  , infoCore    :: Map P.OrigName C.Ident
+  , infoCore    :: Map P.OrigName Ident
     -- ^ Mapping between identifiers in top-level node
 
   }

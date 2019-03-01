@@ -15,8 +15,8 @@ module Language.Lustre.ModelState
 import Data.Map (Map)
 import qualified Data.Map as Map
 
+import Language.Lustre.Name(Ident)
 import qualified Language.Lustre.AST  as P
-import qualified Language.Lustre.Core as C
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
 import Language.Lustre.Driver(ModelInfo(..), ModelFunInfo(..))
@@ -26,7 +26,7 @@ import Language.Lustre.Panic(panic)
 
 -- | A state for a core lustre program.
 type S            = Map CoreIdent CoreValue
-type CoreIdent    = C.Ident     -- ^ Identifier in the core syntax
+type CoreIdent    = Ident       -- ^ Identifier in the core syntax
 type CoreValue    = L.Value     -- ^ Value for a core expression
 
 type SourceIdent  = P.OrigName -- ^ Identifier in the source syntax

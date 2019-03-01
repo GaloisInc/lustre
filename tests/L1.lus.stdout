@@ -1,15 +1,15 @@
-node (a_1 : int, b_2 : int)
-  returns (c_3)
+node (a : int, b : int)
+  returns (c)
   assumes ()
   shows ()
 let
-  c_3 = Add(a_1, b_2)
+  c = Add(a, b)
 tel
 --- Step 1 ---
-a_1 : int  = 1
-b_2 : int  = 2
-c_3 = 3
+a : int  = 1
+b : int  = 2
+c = 3
 --- Step 2 ---
-a_1 : int  = 3
-b_2 : int  = 4
-c_3 = 7
+a : int  = 3
+b : int  = 4
+c = 7

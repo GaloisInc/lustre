@@ -1,38 +1,38 @@
-node (a_1 : int)
-  returns (x_2)
+node (a : int)
+  returns (x)
   assumes ()
   shows ()
 let
-  _pre_x_2_5 = pre x_2
-  _pre_y_3_4 = pre y_3
-  _pre_y_3_6 = pre y_3
-  x_2 = 0 -> _pre_y_3_4
-  y_3 = 1 -> Add(_pre_x_2_5, _pre_y_3_6)
+  valof_pre_y_4 = pre y
+  x = 0 -> valof_pre_y_4
+  valof_pre_x = pre x
+  valof_pre_y_6 = pre y
+  y = 1 -> Add(valof_pre_x, valof_pre_y_6)
 tel
 --- Step 1 ---
-a_1 : int  = 0
-x_2 = 0
+a : int  = 0
+x = 0
 --- Step 2 ---
-a_1 : int  = 0
-x_2 = 1
+a : int  = 0
+x = 1
 --- Step 3 ---
-a_1 : int  = 0
-x_2 = 1
+a : int  = 0
+x = 1
 --- Step 4 ---
-a_1 : int  = 0
-x_2 = 2
+a : int  = 0
+x = 2
 --- Step 5 ---
-a_1 : int  = 0
-x_2 = 3
+a : int  = 0
+x = 3
 --- Step 6 ---
-a_1 : int  = 0
-x_2 = 5
+a : int  = 0
+x = 5
 --- Step 7 ---
-a_1 : int  = 0
-x_2 = 8
+a : int  = 0
+x = 8
 --- Step 8 ---
-a_1 : int  = 0
-x_2 = 13
+a : int  = 0
+x = 13
 --- Step 9 ---
-a_1 : int  = 0
-x_2 = 21
+a : int  = 0
+x = 21
