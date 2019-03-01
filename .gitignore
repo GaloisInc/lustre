@@ -1,5 +1,7 @@
 dist
 dist-newstyle
 .ghc.environment.*
-cabal.project
+cabal.project.local
 *.hs~
+/output
+/bin/test-runner
