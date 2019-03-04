@@ -105,7 +105,7 @@ runNodeIO sIn node =
        hFlush stdout
        doGet b
 
-  ppinfo = qualIdents node
+  ppinfo = unqualIdents node
 
   doGet :: Binder -> IO (Ident,Value)
   doGet b@(x ::: t) =
