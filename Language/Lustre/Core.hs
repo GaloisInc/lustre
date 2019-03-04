@@ -186,10 +186,12 @@ ppNode node =
   $$ text "let"
   $$ nest 2 (vcat (map (ppEqn env) (nEqns node)))
   $$ text "tel"
-  where env = nodePPInfo node
+  where env = qualIdents node
 
-nodePPInfo :: Node -> PPInfo
-nodePPInfo node =
+-- | The set of variables in the node that should be qualified with their
+-- unique identifier as they share a textual name with other variables.
+qualIdents :: Node -> Set Ident
+qualIdents node =
   Set.fromList
     [ i | [i] <- Map.elems $ Map.fromListWith (++)
                            $ map binderInfo
