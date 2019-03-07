@@ -3,7 +3,7 @@ module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Control.Monad(when,unless,zipWithM_)
+import Control.Monad(when,unless,zipWithM_,forM,replicateM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 
@@ -13,6 +13,7 @@ import Language.Lustre.Panic
 import Language.Lustre.Monad(LustreM)
 import Language.Lustre.TypeCheck.Monad
 import Language.Lustre.TypeCheck.Constraint
+import Language.Lustre.TypeCheck.Arity
 
 
 type TypeError = Doc
@@ -297,6 +298,9 @@ checkConstExpr expr ty =
 checkExpr1 :: Expression -> CType -> M ()
 checkExpr1 e t = checkExpr e [t]
 
+
+
+
 {- | Check if an expression has the given type.
 Tuples and function calls may return multiple results,
 which is why we provide multiple clocked types. -}
@@ -467,16 +471,12 @@ checkPrim prim es tys =
 
     Op1 op1 ->
       case es of
-        [e] -> do ty <- one tys
-                  checkOp1 op1 e ty
+        [e] -> checkOp1 op1 e tys
         _   -> reportError $ text (showPP op1 ++ " expects 1 argument.")
 
-    -- IMPORTANT: all binary operators work with the same clocks,
-    -- so we do the clock checking here.  THIS MAY CHANGE if we add more ops!
     Op2 op2 ->
       case es of
-        [e1,e2] -> do ty <- one tys
-                      checkOp2 op2 e1 e2 ty
+        [e1,e2] -> checkOp2 op2 e1 e2 tys
         _ -> reportError $ text (showPP op2 ++ " expects 2 arguments.")
 
     ITE ->
@@ -515,65 +515,76 @@ checkMergeCase i (MergeCase p e) it ts =
   toCType t = CType { cClock = clk, cType = t }
 
 -- | Types of unary opertaors.
-checkOp1 :: Op1 -> Expression -> CType -> M ()
-checkOp1 op e ty =
+checkOp1 :: Op1 -> Expression -> [CType] -> M ()
+checkOp1 op e tys =
   case op of
     Pre -> do checkTemporalOk "pre"
-              checkExpr1 e ty
+              checkExpr e tys
 
     Current ->
       do checkTemporalOk "current"
-         c <- newClockVar
-         checkExpr1 e ty { cClock = c }
+         tys1 <- forM tys $ \ty ->
+                    do c <- newClockVar
+                       pure ty { cClock = c }
+         checkExpr e tys1
+
          -- By now we should have figured out the missing clock,
          -- so check straight away
-         sameClock (cClock ty) =<< clockParent c
+         let checkClock ty newTy =
+                sameClock (cClock ty) =<< clockParent (cClock newTy)
+         zipWithM_ checkClock tys tys1
 
     Not ->
-      do checkExpr1 e ty { cType = BoolType }
+      do ty <- one tys
+         checkExpr1 e ty { cType = BoolType }
          ensure (Subtype BoolType (cType ty))
 
-    Neg -> do t <- newTVar
-              checkExpr1 e ty { cType = t }
-              ensure (Arith1 "-" t (cType ty))
+    Neg ->
+      do ty <- one tys
+         t <- newTVar
+         checkExpr1 e ty { cType = t }
+         ensure (Arith1 "-" t (cType ty))
 
     IntCast ->
-      do checkExpr1 e ty { cType = RealType }
+      do ty <- one tys
+         checkExpr1 e ty { cType = RealType }
          ensure (Subtype IntType (cType ty))
 
     FloorCast ->
-      do checkExpr1 e ty { cType = RealType }
+      do ty <- one tys
+         checkExpr1 e ty { cType = RealType }
          ensure (Subtype IntType (cType ty))
 
     RealCast ->
-      do checkExpr1 e ty { cType = IntType }
+      do ty <- one tys
+         checkExpr1 e ty { cType = IntType }
          ensure (Subtype RealType (cType ty))
 
 
 -- | Types of binary operators.
-checkOp2 :: Op2 -> Expression -> Expression -> CType -> M ()
-checkOp2 op2 e1 e2 res =
+checkOp2 :: Op2 -> Expression -> Expression -> [CType] -> M ()
+checkOp2 op2 e1 e2 tys =
   case op2 of
     FbyArr   -> do checkTemporalOk "->"
-                   checkExpr1 e1 res
-                   checkExpr1 e2 res
+                   checkExpr e1 tys
+                   checkExpr e2 tys
 
     Fby      -> do checkTemporalOk "fby"
-                   checkExpr1 e1 res
-                   checkExpr1 e2 res
+                   checkExpr e1 tys
+                   checkExpr e2 tys
 
     And      -> bool2
     Or       -> bool2
     Xor      -> bool2
     Implies  -> bool2
 
-    Eq       -> rel (CmpEq "=")
-    Neq      -> rel (CmpEq "<>")
+    Eq       -> eqRel "="
+    Neq      -> eqRel "<>"
 
-    Lt       -> rel (CmpOrd "<")
-    Leq      -> rel (CmpOrd "<=")
-    Gt       -> rel (CmpOrd ">")
-    Geq      -> rel (CmpOrd ">=")
+    Lt       -> ordRel "<"
+    Leq      -> ordRel "<="
+    Gt       -> ordRel ">"
+    Geq      -> ordRel ">="
 
     Add      -> arith "+"
     Sub      -> arith "-"
@@ -586,10 +597,11 @@ checkOp2 op2 e1 e2 res =
     Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
 
     Concat ->
-      do a0 <- newTVar
-         checkExpr1 e1 res { cType = a0 }
+      do ty <- one tys
+         a0 <- newTVar
+         checkExpr1 e1 ty { cType = a0 }
          b0 <- newTVar
-         checkExpr1 e2 res { cType = b0 }
+         checkExpr1 e2 ty { cType = b0 }
          a <- tidyType a0
          b <- tidyType b0
          case a of
@@ -600,7 +612,7 @@ checkOp2 op2 e1 e2 res =
                     ensure (Subtype elT1 c)
                     ensure (Subtype elT2 c)
                     sz <- addExprs sz1 sz2
-                    ensure (Subtype (ArrayType c sz) (cType res))
+                    ensure (Subtype (ArrayType c sz) (cType ty))
                TVar {} -> noInfer "right"
                _       -> typeError "right" b
            TVar {} ->
@@ -622,24 +634,34 @@ checkOp2 op2 e1 e2 res =
 
 
   where
-  bool2 = do checkExpr1 e1 res { cType = BoolType }
-             checkExpr1 e1 res { cType = BoolType }
-             retBool
+  bool2     = do ty <- one tys
+                 checkExpr1 e1 ty { cType = BoolType }
+                 checkExpr1 e2 ty { cType = BoolType }
+                 ensure (Subtype BoolType (cType ty))
 
-  infer2 = do t1 <- newTVar
-              checkExpr1 e1 res { cType = t1 }
-              t2 <- newTVar
-              checkExpr1 e2 res { cType = t2 }
-              pure (t1,t2)
+  infer2    = do ty <- one tys
+                 t1 <- newTVar
+                 checkExpr1 e1 ty { cType = t1 }
+                 t2 <- newTVar
+                 checkExpr1 e2 ty { cType = t2 }
+                 pure (t1,t2,ty)
 
-  rel f = do (t1,t2) <- infer2
-             () <- ensure (f t1 t2)
-             retBool
+  ordRel op = do (t1,t2,ty) <- infer2
+                 ensure (CmpOrd op t1 t2)
+                 ensure (Subtype BoolType (cType ty))
 
-  retBool = ensure (Subtype BoolType (cType res))
+  arith x   = do (t1,t2,ty) <- infer2
+                 ensure (Arith2 x t1 t2 (cType ty))
 
-  arith x = do (t1,t2) <- infer2
-               ensure (Arith2 x t1 t2 (cType res))
+  eqRel op  = do ty  <- one tys
+                 n   <- exprArity e1
+                 tv1s <- replicateM n newTVar
+                 tv2s <- replicateM n newTVar
+                 let toTy t = ty { cType = t }
+                 checkExpr e1 (map toTy tv1s)
+                 checkExpr e2 (map toTy tv2s)
+                 zipWithM_ (\t1 t2 -> ensure (CmpEq op t1 t2)) tv1s tv2s
+                 ensure (Subtype BoolType (cType ty))
 
 
 
