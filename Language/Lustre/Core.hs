@@ -120,18 +120,21 @@ orderedEqns eqns
 -- Pretty Printing
 
 
-type PPInfo = Set Ident -- These idents are safe and no need to show unique
+-- | Local identifier numbering. See `identVariants`.
+type PPInfo = Map Ident Int
 
 noInfo :: PPInfo
-noInfo = Set.empty
+noInfo = Map.empty
 
 ppPrim :: Op -> Doc
 ppPrim = text . show
 
 ppIdent :: PPInfo -> Ident -> Doc
-ppIdent info i
-  | i `Set.member` info = pp i
-  | otherwise = pp (identText i) PP.<> "_" PP.<> PP.int (identUID i)
+ppIdent info i =
+  case Map.lookup i info of
+    Nothing -> pp (identText i) PP.<> "$u" PP.<> PP.int (identUID i)
+    Just 0  -> pp i
+    Just n  -> pp i PP.<> "$" PP.<> PP.int n
 
 ppType :: Type -> Doc
 ppType ty =
@@ -186,21 +189,25 @@ ppNode node =
   $$ text "let"
   $$ nest 2 (vcat (map (ppEqn env) (nEqns node)))
   $$ text "tel"
-  where env = unqualIdents node
+  where env = identVariants node
 
--- | The set of variables in the node that don't need to be qualified with their
--- unique identifier as they don't share text with anything.
-unqualIdents :: Node -> Set Ident
-unqualIdents node =
-  Set.fromList
-    [ i | [i] <- Map.elems $ Map.fromListWith (++)
-                           $ map binderInfo
-                           $ nInputs node ++
-                             [ b | b := _ <- nEqns node ]
-    ]
+
+-- | Pick a normalized number for the identifier in a node.
+-- Identifiers with the same text name are going to get different numbers.
+-- Identifiers that only have one version around will get the number 0.
+-- This is handy for pretty printing and exporting to external tools.
+identVariants :: Node -> Map Ident Int
+identVariants node = Map.fromList
+                   $ concat
+                   $ Map.elems
+                   $ fmap (`zip` [ 0 .. ])
+                   $ Map.fromListWith (++)
+                   $ map binderInfo
+                   $ nInputs node ++ [ b | b := _ <- nEqns node ]
 
   where
   binderInfo (x ::: _) = (identText x, [x])
+
 
 
 
