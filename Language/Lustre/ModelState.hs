@@ -6,10 +6,10 @@ module Language.Lustre.ModelState
     CallSiteId, callSiteName,
 
     -- * Accessing Variables
-    S, Vars(..), lookupVars,
+    S, Vars(..), lookupVars, locVars,
     -- * Names
     CoreValue, SourceValue,
-    CoreIdent, SourceIdent
+    SourceIdent
   ) where
 
 import Data.Map (Map)
@@ -25,8 +25,7 @@ import qualified Language.Lustre.Semantics.Value as V
 import Language.Lustre.Panic(panic)
 
 -- | A state for a core lustre program.
-type S            = Map CoreIdent CoreValue
-type CoreIdent    = Ident       -- ^ Identifier in the core syntax
+type S            = Map Ident CoreValue
 type CoreValue    = L.Value     -- ^ Value for a core expression
 
 type SourceIdent  = P.OrigName -- ^ Identifier in the source syntax
@@ -107,6 +106,10 @@ exitCall = lAbove
 
 
 --------------------------------------------------------------------------------
+
+-- | The variables at this location.
+locVars :: Loc -> Vars SourceIdent
+locVars = lVars
 
 -- | Get the values for all varialbes in a location.
 lookupVars :: Loc -> S -> Vars (SourceIdent, Maybe SourceValue)
