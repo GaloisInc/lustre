@@ -456,29 +456,22 @@ evalBin f e1 e2 =
 
 -- | Evaluate a struct update
 evalStructUpdate ::
-  OrigName {- type -} -> Name -> [Field Expression] -> NosM (StructData Expression)
-evalStructUpdate s x es =
-  do mb <- lkpStrName x
-     case mb of
-       Just ev ->
-         case ev of
-           SStruct s' oldVal | s == s' ->
-              do newVals <- traverse evalField es  -- user provided values
-                 let newMap = Map.fromList [ (l,e) | Field l e <- newVals ]
-                     toExpr = fmap (Var . origNameToName)
-                 pure $ SStruct s
-                          [ Field l (Map.findWithDefault (toExpr v) l newMap)
-                                                         | Field l v <- oldVal ]
+  OrigName {- type -} ->
+  Expression -> [Field Expression] -> NosM (StructData Expression)
+evalStructUpdate s expr es =
+  do ev <- evalExpr expr
+     case ev of
+       SStruct s' oldVal | s == s' ->
+          do newVals <- traverse evalField es  -- user provided values
+             let newMap = Map.fromList [ (l,e) | Field l e <- newVals ]
+             pure $ SStruct s
+                      [ Field l (Map.findWithDefault v l newMap)
+                                                     | Field l v <- oldVal ]
 
-           _ -> bad [ "Unexpected value to update:"
-                    , "*** Expected: a struct"
-                    , "*** Expression: " ++ showPP ev
-                    ]
-
-       Nothing -> bad [ "Missing structure expression for:"
-                      , "*** Name: " ++ showPP x
-                      ]
-
+       _ -> bad [ "Unexpected value to update:"
+                , "*** Expected: a struct"
+                , "*** Expression: " ++ showPP ev
+                ]
   where
   bad = panic "evalStructUpdate"
 
@@ -563,7 +556,7 @@ evalExpr expr =
     Array es -> SArray <$> traverse evalExpr es
 
     Struct s fs         -> SStruct (nameOrigName s) <$> traverse evalField fs
-    UpdateStruct s x es -> evalStructUpdate (nameOrigName s) x es
+    UpdateStruct s e es -> evalStructUpdate (nameOrigName s) e es
 
     Select e sel ->
       do e1 <- evalExpr e

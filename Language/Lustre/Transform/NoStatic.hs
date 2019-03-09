@@ -955,10 +955,7 @@ evalDynExpr eloc env expr =
 
     -- INVARIANT: the fields in a struct value are in the same order is
     -- in the declaration.
-    UpdateStruct s x fs ->
-      case Map.lookup (nameOrigName s) (C.envConsts (cEnv env)) of
-        Nothing -> evalUpdExprStruct env s x fs
-        Just v  -> evalUpdConstStruct env s v fs
+    UpdateStruct s e fs -> evalUpdExprStruct env s e fs
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
@@ -1125,24 +1122,15 @@ evalMergeCase env (MergeCase p e) =
   MergeCase (evalExpr env p) <$> evalDynExpr NestedExpr env e
 
 -- | Evaluate an update to a struct that is not a constant.
-evalUpdExprStruct :: Env -> Name -> Name -> [Field Expression] -> M Expression
-evalUpdExprStruct env s x fs =
-  do fs' <- mapM evalField fs
-     pure (UpdateStruct s x fs')
+evalUpdExprStruct ::
+  Env -> Name -> Expression -> [Field Expression] -> M Expression
+evalUpdExprStruct env s e fs =
+  do e1  <- evalDynExpr NestedExpr env e
+     fs' <- mapM evalField fs
+     pure (UpdateStruct s e1 fs')
   where
   evalField (Field l e) = Field l <$> evalDynExpr NestedExpr env e
 
-
--- | Evaluate an update to a struct constant.
-evalUpdConstStruct :: Env -> Name -> Value -> [Field Expression] -> M Expression
-evalUpdConstStruct env s v fs =
-  evalNewStructWithDefs env s fs $
-  case v of
-    VStruct _ fvs -> [ (l, Just fv) | Field l fv <- fvs ]
-    _ -> panic "evalUpdConstStruct"
-                [ "Not a struct value:"
-                , "*** Value: " ++ showPP (valToExpr env v)
-                ]
 
 -- | Evaluate a dynamic expression declaring a struct literal.
 -- Missing fields are added by using the default values declared in the type.

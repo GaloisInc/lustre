@@ -77,20 +77,18 @@ evalConst env expr =
       where name = nameOrigName s
 
     UpdateStruct s y fes ->
-      do fs <- Map.fromList <$> mapM (evalField env) fes
-         case Map.lookup (nameOrigName y) (envConsts env) of
-           Nothing -> bad ("Undefined struct constant `" ++ show y ++ "`.")
-           Just uv ->
-             case uv of
-               VStruct s' fs1
-                  | s' == name ->
-                    pure $ VStruct name
-                             [ Field i v1
-                             | Field i v <- fs1
-                             , let v1 = Map.findWithDefault v i fs
-                             ]
+      do uv <- evalConst env y
+         fs <- Map.fromList <$> mapM (evalField env) fes
+         case uv of
+           VStruct s' fs1
+              | s' == name ->
+                pure $ VStruct name
+                         [ Field i v1
+                         | Field i v <- fs1
+                         , let v1 = Map.findWithDefault v i fs
+                         ]
 
-               _ -> typeError "struct update" ("a `" ++ show s ++ "`.")
+           _ -> typeError "struct update" ("a `" ++ show s ++ "`.")
         where name = nameOrigName s
 
     Select e sel ->

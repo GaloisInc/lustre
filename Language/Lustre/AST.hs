@@ -210,7 +210,7 @@ data Expression = ERange !SourceRange !Expression
                 | Struct Name [Field Expression]
                   -- ^ Create a new struct value.  'Name' is the struct type
 
-                | UpdateStruct Name Name [Field Expression]
+                | UpdateStruct Name Expression [Field Expression]
                   {- ^ Update a struct.
                   The first 'Name' is the field type.
                   The second one is the name of the struct being updated. -}

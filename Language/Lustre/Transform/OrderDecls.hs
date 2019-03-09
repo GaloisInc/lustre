@@ -279,9 +279,9 @@ resolveConstExpr expr =
          fs1 <- traverse (resolveField resolveConstExpr) fs
          pure (Struct x1 fs1)
 
-    UpdateStruct x y fs   ->
+    UpdateStruct x e fs   ->
       do x1  <- resolveName x AType
-         y1  <- resolveName y AConst
+         y1  <- resolveConstExpr e
          fs1 <- traverse (resolveField resolveConstExpr) fs
          pure (UpdateStruct x1 y1 fs1)
 
@@ -313,11 +313,11 @@ resolveExpr expr =
          fs1 <- traverse (resolveField resolveExpr) fs
          pure (Struct x1 fs1)
 
-    UpdateStruct x y fs   ->
+    UpdateStruct x e fs   ->
       do x1   <- resolveName x AType
-         y1   <- inferName y
+         e1   <- resolveExpr e
          fs1  <- traverse (resolveField resolveExpr) fs
-         pure (UpdateStruct x1 y1 fs1)
+         pure (UpdateStruct x1 e1 fs1)
 
     WithThenElse e1 e2 e3 ->
       WithThenElse <$> resolveConstExpr e1
