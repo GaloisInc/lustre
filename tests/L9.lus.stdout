@@ -3,11 +3,11 @@ node (a : int)
   assumes ()
   shows ()
 let
-  valof_pre_y_4 = pre y
-  x = 0 -> valof_pre_y_4
+  valof_pre_y$1 = pre y
+  x = 0 -> valof_pre_y$1
   valof_pre_x = pre x
-  valof_pre_y_6 = pre y
-  y = 1 -> Add(valof_pre_x, valof_pre_y_6)
+  valof_pre_y = pre y
+  y = 1 -> Add(valof_pre_x, valof_pre_y)
 tel
 --- Step 1 ---
 a : int  = 0
