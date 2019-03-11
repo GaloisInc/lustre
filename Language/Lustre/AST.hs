@@ -200,6 +200,7 @@ data Expression = ERange !SourceRange !Expression
                 | Lit !Literal
 
                 | Expression `When` ClockExpr
+                | CondAct ClockExpr Expression (Maybe Expression)
 
                 | Tuple ![Expression]
                   -- ^ These are more like unboxed tuples in Haskell

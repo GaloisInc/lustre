@@ -3,7 +3,7 @@ module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Control.Monad(when,unless,zipWithM_,forM,replicateM)
+import Control.Monad(when,unless,zipWithM_,forM,forM_,replicateM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 
@@ -324,6 +324,17 @@ checkExpr expr tys =
 
          tys1 <- forM tys $ \ty ->
                    do sameClock (cClock ty) (KnownClock c)
+                      pure ty { cClock = c1 }
+
+         checkExpr e tys1
+
+    CondAct c e mb ->
+      do checkTemporalOk "when"
+         c1 <- checkClockExpr c -- `c1` is the clock of c
+         forM_ mb $ \d -> checkExpr d tys
+
+         tys1 <- forM tys $ \ty ->
+                   do sameClock (cClock ty) c1
                       pure ty { cClock = c1 }
 
          checkExpr e tys1
