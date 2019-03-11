@@ -1129,7 +1129,7 @@ evalUpdExprStruct env s e fs =
      fs' <- mapM evalField fs
      pure (UpdateStruct s e1 fs')
   where
-  evalField (Field l e) = Field l <$> evalDynExpr NestedExpr env e
+  evalField (Field l e1) = Field l <$> evalDynExpr NestedExpr env e1
 
 
 -- | Evaluate a dynamic expression declaring a struct literal.
