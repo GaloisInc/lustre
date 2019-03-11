@@ -270,6 +270,7 @@ checkConstExpr expr ty =
     Var x      -> checkConstVar x ty
     Lit l      -> ensure (Subtype (inferLit l) ty)
     _ `When` _ -> reportError "`when` is not a constant expression."
+    CondAct {} -> reportError "`condact` is not a constant expression."
     Tuple {}   -> reportError "tuples cannot be used in constant expressions."
     Array es   ->
       do elT <- newTVar
@@ -319,10 +320,13 @@ checkExpr expr tys =
 
     e `When` c ->
       do checkTemporalOk "when"
-         ty <- one tys
          c1 <- checkClockExpr c -- `c1` is the clock of c
-         sameClock (cClock ty) (KnownClock c)
-         checkExpr1 e ty { cClock = c1 }
+
+         tys1 <- forM tys $ \ty ->
+                   do sameClock (cClock ty) (KnownClock c)
+                      pure ty { cClock = c1 }
+
+         checkExpr e tys1
 
     Tuple es
       | have == need -> zipWithM_ checkExpr1 es tys
