@@ -41,29 +41,6 @@ data Constraint = Subtype Type Type
                 | CmpEq  Doc Type Type      -- ^ op, in1, in2
                 | CmpOrd Doc Type Type      -- ^ op, in1, in2
 
--- | A single clock expression.
-data IClock     = BaseClock
-                | KnownClock ClockExpr
-                | ClockVar CVar
-
--- | A clock variable
-newtype CVar    = CVar Int deriving (Eq,Ord)
-
-instance Pretty IClock where
-  ppPrec n c = case c of
-                 BaseClock    -> "base clock"
-                 KnownClock k -> ppPrec n k
-                 ClockVar v   -> pp v
-
-instance Pretty CVar where
-  ppPrec _ (CVar i) = "cv_" PP.<> pp i
-
-
--- | A type, together with its clock.
-data CType      = CType { cType :: Type, cClock :: IClock }
-
-
-
 
 newtype M a = M { unM ::
   WithBase LustreM

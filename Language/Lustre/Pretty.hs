@@ -499,3 +499,13 @@ instance Pretty OrigName where
   ppPrec _ x = pp (rnIdent x) -- XXX: more?
 
 
+instance Pretty IClock where
+  ppPrec n c = case c of
+                 BaseClock    -> "base clock"
+                 KnownClock k -> ppPrec n k
+                 ClockVar v   -> pp v
+
+instance Pretty CVar where
+  ppPrec _ (CVar i) = "cv_" PP.<> pp i
+
+

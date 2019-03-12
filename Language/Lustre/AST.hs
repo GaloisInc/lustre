@@ -332,6 +332,21 @@ data OpN = AtMostOne | Nor
                   deriving (Show, Eq, Ord)
 
 
+--------------------------------------------------------------------------------
+-- Type checking
+
+-- | A type, together with its clock.
+data CType      = CType { cType :: Type, cClock :: IClock }
+
+-- | A single clock expression.
+data IClock     = BaseClock
+                | KnownClock ClockExpr
+                | ClockVar CVar         -- ^ Only present during type-checking
+
+-- | A clock variable
+newtype CVar    = CVar Int deriving (Eq,Ord)
+
+
 
 --------------------------------------------------------------------------------
 
@@ -348,6 +363,7 @@ exprRangeMaybe expr =
     Var x           -> Just (range x)
     e `When` c      -> Just (e  <-> c)
 
+    CondAct {}      -> Nothing
     Lit {}          -> Nothing
     Tuple {}        -> Nothing
     Array {}        -> Nothing
