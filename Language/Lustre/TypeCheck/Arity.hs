@@ -18,7 +18,8 @@ exprArity expr =
     ERange r e          -> inRange r (exprArity e)
     Var {}              -> pure 1
     Lit {}              -> pure 1
-    When {}             -> pure 1    -- XXX: can we do this on tuples?
+    e `When` _          -> exprArity e
+    CondAct _ e _       -> exprArity e
     Tuple es            -> pure (length es)
     Array {}            -> pure 1
     Select {}           -> pure 1
