@@ -552,6 +552,8 @@ evalExpr expr =
       do e1' <- evalExpr e1
          pure (evalWhen e1' ce)
 
+    CondAct {} -> panic "evalExpr" ["Unexpected `condact`"]
+
     Tuple es -> STuple <$> traverse evalExpr es
     Array es -> SArray <$> traverse evalExpr es
 

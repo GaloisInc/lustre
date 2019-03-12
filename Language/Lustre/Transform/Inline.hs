@@ -189,6 +189,7 @@ instance Rename Expression where
       Lit _           -> expr
 
       e `When` ce     -> rename su e `When` rename su ce
+      CondAct {}      -> bad "condact"
 
       Merge i ms      -> Merge (rename su i) (rename su ms)
       Call ni es      -> Call ni (rename su es)

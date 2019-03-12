@@ -384,6 +384,8 @@ evalExpr expr =
          a2 <- evalClockExprAtom ce
          pure (C.When a1 a2)
 
+    P.CondAct {} -> bad "condact"
+
 
     P.Merge i alts ->
       do let j = C.Var i

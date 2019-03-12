@@ -51,8 +51,9 @@ evalConst env expr =
            VBool b -> if b then evalConst env t else evalConst env e
            _       -> typeError "with-then-else" "A `bool`"
 
-    When {}   -> bad "`when` is not a constant expression."
-    Merge {}  -> bad "`merge` is not a constant expression."
+    When {}    -> bad "`when` is not a constant expression."
+    CondAct {} -> bad "`condact` is not a constant expression."
+    Merge {}   -> bad "`merge` is not a constant expression."
 
     Var x ->
       case Map.lookup (nameOrigName x) (envConsts env) of

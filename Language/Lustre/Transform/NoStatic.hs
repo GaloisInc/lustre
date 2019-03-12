@@ -1,7 +1,16 @@
 {-# Language OverloadedStrings, DataKinds #-}
-{-| This module removes static arguments and constants.
+{-| NOTE: At the moment the transformation in this pass are not really
+optional, as the following passes expect them.
+
+XXX: This is quite comples, and it should probably be split into
+the code that names call sites, and the code that actually instantiates
+static parameters.
+
+This module removes static arguments and constants.
 Calls to functions with static arguments are lifted to the top-level
 and given an explicit name.
+
+Also, in this pass we desugar calls to `condact`
 
 Optionally (flag 'expandNodeInstDecl'), we can also expand functions
 applied to static arguments to functions using a specialized definition instead.
@@ -943,6 +952,10 @@ evalDynExpr eloc env expr =
 
     e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
                           pure (e1' `When` evalClockExpr env e2)
+
+    CondAct c e d   -> desugarCondAct eloc env c e d
+
+
     Tuple es -> Tuple <$> mapM (evalDynExpr NestedExpr env) es
     Array es -> Array <$> mapM (evalDynExpr NestedExpr env) es
     Select e s      -> do e' <- evalDynExpr NestedExpr env e
@@ -1018,6 +1031,56 @@ evalDynExpr eloc env expr =
       Tuple es    -> Just es
       _           -> Nothing
 
+
+
+{- | Desugar a conditional actiavation:
+
+> condact(c,e,d)
+> ~~>
+> x = if c then current (e when c)
+>          else d -> pre x
+
+-}
+
+desugarCondAct ::
+  ExprLoc -> Env -> ClockExpr -> Expression -> Maybe Expression -> M Expression
+desugarCondAct _ _ _ _ _ =
+    panic "desugarCondAct" ["`condact` is not yet implemented"]
+{-
+  case mbD of
+    Nothing -> evalDynExpr loc env cur
+    Just d ->
+      -- XXX: Need the type of `e`.  if it is a mult-expr we should
+      -- generate multiple new names here, similar to what we do for functions.
+      do x   <- newIdent r Nothing AVal
+         rhs <- evalDynExpr loc env
+              $ Call pIf [ cb, cur, Call pArr [d, Call pPre [ var x ] ] ]
+
+         let b = Binder
+                   { binderDefines = origNameToIdent x
+                   , binderType    = error "XXX: Need type of `e`"
+                   , binderClock   = error "XXX: Need clock of `e`"
+                   }
+
+          recordCallSite r (LVar (origNameToIdent x))
+          addFunEqn [b] (Define lhs rhs)
+          pure $ case map (Var . Unqual) ns of
+                     [one] -> one
+                     notOne -> Tuple notOne
+
+  where
+  WhenClock r k i = c
+
+  pCur = NodeInst (Prim r (Op1 Current)) []
+  pIf  = NodeInst (Prim r ITE) []
+  pEq  = NodeInst (Prim r (Op2 Eq)) []
+  pArr = NodeInst (Prim r (Op2 FbyArr)) []
+  pPre = NodeInst (Prim r (Op1 Pre)) []
+  var o = Var (origNameToName o)
+
+  cur   = Call pCur [ e `When` c ]
+  cb    = Call pEq [ k, var (identOrigName i) ]
+-}
 
 -- | Identify which of the inputs are really static constant parameters.
 inputBindersToParams :: [InputBinder] -> ([StaticParam],[InputBinder])

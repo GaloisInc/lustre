@@ -249,10 +249,14 @@ instance Pretty Expression where
       Lit l         -> pp l
       e `When` ce   -> parenIf (n > 10) doc
         where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce
+      CondAct b e d -> "condact" <> parens (commaSep docs)
+        where docs = [ pp b, pp e ] ++ (case d of
+                                          Nothing -> []
+                                          Just d' -> [pp d'])
 
 
-      Tuple es      -> parens (hsep (punctuate comma (map pp es)))
-      Array es      -> brackets (hsep (punctuate comma (map pp es)))
+      Tuple es      -> parens (commaSep (map pp es))
+      Array es      -> brackets (commaSep (map pp es))
       Select e s    -> ppPrec 13 e <> pp s
       Struct s fs   -> pp s <+> braces (vcat (punctuate semi (map pp fs)))
       UpdateStruct s x fs ->

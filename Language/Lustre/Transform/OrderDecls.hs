@@ -270,6 +270,7 @@ resolveConstExpr expr =
     Var x                 -> Var <$> resolveName x AConst
     Lit _                 -> pure expr
     When {}               -> bad "when"
+    CondAct {}            -> bad "condact"
     Tuple es              -> Tuple  <$> traverse resolveConstExpr es
     Array es              -> Array  <$> traverse resolveConstExpr es
     Select e s            -> Select <$> resolveConstExpr e <*> resolve s
@@ -303,6 +304,9 @@ resolveExpr expr =
     Var x                 -> Var <$> inferName x
     Lit _                 -> pure expr
     e1 `When` e2          -> When <$> resolveExpr e1 <*> resolve e2
+    CondAct c e d         -> CondAct <$> resolve c
+                                     <*> resolveExpr e
+                                     <*> traverse resolveExpr d
 
     Tuple es              -> Tuple  <$> traverse resolveExpr es
     Array es              -> Array  <$> traverse resolveExpr es
