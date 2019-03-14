@@ -3,7 +3,7 @@ module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Control.Monad(when,unless,zipWithM_,zipWithM,forM,forM_,replicateM)
+import Control.Monad(when,unless,zipWithM_,zipWithM,forM,replicateM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 
@@ -225,8 +225,8 @@ checkOutputBinders bs m =
   case bs of
     [] -> addFst [] m
     b : more ->
-      do (b1,(bs,a)) <- checkBinder b (checkOutputBinders more m)
-         pure (b1:bs,a)
+      do (b1,(xs,a)) <- checkBinder b (checkOutputBinders more m)
+         pure (b1:xs,a)
 
 addFst :: a -> M b -> M (a,b)
 addFst a m =
@@ -496,8 +496,8 @@ checkCall f as es0 tys =
   checkInputs done mp is es =
     case (is,es) of
       ([],[]) -> pure (reverse done,mp)
-      (b:bs,a:as) -> do (e,mp1) <- checkIn mp b a
-                        checkInputs (e:done) mp1 bs as
+      (b:bs,c:cs) -> do (e,mp1) <- checkIn mp b c
+                        checkInputs (e:done) mp1 bs cs
       _ -> reportError $ text ("Bad arity in call to " ++ showPP f)
 
   checkIn mp ib e =
@@ -585,6 +585,7 @@ checkPrim r prim as es tys =
 
   where
   noStatic op =
+    unless (null as) $
     reportError (backticks (pp op) <+> "does not take static arguments")
 
 
