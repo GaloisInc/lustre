@@ -245,6 +245,18 @@ data ClockExpr  = WhenClock SourceRange Expression Ident
 data NodeInst   = NodeInst Callable [StaticArg]
                   deriving Show
 
+eOp1 :: SourceRange -> Op1 -> Expression -> Expression
+eOp1 r op e = Call (NodeInst (CallPrim r (Op1 op)) []) [e]
+
+eOp2 :: SourceRange -> Op2 -> Expression -> Expression -> Expression
+eOp2 r op e1 e2 = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2]
+
+eITE :: SourceRange -> Expression -> Expression -> Expression -> Expression
+eITE r e1 e2 e3 = Call (NodeInst (CallPrim r ITE) []) [e1,e2,e3]
+
+eOpN :: SourceRange -> OpN -> [Expression] -> Expression
+eOpN r op es = Call (NodeInst (CallPrim r (OpN op)) []) es
+
 -- | Things that may be called
 data Callable   = CallUser Name                   -- ^ A user-defined node
                 | CallPrim SourceRange PrimNode   -- ^ A built-in node
@@ -325,6 +337,10 @@ data Op2 = FbyArr       -- a -> a -> a
          | Geq          -- Num a => a -> a -> bool
          | Mul | Mod | Div | Add | Sub | Power    -- Num a => a -> a -> a
          | Replicate    -- a -> (n:Int) -> a^n
+           -- XXX: the `n` is a constante so perhaps we should
+           -- represent it as a static parametere.
+
+
          | Concat       -- a^M -> a^N -> a^(M+N)
            deriving (Show, Eq, Ord)
 

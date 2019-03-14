@@ -47,7 +47,8 @@ quickDeclsSimp ds =
      let enums = getEnumInfo ds1
 
      tcOn <- lustreTCEnabled
-     when tcOn (quickCheckDecls ds1)
+     when tcOn $ do _ds1 <- quickCheckDecls ds1
+                    pure ()
      (csMap,ds2) <- noConst ds1
      let nosIn = NosIn
                    { nosiStructs   = Map.empty

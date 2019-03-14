@@ -3,7 +3,7 @@ module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Control.Monad(when,unless,zipWithM_,forM,forM_,replicateM)
+import Control.Monad(when,unless,zipWithM_,zipWithM,forM,forM_,replicateM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 
@@ -21,50 +21,53 @@ type TypeWarn  = Doc
 
 
 -- | Assumes that the declarations are in dependency order.
-quickCheckDecls :: [TopDecl] -> LustreM ()
+quickCheckDecls :: [TopDecl] -> LustreM [TopDecl]
 quickCheckDecls ds = runTC (go ds)
   where
   go xs = case xs of
-            [] -> pure ()
-            x : more -> checkTopDecl x (go more)
+            [] -> pure []
+            x : more -> do (y,ys) <- checkTopDecl x (go more)
+                           pure (y:ys)
 
 
-checkTopDecl :: TopDecl -> M a -> M a
+checkTopDecl :: TopDecl -> M a -> M (TopDecl,a)
 checkTopDecl td m =
   case td of
-    DeclareType tyd -> checkTypeDecl tyd m
-    DeclareConst cd -> checkConstDef cd m
-    DeclareNode nd -> checkNodeDecl nd m
+    DeclareType tyd -> apFstM DeclareType (checkTypeDecl tyd m)
+    DeclareConst cd -> apFstM DeclareConst (checkConstDef cd m)
+    DeclareNode nd  -> apFstM DeclareNode (checkNodeDecl nd m)
     DeclareNodeInst _nid -> notYetImplemented "node instances"
     DeclareContract {} -> notYetImplemented "top-level contract"
 
 
-checkTypeDecl :: TypeDecl -> M a -> M a
+checkTypeDecl :: TypeDecl -> M a -> M (TypeDecl, a)
 checkTypeDecl td m =
   case typeDef td of
-    Nothing -> done AbstractTy
+    Nothing -> addFst td $ withNamedType (typeName td) AbstractTy m
     Just dec ->
       case dec of
 
         IsEnum is ->
-          do let ti     = typeName td
-                 nty    = NamedType (Unqual ti)
+          do let nty    = NamedType (Unqual ti)
                  addE i = withConst i nty
                  ty     = EnumTy (Set.fromList (map identOrigName is))
-             withNamedType ti ty (foldr addE m is)
+             addFst td (withNamedType ti ty (foldr addE m is))
 
         IsStruct fs ->
-          do mapM_ checkFieldType fs
-             mapM_ checkDup $ group $ sort $ map fieldName fs
-             done (StructTy (Map.fromList [ (fieldName f, fieldType f)
-                                             | f <- fs  ]))
+          do fs1 <- mapM checkFieldType fs
+             mapM_ checkDup $ group $ sort $ map fieldName fs1
+             let ty  = StructTy (Map.fromList [ (fieldName f, fieldType f)
+                                              | f <- fs1  ])
+                 newTD = td { typeDef = Just (IsStruct fs1) }
+             addFst newTD (withNamedType ti ty m)
 
         IsType t ->
-           do checkType t
-              t1 <- tidyType t
-              done (AliasTy t1)
+           do t1 <- checkType t
+              t2 <- tidyType t1
+              let newTD = td { typeDef = Just (IsType t1) }
+              addFst newTD (withNamedType ti (AliasTy t2) m)
   where
-  done x = withNamedType (typeName td) x m
+  ti = typeName td
 
   checkDup xs =
     case xs of
@@ -78,19 +81,24 @@ checkTypeDecl td m =
           ] ++ [ "Location:" <+> pp (range f) | f <- xs ]
 
 
-checkFieldType :: FieldType -> M ()
+checkFieldType :: FieldType -> M FieldType
 checkFieldType f =
   do let t = fieldType f
-     checkType t
-     case fieldDefault f of
-       Nothing -> pure ()
-       Just e  -> checkConstExpr e t
+     t1 <- checkType t
+     d1 <- case fieldDefault f of
+             Nothing -> pure Nothing
+             Just e  -> Just <$> checkConstExpr e t
+     pure f { fieldType = t1, fieldDefault = d1 }
 
-checkNodeDecl :: NodeDecl -> M a -> M a
+checkNodeDecl :: NodeDecl -> M a -> M (NodeDecl,a)
 checkNodeDecl nd k =
-  do (a,b) <- check
-     withNode a b k
+  do newNd <- check
+     addFst newNd
+       $ withNode (nodeName newNd)
+                  (nodeSafety newNd, nodeType newNd, nodeProfile newNd)
+                  k
   where
+  check :: M NodeDecl
   check =
     inRange (range (nodeName nd)) $
     allowTemporal (nodeType nd == Node) $
@@ -104,29 +112,41 @@ checkNodeDecl nd k =
                      ["Node:" <+> pp (nodeName nd)]
            Nothing -> pure ()
        let prof = nodeProfile nd
-       res <- checkInputBinders  (nodeInputs prof) $
-              checkOutputBinders (nodeOutputs prof) $
+       (ins,(outs,bod)) <-
+          checkInputBinders  (nodeInputs prof) $
+          checkOutputBinders (nodeOutputs prof) $
+          do case nodeContract nd of
+               Nothing -> pure ()
+               Just _  -> notYetImplemented "Node contracts"
 
-         do case nodeContract nd of
-              Nothing -> pure ()
-              Just _  -> notYetImplemented "Node contracts"
+             case nodeDef nd of
+               Nothing ->
+                  do unless (nodeExtern nd) $ reportError $ nestedError
+                            "Missing node definition"
+                            ["Node:" <+> pp (nodeName nd)]
+                     pure Nothing
+               Just b -> Just <$> checkNodeBody b
 
-            case nodeDef nd of
-              Nothing -> unless (nodeExtern nd) $ reportError $ nestedError
-                           "Missing node definition"
-                           ["Node:" <+> pp (nodeName nd)]
-              Just b -> checkNodeBody b
-            pure (nodeName nd, (nodeSafety nd, nodeType nd, nodeProfile nd))
+       let newProf = NodeProfile { nodeInputs = ins
+                                 , nodeOutputs = outs
+                                 }
        solveConstraints
-       pure res
+
+           -- XXX: static inputs
+           -- XXX: contract
+       pure nd { nodeProfile = newProf
+               , nodeDef = bod
+               }
 
 
-checkNodeBody :: NodeBody -> M ()
+
+checkNodeBody :: NodeBody -> M NodeBody
 checkNodeBody nb = addLocals (nodeLocals nb)
   where
   -- XXX: after checking that equations are OK individually,
   -- we should check that the LHS define proper values
   -- (e.g., no missing parts of structs/arrays etc, no repeated declarations)
+  -- (NOTE2: although, with partial specifications, some of that might be OK?)
   -- XXX: we also need to check that all outputs were defined.
   --      (although partial specs are also OK sometimes?)
   -- XXX: also check that that all locals have definitions
@@ -135,20 +155,23 @@ checkNodeBody nb = addLocals (nodeLocals nb)
   -- that are not yet defined (e.g., x = x, not OK, but x = pre x is OK)
   addLocals ls =
     case ls of
-      []       -> mapM_ checkEquation (nodeEqns nb)
-      l : more -> checkLocalDecl l (addLocals more)
+      []       -> do es <- mapM checkEquation (nodeEqns nb)
+                     pure NodeBody { nodeLocals = [], nodeEqns = es }
+      l : more ->
+          do (d,n) <- checkLocalDecl l (addLocals more)
+             pure n { nodeLocals = d : nodeLocals n }
 
-checkLocalDecl :: LocalDecl -> M a -> M a
+checkLocalDecl :: LocalDecl -> M a -> M (LocalDecl,a)
 checkLocalDecl ld m =
   case ld of
-    LocalVar b   -> checkBinder b m
-    LocalConst c -> checkConstDef c m
+    LocalVar b   -> apFstM LocalVar  (checkBinder b m)
+    LocalConst c -> apFstM LocalConst (checkConstDef c m)
 
 
-checkConstDef :: ConstDef -> M a -> M a
+checkConstDef :: ConstDef -> M a -> M (ConstDef, a)
 checkConstDef c m =
-  do t <- checkDef
-     withConst (constName c) t m
+  do (c1,t) <- checkDef
+     addFst c1 (withConst (constName c) t m)
   where
   checkDef =
     inRange (range (constName c)) $
@@ -158,91 +181,110 @@ checkConstDef c m =
           Nothing -> reportError $ nestedError
                      "Constant declaration with no type or default."
                      [ "Name:" <+> pp (constName c) ]
-          Just t -> do checkType t
-                       pure t
+          Just t -> do t1 <- checkType t
+                       pure (c { constType = Just t }, t1)
 
       Just e ->
         do t <- case constType c of
                   Nothing -> newTVar
-                  Just t  -> do checkType t
-                                pure t
-           checkConstExpr e t
-           pure t
+                  Just t  -> checkType t
+           e1 <- checkConstExpr e t
+           pure (c { constType = Just t, constDef = Just e1 }, t)
 
-checkInputBinder :: InputBinder -> M a -> M a
+checkInputBinder :: InputBinder -> M a -> M (InputBinder, a)
 checkInputBinder ib m =
   case ib of
-    InputBinder b -> checkBinder b m
+    InputBinder b -> apFstM InputBinder (checkBinder b m)
     InputConst i t ->
-      do checkType t
-         withConst i t m
+      do t1 <- checkType t
+         addFst (InputConst i t1) (withConst i t1 m)
 
-checkBinder :: Binder -> M a -> M a
+checkBinder :: Binder -> M a -> M (Binder,a)
 checkBinder b m =
-  do c <- case binderClock b of
-            Nothing -> pure BaseClock
-            Just e  -> do _c <- checkClockExpr e
-                          pure (KnownClock e)
-     checkType (binderType b)
-     let ty = CType { cType = binderType b, cClock = c }
-     withLocal (binderDefines b) ty m
+  do (c1,c) <-
+        case binderClock b of
+          Nothing -> pure (Nothing,BaseClock)
+          Just e  -> do (e',_c) <- checkClockExpr e
+                        pure (Just e', KnownClock e')
+     t <- checkType (binderType b)
+     let ty   = CType { cType = t, cClock = c }
+         newB = b { binderType = t, binderClock = c1 }
+     addFst newB $ withLocal (binderDefines b) ty m
 
-checkInputBinders :: [InputBinder] -> M a -> M a
+checkInputBinders :: [InputBinder] -> M a -> M ([InputBinder],a)
 checkInputBinders bs m =
   case bs of
-    [] -> m
-    b : more -> checkInputBinder b (checkInputBinders more m)
+    [] -> do a <- m
+             pure ([],a)
+    b : more -> do (b1,(bs1,a)) <- checkInputBinder b (checkInputBinders more m)
+                   pure (b1:bs1,a)
 
 
-checkOutputBinders :: [Binder] -> M a -> M a
+checkOutputBinders :: [Binder] -> M a -> M ([Binder],a)
 checkOutputBinders bs m =
   case bs of
-    [] -> m
-    b : more -> checkBinder b (checkOutputBinders more m)
+    [] -> addFst [] m
+    b : more ->
+      do (b1,(bs,a)) <- checkBinder b (checkOutputBinders more m)
+         pure (b1:bs,a)
+
+addFst :: a -> M b -> M (a,b)
+addFst a m =
+  do b <- m
+     pure (a,b)
+
+apFstM :: (a -> x) -> M (a,b) -> M (x,b)
+apFstM f m =
+  do (a,b) <- m
+     pure (f a, b)
 
 
 
 
-checkType :: Type -> M ()
+
+checkType :: Type -> M Type
 checkType ty =
   case ty of
     TypeRange r t -> inRange r (checkType t)
-    IntType       -> pure ()
-    BoolType      -> pure ()
-    RealType      -> pure ()
+    IntType       -> pure IntType
+    BoolType      -> pure BoolType
+    RealType      -> pure RealType
     TVar x        -> panic "checkType" [ "Unexpected type variable:"
                                        , "*** Tvar: " ++ showPP x ]
     IntSubrange x y ->
-      do checkConstExpr x IntType
-         checkConstExpr y IntType
+      do a <- checkConstExpr x IntType
+         b <- checkConstExpr y IntType
          leqConsts x y
+         pure (IntSubrange a b)
     NamedType x ->
-      do _ <- resolveNamed x
-         pure ()
+      do _t <- resolveNamed x
+         pure ty -- or the resolved type?
     ArrayType t n ->
-      do checkConstExpr n IntType
+      do n1 <- checkConstExpr n IntType
          leqConsts (Lit (Int 0)) n
-         checkType t
+         t1 <- checkType t
+         pure (ArrayType t1 n1)
 
 
-checkEquation :: Equation -> M ()
+checkEquation :: Equation -> M Equation
 checkEquation eqn =
   enterRange $
   case eqn of
-    Assert _ e ->
+    Assert l e ->
       onlyInputs $
-        checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
+        Assert l <$> checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
 
-    Property _ e ->
-      checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
+    Property l e ->
+      Property l <$> checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
 
-    IsMain _ -> pure ()
+    IsMain _ -> pure eqn
 
-    IVC _ -> pure () -- XXX: what should we check here?
+    IVC _ -> pure eqn -- XXX: what should we check here?
 
     Define ls e ->
-      do lts <- mapM checkLHS ls
-         checkExpr e lts
+      do (ls1,lts) <- unzip <$> mapM checkLHS ls
+         es1 <- checkExpr e lts
+         pure (Define ls1 es1)
 
   where
   enterRange = case eqnRangeMaybe eqn of
@@ -250,53 +292,57 @@ checkEquation eqn =
                  Just r  -> inRange r
 
 
-checkLHS :: LHS Expression -> M CType
+checkLHS :: LHS Expression -> M (LHS Expression, CType)
 checkLHS lhs =
   case lhs of
-    LVar i -> lookupLocal i
+    LVar i -> do (j,t) <- checkLocalVar i
+                 pure (LVar j, t)
     LSelect l s ->
-      do t  <- checkLHS l
-         t1 <- inferSelector s (cType t)
-         pure t { cType = t1 }
+      do (l1,t)  <- checkLHS l
+         (s1,t1) <- inferSelector s (cType t)
+         pure (LSelect l1 s1, t { cType = t1 })
 
 
 
 
 -- | Infer the type of a constant expression.
-checkConstExpr :: Expression -> Type -> M ()
+checkConstExpr :: Expression -> Type -> M Expression
 checkConstExpr expr ty =
   case expr of
     ERange r e -> inRange r (checkConstExpr e ty)
-    Var x      -> checkConstVar x ty
-    Lit l      -> ensure (Subtype (inferLit l) ty)
-    _ `When` _ -> reportError "`when` is not a constant expression."
+    Var x      -> Var <$> checkConstVar x ty
+    Lit l      -> do ensure (Subtype (inferLit l) ty)
+                     pure (Lit l)
+    When {}    -> reportError "`when` is not a constant expression."
     CondAct {} -> reportError "`condact` is not a constant expression."
     Tuple {}   -> reportError "tuples cannot be used in constant expressions."
     Array es   ->
       do elT <- newTVar
-         mapM_ (`checkConstExpr` elT) es
+         es1 <- mapM (`checkConstExpr` elT) es
          let n = Lit $ Int $ fromIntegral $ length es
          ensure (Subtype (ArrayType elT n) ty)
+         pure (Array es1)
 
     Struct {} -> notYetImplemented "structs"
     UpdateStruct {} -> notYetImplemented "updating structs"
 
     Select e s ->
       do t <- newTVar
-         checkConstExpr e t
-         t1 <- inferSelector s t
+         e1 <- checkConstExpr e t
+         (s1,t1) <- inferSelector s t
          ensure (Subtype t1 ty)
+         pure (Select e1 s1)
 
     WithThenElse e1 e2 e3 ->
-      do checkConstExpr e1 BoolType
-         checkConstExpr e2 ty
-         checkConstExpr e3 ty
+      WithThenElse <$> checkConstExpr e1 BoolType
+                   <*> checkConstExpr e2 ty
+                   <*> checkConstExpr e3 ty
 
     Merge {}   -> reportError "`merge` is not a constant expression."
     Call {}   -> reportError "constant expressions do not support calls."
 
 -- | Check that the expression has the given type.
-checkExpr1 :: Expression -> CType -> M ()
+checkExpr1 :: Expression -> CType -> M Expression
 checkExpr1 e t = checkExpr e [t]
 
 
@@ -305,42 +351,47 @@ checkExpr1 e t = checkExpr e [t]
 {- | Check if an expression has the given type.
 Tuples and function calls may return multiple results,
 which is why we provide multiple clocked types. -}
-checkExpr :: Expression -> [CType] -> M ()
+checkExpr :: Expression -> [CType] -> M Expression
 checkExpr expr tys =
   case expr of
     ERange r e -> inRange r (checkExpr e tys)
 
-    Var x      -> inRange (range x) $
-                  do ty <- one tys
-                     checkVar x ty
+    Var x ->
+      inRange (range x) $
+        do ty <- one tys
+           Var <$> checkVar x ty
 
-    Lit l      -> do ty <- one tys
-                     let lt = inferLit l
-                     ensure (Subtype lt (cType ty))
+    Lit l ->
+      do ty <- one tys
+         let lt = inferLit l
+         ensure (Subtype lt (cType ty))
+         pure (Lit l)
 
     e `When` c ->
       do checkTemporalOk "when"
-         c1 <- checkClockExpr c -- `c1` is the clock of c
+         (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
 
          tys1 <- forM tys $ \ty ->
                    do sameClock (cClock ty) (KnownClock c)
-                      pure ty { cClock = c1 }
+                      pure ty { cClock = cl }
 
-         checkExpr e tys1
+         e1 <- checkExpr e tys1
+         pure (e1 `When` c1)
 
     CondAct c e mb ->
       do checkTemporalOk "when"
-         c1 <- checkClockExpr c -- `c1` is the clock of c
-         forM_ mb $ \d -> checkExpr d tys
+         (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
+         mb1     <- forM mb $ \d -> checkExpr d tys
 
          tys1 <- forM tys $ \ty ->
-                   do sameClock (cClock ty) c1
-                      pure ty { cClock = c1 }
+                   do sameClock (cClock ty) cl
+                      pure ty { cClock = cl }
 
-         checkExpr e tys1
+         e1 <- checkExpr e tys1
+         pure (CondAct c1 e1 mb1)
 
     Tuple es
-      | have == need -> zipWithM_ checkExpr1 es tys
+      | have == need -> Tuple <$> zipWithM checkExpr1 es tys
       | otherwise    -> reportError $ nestedError "Arity mismatch in tuple"
                           [ "Expected arity:" <+> text (show need)
                           , "Actual arity:" <+> text (show have) ]
@@ -353,52 +404,55 @@ checkExpr expr tys =
          let n = Lit $ Int $ fromIntegral $ length es
          ensure (Subtype (ArrayType elT n) (cType ty))
          let elCT = ty { cType = elT }
-         mapM_ (`checkExpr1` elCT) es
-
+         es1 <- mapM (`checkExpr1` elCT) es
+         pure (Array es1)
 
     Select e s ->
-      do ty <- one tys
-         recT <- newTVar
-         checkExpr1 e ty { cType = recT }
-         t1 <- inferSelector s recT
+      do ty        <- one tys
+         recT      <- newTVar
+         e1        <- checkExpr1 e ty { cType = recT }
+         (s1,t1)   <- inferSelector s recT
          ensure (Subtype t1 (cType ty))
+         pure (Select e1 s1)
 
     Struct {} -> notYetImplemented "struct"
     UpdateStruct {} -> notYetImplemented "update struct"
 
     WithThenElse e1 e2 e3 ->
-      do checkConstExpr e1 BoolType
-         checkExpr e2 tys
-         checkExpr e3 tys
+      WithThenElse <$> checkConstExpr e1 BoolType
+                   <*> checkExpr e2 tys
+                   <*> checkExpr e3 tys
 
     Merge i as ->
-      do t <- lookupLocal i
+      do (j,t) <- checkLocalVar i
          mapM_ (sameClock (cClock t) . cClock) tys
          let it      = cType t
              ts      = map cType tys
-             check c = checkMergeCase i c it ts
-         mapM_ check as
+             check c = checkMergeCase j c it ts
+         as1 <- mapM check as
+         pure (Merge j as1)
 
     Call (NodeInst call as) es
-      | not (null as) -> notYetImplemented "Call with static arguments."
 
       -- Special case for @^@ because its second argument is a constant
       -- expression, not an ordinary one.
       | CallPrim r (Op2 Replicate) <- call ->
         inRange r $
-        case es of
-          [e1,e2] ->
-            do ty <- one tys
-               checkConstExpr e2 IntType
-               elT <- newTVar
-               checkExpr e1 [ty { cType = elT }]
-               ensure (Subtype (ArrayType elT e2) (cType ty))
-          _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
+        do unless (null as) $ reportError "`^` does not take static arguments."
+           case es of
+             [e1,e2] ->
+               do ty <- one tys
+                  e2' <- checkConstExpr e2 IntType
+                  elT <- newTVar
+                  e1' <- checkExpr e1 [ty { cType = elT }]
+                  ensure (Subtype (ArrayType elT e2) (cType ty))
+                  pure (eOp2 r Replicate e1' e2')
+             _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
 
       | otherwise ->
         case call of
-          CallUser f      -> checkCall f es tys
-          CallPrim _ prim -> checkPrim prim es tys
+          CallUser f      -> checkCall f as es tys
+          CallPrim r prim -> checkPrim r prim as es tys
 
 -- | Assert that a given expression has only one type (i.e., is not a tuple)
 one :: [CType] -> M CType
@@ -414,8 +468,8 @@ one xs =
 
 
 -- | Infer the type of a call to a user-defined node.
-checkCall :: Name -> [Expression] -> [CType] -> M ()
-checkCall f es0 tys =
+checkCall :: Name -> [StaticArg] -> [Expression] -> [CType] -> M Expression
+checkCall f as es0 tys =
   do (safe,ty,prof) <- lookupNodeProfile f
      case safe of
        Safe   -> pure ()
@@ -423,8 +477,12 @@ checkCall f es0 tys =
      case ty of
        Node     -> checkTemporalOk ("node" <+> pp f)
        Function -> pure ()
-     mp   <- checkInputs Map.empty (nodeInputs prof) es0
+     as1 <- case as of
+              [] -> pure as
+              _  -> notYetImplemented "Nodes with static arguments."
+     (es1,mp)   <- checkInputs [] Map.empty (nodeInputs prof) es0
      checkOuts mp (nodeOutputs prof)
+     pure (Call (NodeInst (CallUser f) as1) es1)
   where
   renBinderClock mp b =
     case binderClock b of
@@ -435,24 +493,26 @@ checkCall f es0 tys =
           Nothing -> reportError $ text ("Parameter for clock " ++ showPP i ++
                                                       "is not an identifier.")
 
-  checkInputs mp is es =
+  checkInputs done mp is es =
     case (is,es) of
-      ([],[]) -> pure mp
-      (b:bs,a:as) -> do mp1 <- checkIn mp b a
-                        checkInputs mp1 bs as
+      ([],[]) -> pure (reverse done,mp)
+      (b:bs,a:as) -> do (e,mp1) <- checkIn mp b a
+                        checkInputs (e:done) mp1 bs as
       _ -> reportError $ text ("Bad arity in call to " ++ showPP f)
 
   checkIn mp ib e =
     case ib of
       InputBinder b ->
-        do c <- renBinderClock mp b
-           checkExpr1 e CType { cClock = c, cType = binderType b }
-           pure $ case isIdent e of
+        do c  <- renBinderClock mp b
+           e1 <- checkExpr1 e CType { cClock = c, cType = binderType b }
+           pure ( e1
+                , case isIdent e of
                     Just k  -> Map.insert (binderDefines b) k mp
                     Nothing -> mp
+                )
       InputConst _ t ->
-        do checkConstExpr e t
-           pure mp
+        do e1 <- checkConstExpr e t
+           pure (e1,mp)
 
   isIdent e =
     case e of
@@ -478,33 +538,36 @@ checkCall f es0 tys =
 
 
 -- | Infer the type of a call to a primitive node.
-checkPrim :: PrimNode -> [Expression] -> [CType] -> M ()
-checkPrim prim es tys =
+checkPrim :: SourceRange -> PrimNode -> [StaticArg] -> [Expression] ->
+              [CType] -> M Expression
+checkPrim r prim as es tys =
   case prim of
 
     Iter {} -> notYetImplemented "iterators."
 
     Op1 op1 ->
       case es of
-        [e] -> checkOp1 op1 e tys
-        _   -> reportError $ text (showPP op1 ++ " expects 1 argument.")
+        [e] -> noStatic op1 >> checkOp1 r op1 e tys
+        _   -> reportError (pp op1 <+> "expects 1 argument.")
 
     Op2 op2 ->
       case es of
-        [e1,e2] -> checkOp2 op2 e1 e2 tys
-        _ -> reportError $ text (showPP op2 ++ " expects 2 arguments.")
+        [e1,e2] -> noStatic op2 >> checkOp2 r op2 e1 e2 tys
+        _ -> reportError (pp op2 <+> "expects 2 arguments.")
 
     ITE ->
       case es of
         [e1,e2,e3] ->
-          do c <- case tys of
+          do noStatic ITE
+             c <- case tys of
                     []     -> newClockVar -- XXX: or report error?
                     t : ts -> do let c = cClock t
                                  mapM_ (sameClock c . cClock) ts
                                  pure c
-             checkExpr1 e1 CType { cClock = c, cType = BoolType }
-             checkExpr e2 tys
-             checkExpr e3 tys
+             e1' <- checkExpr1 e1 CType { cClock = c, cType = BoolType }
+             e2' <- checkExpr e2 tys
+             e3' <- checkExpr e3 tys
+             pure (eITE r e1' e2' e3')
 
         _ -> reportError "`if-then-else` expects 3 arguments."
 
@@ -512,182 +575,215 @@ checkPrim prim es tys =
     -- IMPORTANT: For the moment these all work with bools, so we
     -- just do them in one go.  THIS MAY CHANGE if we add
     -- other operators!
-    OpN _ ->
-      do ty <- one tys
+    OpN op ->
+      do noStatic op
+         ty <- one tys
          let bool = ty { cType = BoolType }
-         mapM_ (`checkExpr1` bool) es
+         es1 <- mapM (`checkExpr1` bool) es
          ensure (Subtype BoolType (cType ty))
+         pure (eOpN r op es1)
 
+  where
+  noStatic op =
+    reportError (backticks (pp op) <+> "does not take static arguments")
 
 
 -- | Infer the type for a branch of a merge.
-checkMergeCase :: Ident -> MergeCase Expression -> Type -> [Type] -> M ()
+checkMergeCase ::
+  Ident -> MergeCase Expression -> Type -> [Type] -> M (MergeCase Expression)
 checkMergeCase i (MergeCase p e) it ts =
-  do checkConstExpr p it
-     checkExpr e (map toCType ts)
-  where
-  clk       = KnownClock (WhenClock (range p) p i)
-  toCType t = CType { cClock = clk, cType = t }
+  do p1 <- checkConstExpr p it
+     let clk       = KnownClock (WhenClock (range p1) p1 i)
+         toCType t = CType { cClock = clk, cType = t }
+     e1 <- checkExpr e (map toCType ts)
+     pure (MergeCase p1 e1)
 
 -- | Types of unary opertaors.
-checkOp1 :: Op1 -> Expression -> [CType] -> M ()
-checkOp1 op e tys =
-  case op of
-    Pre -> do checkTemporalOk "pre"
-              checkExpr e tys
+checkOp1 :: SourceRange -> Op1 -> Expression -> [CType] -> M Expression
+checkOp1 r op e tys =
+  do a <- check
+     pure (eOp1 r op a)
 
-    Current ->
-      do checkTemporalOk "current"
-         tys1 <- forM tys $ \ty ->
-                    do c <- newClockVar
-                       pure ty { cClock = c }
-         checkExpr e tys1
+  where
+  check =
+    case op of
+      Pre ->
+        do checkTemporalOk "pre"
+           checkExpr e tys
 
-         -- By now we should have figured out the missing clock,
-         -- so check straight away
-         let checkClock ty newTy =
-                sameClock (cClock ty) =<< clockParent (cClock newTy)
-         zipWithM_ checkClock tys tys1
+      Current ->
+        do checkTemporalOk "current"
+           tys1 <- forM tys $ \ty ->
+                      do c <- newClockVar
+                         pure ty { cClock = c }
+           e1 <- checkExpr e tys1
 
-    Not ->
-      do ty <- one tys
-         checkExpr1 e ty { cType = BoolType }
-         ensure (Subtype BoolType (cType ty))
+           -- By now we should have figured out the missing clock,
+           -- so check straight away
+           let checkClock ty newTy =
+                  sameClock (cClock ty) =<< clockParent (cClock newTy)
+           zipWithM_ checkClock tys tys1
+           pure e1
 
-    Neg ->
-      do ty <- one tys
-         t <- newTVar
-         checkExpr1 e ty { cType = t }
-         ensure (Arith1 "-" t (cType ty))
+      Not ->
+        do ty <- one tys
+           e1 <- checkExpr1 e ty { cType = BoolType }
+           ensure (Subtype BoolType (cType ty))
+           pure e1
 
-    IntCast ->
-      do ty <- one tys
-         checkExpr1 e ty { cType = RealType }
-         ensure (Subtype IntType (cType ty))
+      Neg ->
+        do ty <- one tys
+           t  <- newTVar
+           e1 <- checkExpr1 e ty { cType = t }
+           ensure (Arith1 "-" t (cType ty))
+           pure e1
 
-    FloorCast ->
-      do ty <- one tys
-         checkExpr1 e ty { cType = RealType }
-         ensure (Subtype IntType (cType ty))
+      IntCast ->
+        do ty <- one tys
+           e1 <- checkExpr1 e ty { cType = RealType }
+           ensure (Subtype IntType (cType ty))
+           pure e1
 
-    RealCast ->
-      do ty <- one tys
-         checkExpr1 e ty { cType = IntType }
-         ensure (Subtype RealType (cType ty))
+      FloorCast ->
+        do ty <- one tys
+           e1 <- checkExpr1 e ty { cType = RealType }
+           ensure (Subtype IntType (cType ty))
+           pure e1
+
+      RealCast ->
+        do ty <- one tys
+           e1 <- checkExpr1 e ty { cType = IntType }
+           ensure (Subtype RealType (cType ty))
+           pure e1
+
 
 
 -- | Types of binary operators.
-checkOp2 :: Op2 -> Expression -> Expression -> [CType] -> M ()
-checkOp2 op2 e1 e2 tys =
-  case op2 of
-    FbyArr   -> do checkTemporalOk "->"
-                   checkExpr e1 tys
-                   checkExpr e2 tys
-
-    Fby      -> do checkTemporalOk "fby"
-                   checkExpr e1 tys
-                   checkExpr e2 tys
-
-    And      -> bool2
-    Or       -> bool2
-    Xor      -> bool2
-    Implies  -> bool2
-
-    Eq       -> eqRel "="
-    Neq      -> eqRel "<>"
-
-    Lt       -> ordRel "<"
-    Leq      -> ordRel "<="
-    Gt       -> ordRel ">"
-    Geq      -> ordRel ">="
-
-    Add      -> arith "+"
-    Sub      -> arith "-"
-    Mul      -> arith "*"
-    Div      -> arith "/"
-    Mod      -> arith "mod"
-
-    Power    -> notYetImplemented "Exponentiation"
-
-    Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
-
-    Concat ->
-      do ty <- one tys
-         a0 <- newTVar
-         checkExpr1 e1 ty { cType = a0 }
-         b0 <- newTVar
-         checkExpr1 e2 ty { cType = b0 }
-         a <- tidyType a0
-         b <- tidyType b0
-         case a of
-           ArrayType elT1 sz1 ->
-             case b of
-               ArrayType elT2 sz2 ->
-                 do c <- newTVar
-                    ensure (Subtype elT1 c)
-                    ensure (Subtype elT2 c)
-                    sz <- addExprs sz1 sz2
-                    ensure (Subtype (ArrayType c sz) (cType ty))
-               TVar {} -> noInfer "right"
-               _       -> typeError "right" b
-           TVar {} ->
-             case b of
-               ArrayType {} -> noInfer "left"
-               TVar {}      -> noInfer "left"
-               _            -> typeError "left" a
-           _ -> typeError "left" a
-
-
-      where
-      noInfer x = reportError ("Failed to infer the type of the" <+> x <+>
-                                                            "argument of `|`")
-
-      typeError x t = reportError $ nestedError
-                        ("Incorrect" <+> x <+> "argument to `|`")
-                        [ "Expected:" <+> "array"
-                        , "Actual type:" <+> pp t ]
-
+checkOp2 ::
+  SourceRange -> Op2 -> Expression -> Expression -> [CType] -> M Expression
+checkOp2 r op2 e1 e2 tys =
+  do (a,b) <- check
+     pure (eOp2 r op2 a b)
 
   where
+  check =
+    case op2 of
+      FbyArr   -> do checkTemporalOk "->"
+                     a <- checkExpr e1 tys
+                     b <- checkExpr e2 tys
+                     pure (a,b)
+
+      Fby      -> do checkTemporalOk "fby"
+                     a <- checkExpr e1 tys
+                     b <- checkExpr e2 tys
+                     pure (a,b)
+
+      And      -> bool2
+      Or       -> bool2
+      Xor      -> bool2
+      Implies  -> bool2
+
+      Eq       -> eqRel "="
+      Neq      -> eqRel "<>"
+
+      Lt       -> ordRel "<"
+      Leq      -> ordRel "<="
+      Gt       -> ordRel ">"
+      Geq      -> ordRel ">="
+
+      Add      -> arith "+"
+      Sub      -> arith "-"
+      Mul      -> arith "*"
+      Div      -> arith "/"
+      Mod      -> arith "mod"
+
+      Power    -> notYetImplemented "Exponentiation"
+
+      Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
+
+      Concat -> checkConcat
+
   bool2     = do ty <- one tys
-                 checkExpr1 e1 ty { cType = BoolType }
-                 checkExpr1 e2 ty { cType = BoolType }
+                 a <- checkExpr1 e1 ty { cType = BoolType }
+                 b <- checkExpr1 e2 ty { cType = BoolType }
                  ensure (Subtype BoolType (cType ty))
+                 pure (a,b)
 
   infer2    = do ty <- one tys
                  t1 <- newTVar
-                 checkExpr1 e1 ty { cType = t1 }
+                 a <- checkExpr1 e1 ty { cType = t1 }
                  t2 <- newTVar
-                 checkExpr1 e2 ty { cType = t2 }
-                 pure (t1,t2,ty)
+                 b <- checkExpr1 e2 ty { cType = t2 }
+                 pure (a,b,t1,t2,ty)
 
-  ordRel op = do (t1,t2,ty) <- infer2
+  ordRel op = do (a,b,t1,t2,ty) <- infer2
                  ensure (CmpOrd op t1 t2)
                  ensure (Subtype BoolType (cType ty))
+                 pure (a,b)
 
-  arith x   = do (t1,t2,ty) <- infer2
+  arith x   = do (a,b,t1,t2,ty) <- infer2
                  ensure (Arith2 x t1 t2 (cType ty))
+                 pure (a,b)
 
-  eqRel op  = do ty  <- one tys
-                 n   <- exprArity e1
+  eqRel op  = do ty   <- one tys
+                 n    <- exprArity e1
                  tv1s <- replicateM n newTVar
                  tv2s <- replicateM n newTVar
                  let toTy t = ty { cType = t }
-                 checkExpr e1 (map toTy tv1s)
-                 checkExpr e2 (map toTy tv2s)
+                 a <- checkExpr e1 (map toTy tv1s)
+                 b <- checkExpr e2 (map toTy tv2s)
                  zipWithM_ (\t1 t2 -> ensure (CmpEq op t1 t2)) tv1s tv2s
                  ensure (Subtype BoolType (cType ty))
+                 pure (a,b)
+
+  checkConcat =
+    do ty <- one tys
+       a0 <- newTVar
+       e1' <- checkExpr1 e1 ty { cType = a0 }
+       b0 <- newTVar
+       e2' <- checkExpr1 e2 ty { cType = b0 }
+       a <- tidyType a0
+       b <- tidyType b0
+       case a of
+         ArrayType elT1 sz1 ->
+           case b of
+             ArrayType elT2 sz2 ->
+               do c <- newTVar
+                  ensure (Subtype elT1 c)
+                  ensure (Subtype elT2 c)
+                  sz <- addExprs sz1 sz2
+                  ensure (Subtype (ArrayType c sz) (cType ty))
+                  pure (e1',e2')
+             TVar {} -> noInfer "right"
+             _       -> typeError "right" b
+         TVar {} ->
+           case b of
+             ArrayType {} -> noInfer "left"
+             TVar {}      -> noInfer "left"
+             _            -> typeError "left" a
+         _ -> typeError "left" a
+
+    where
+    noInfer x = reportError ("Failed to infer the type of the" <+> x <+>
+                                                          "argument of `|`")
+
+    typeError x t = reportError $ nestedError
+                      ("Incorrect" <+> x <+> "argument to `|`")
+                      [ "Expected:" <+> "array"
+                      , "Actual type:" <+> pp t ]
+
 
 
 
 -- | Check the type of a variable.
-checkVar :: Name -> CType -> M ()
+checkVar :: Name -> CType -> M Name
 checkVar x ty =
   case x of
     Unqual i ->
       case rnThing (nameOrigName x) of
-        AVal   -> do c <- lookupLocal i
+        AVal   -> do (j,c) <- checkLocalVar i
                      subCType c ty
+                     pure (Unqual j)
         AConst -> checkConstVar x (cType ty)
         t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
                               , "*** Name: " ++ showPP x
@@ -699,10 +795,19 @@ checkVar x ty =
 
 
 -- | Check the type of a named constnat.
-checkConstVar :: Name -> Type -> M ()
+checkConstVar :: Name -> Type -> M Name
 checkConstVar x ty = inRange (range x) $
                      do t1 <- lookupConst x
                         ensure (Subtype t1 ty)
+                        pure x
+
+-- | Check a local variable. Returns the elaborated variable and its type.
+checkLocalVar :: Ident -> M (Ident, CType)
+checkLocalVar i =
+  do ct <- lookupLocal i
+     pure (i,ct) -- XXX: elaborate
+
+
 
 -- | Infer the type of a literal.
 inferLit :: Literal -> Type
@@ -712,17 +817,18 @@ inferLit lit =
        Real _  -> RealType
        Bool _  -> BoolType
 
--- | Check a clock expression, and return its clock.
-checkClockExpr :: ClockExpr -> M IClock
+-- | Check a clock expression.
+-- Returns the elaborated clock expression, and its clock.
+checkClockExpr :: ClockExpr -> M (ClockExpr,IClock)
 checkClockExpr (WhenClock r v i) =
   inRange r $
-    do ct <- lookupLocal i
-       checkConstExpr v (cType ct)
-       pure (cClock ct)
+    do (j,ct) <- checkLocalVar i
+       w      <- checkConstExpr v (cType ct)
+       pure (WhenClock r w j, cClock ct)
 
 --------------------------------------------------------------------------------
 
-inferSelector :: Selector Expression -> Type -> M Type
+inferSelector :: Selector Expression -> Type -> M (Selector Expression, Type)
 inferSelector sel ty0 =
   do ty <- tidyType ty0
      case sel of
@@ -731,7 +837,7 @@ inferSelector sel ty0 =
            NamedType a ->
              do fs <- lookupStruct a
                 case Map.lookup f fs of
-                  Just t  -> pure t
+                  Just t  -> pure (sel,t)
                   Nothing ->
                     reportError $
                     nestedError
@@ -751,9 +857,9 @@ inferSelector sel ty0 =
        SelectElement n ->
          case ty of
            ArrayType t _sz ->
-             do checkConstExpr n IntType
+             do n1 <- checkConstExpr n IntType
                 -- XXX: check that 0 <= && n < sz ?
-                pure t
+                pure (SelectElement n1, t)
 
            TVar {} -> notYetImplemented "Array selection from unknown type"
 
