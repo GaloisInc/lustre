@@ -68,9 +68,10 @@ data RW = RW
                         -- ^ delayed constraints
   }
 
-data NamedType = StructTy (Map Ident Type)  -- ^ The Ident's are just labels
+data NamedType = StructTy [FieldType]
+                 -- ^ Order of the fields should match declaration
                | EnumTy   (Set OrigName)
-               | AliasTy  Type              -- ^ already tidied
+               | AliasTy  Type
                | AbstractTy
 
 
@@ -161,7 +162,7 @@ resolveTVar tv =
   do su <- M (rwTyVarSubst <$> get)
      pure (Map.findWithDefault (TVar tv) tv su)
 
-lookupStruct :: Name -> M (Map Ident Type)
+lookupStruct :: Name -> M [FieldType]
 lookupStruct s =
   do ro <- M ask
      case Map.lookup (nameOrigName s) (roTypeNames ro) of

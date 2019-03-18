@@ -3,9 +3,11 @@ module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import           Data.List (find)
 import Control.Monad(when,unless,zipWithM_,zipWithM,forM,replicateM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
+import Data.Traversable(for)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -56,8 +58,7 @@ checkTypeDecl td m =
         IsStruct fs ->
           do fs1 <- mapM checkFieldType fs
              mapM_ checkDup $ group $ sort $ map fieldName fs1
-             let ty  = StructTy (Map.fromList [ (fieldName f, fieldType f)
-                                              | f <- fs1  ])
+             let ty  = StructTy fs1
                  newTD = td { typeDef = Just (IsStruct fs1) }
              addFst newTD (withNamedType ti ty m)
 
@@ -415,8 +416,8 @@ checkExpr expr tys =
          ensure (Subtype t1 (cType ty))
          pure (Select e1 s1)
 
-    Struct {} -> notYetImplemented "struct"
-    UpdateStruct {} -> notYetImplemented "update struct"
+    Struct s fs         -> checkStruct s fs tys
+    UpdateStruct s e fs -> checkStructUpdate s e fs tys
 
     WithThenElse e1 e2 e3 ->
       WithThenElse <$> checkConstExpr e1 BoolType
@@ -461,9 +462,85 @@ one xs =
     [x] -> pure x
     _   -> reportError $
            nestedError "Arity mismatch."
-            [ "Expected arity:" <+> int (length xs)
-            , "Actual arity:" <+> "1"
-            ]
+             [ "Expected arity:" <+> int (length xs)
+             , "Actual arity:" <+> "1"
+             ]
+
+
+checkStructType :: Name -> M (Name, [FieldType])
+checkStructType s =
+  do ty   <- checkType (NamedType s)
+     let name = case ty of
+                  NamedType nm -> nm
+                  _ -> panic "checkStructType"
+                         [ "Unexpected struct type ellaboration:"
+                         , "*** Struct type: " ++ showPP s
+                         , "*** Result: " ++ showPP ty
+                         ]
+     fs <- lookupStruct name
+     pure (name,fs)
+
+
+-- | Check an struct expression. Also fills in defaults for missing fields.
+checkStruct :: Name -> [Field Expression] -> [CType] -> M Expression
+checkStruct s fs tys =
+  do expected <- one tys
+     (actualName, fieldTs) <- checkStructType s
+     ensure (Subtype (NamedType actualName) (cType expected))
+     distinctFields fs
+
+     let fieldMap = Map.fromList [ (fName f, f) | f <- fs ]
+
+     fs1 <- for fieldTs $ \ft ->
+              case Map.lookup (fieldName ft) fieldMap of
+
+                Nothing -> -- Field not initialized
+                  case fieldDefault ft of
+                    Nothing -> reportError $
+                      "Field" <+> backticks (pp (fieldName ft)) <+>
+                      "of"    <+> backticks (pp actualName)     <+>
+                      "is not initialized."
+                    Just e1 -> pure Field { fName  = fieldName ft
+                                          , fValue = e1
+                                          }
+
+                Just f -> -- Field initialized
+                  do let ty = expected { cType = fieldType ft }
+                     e1 <- checkExpr1 (fValue f) ty
+                     pure f { fValue = e1 }
+
+     pure (Struct actualName fs1)
+
+-- | Check a structure updatating expression.
+checkStructUpdate ::
+  Name -> Expression -> [Field Expression] -> [CType] -> M Expression
+checkStructUpdate s e fs tys =
+  do expected <- one tys
+     (actualName, fieldTs) <- checkStructType s
+     e1 <- checkExpr1 e expected
+     distinctFields fs
+     fs1 <- for fs $ \f ->
+              case find ((fName f ==) . fieldName) fieldTs of
+                Just ft ->
+                  do let ty = expected { cType = fieldType ft }
+                     fe <- checkExpr1 (fValue f) ty
+                     pure f { fValue = fe }
+                Nothing -> reportError $
+                  "Struct"                <+> backticks (pp actualName) <+>
+                  "does not have a field" <+> backticks (pp (fName f))
+     pure (UpdateStruct actualName e1 fs1)
+
+-- | Check that all of the fields are different.
+distinctFields :: [Field Expression] -> M ()
+distinctFields = mapM_ check . group . sort . map fName
+  where
+  check g =
+    case g of
+      []    -> panic "distinctFields" ["`group` returned an empty list?"]
+      [_]   -> pure ()
+      f : _ -> reportError $ nestedError
+                ("Repeated occurances of field" <+> backticks (pp f))
+                (map (pp . range) g)
 
 
 
@@ -837,8 +914,8 @@ inferSelector sel ty0 =
          case ty of
            NamedType a ->
              do fs <- lookupStruct a
-                case Map.lookup f fs of
-                  Just t  -> pure (sel,t)
+                case find ((f ==) . fieldName) fs of
+                  Just fi  -> pure (sel,fieldType fi)
                   Nothing ->
                     reportError $
                     nestedError

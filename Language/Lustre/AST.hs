@@ -301,7 +301,7 @@ data StaticArg  = TypeArg Type
 data Literal    = Int Integer | Real Rational | Bool Bool
                   deriving (Show,Eq)
 
-data Field e    = Field Ident e
+data Field e    = Field { fName :: Ident, fValue :: e }
                   deriving Show
 
 instance Functor Field where
