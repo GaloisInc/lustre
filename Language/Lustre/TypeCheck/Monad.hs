@@ -50,7 +50,8 @@ newtype M a = M { unM ::
 
 data RO = RO
   { roConstants   :: Map OrigName (SourceRange, Type)
-    -- ^ Constants that are in scope
+    -- ^ Constants that are in scope. These include top-level constants,
+    -- constant (i.e., static) parameters, and local constants.
 
   , roUserNodes   :: Map OrigName (SourceRange, Safety, NodeType, NodeProfile)
     -- ^ User defined nodes in scope, as well as static node parameters.
