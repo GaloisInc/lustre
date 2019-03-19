@@ -4,7 +4,7 @@ module Language.Lustre.TypeCheck where
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           Data.List (find)
-import Control.Monad(when,unless,zipWithM_,zipWithM,forM,replicateM)
+import Control.Monad(when,unless,zipWithM_,zipWithM,replicateM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 import Data.Traversable(for)
@@ -371,7 +371,7 @@ checkExpr expr tys =
       do checkTemporalOk "when"
          (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
 
-         tys1 <- forM tys $ \ty ->
+         tys1 <- for tys $ \ty ->
                    do sameClock (cClock ty) (KnownClock c)
                       pure ty { cClock = cl }
 
@@ -381,9 +381,9 @@ checkExpr expr tys =
     CondAct c e mb ->
       do checkTemporalOk "when"
          (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
-         mb1     <- forM mb $ \d -> checkExpr d tys
+         mb1     <- for mb $ \d -> checkExpr d tys
 
-         tys1 <- forM tys $ \ty ->
+         tys1 <- for tys $ \ty ->
                    do sameClock (cClock ty) cl
                       pure ty { cClock = cl }
 
@@ -543,7 +543,7 @@ distinctFields = mapM_ check . group . sort . map fName
 
 
 
--- | Infer the type of a call to a user-defined node.
+-- | Check the type of a call to a user-defined node.
 checkCall :: Name -> [StaticArg] -> [Expression] -> [CType] -> M Expression
 checkCall f as es0 tys =
   do (safe,ty,prof) <- lookupNodeProfile f
@@ -621,15 +621,15 @@ checkPrim r prim as es tys =
 
     Iter {} -> notYetImplemented "iterators."
 
-    Op1 op1 ->
+    Op1 op ->
       case es of
-        [e] -> noStatic op1 >> checkOp1 r op1 e tys
-        _   -> reportError (pp op1 <+> "expects 1 argument.")
+        [e] -> noStatic op >> checkOp1 r op e tys
+        _   -> reportError (pp op <+> "expects 1 argument.")
 
-    Op2 op2 ->
+    Op2 op ->
       case es of
-        [e1,e2] -> noStatic op2 >> checkOp2 r op2 e1 e2 tys
-        _ -> reportError (pp op2 <+> "expects 2 arguments.")
+        [e1,e2] -> noStatic op >> checkOp2 r op e1 e2 tys
+        _ -> reportError (pp op <+> "expects 2 arguments.")
 
     ITE ->
       case es of
@@ -648,17 +648,7 @@ checkPrim r prim as es tys =
         _ -> reportError "`if-then-else` expects 3 arguments."
 
 
-    -- IMPORTANT: For the moment these all work with bools, so we
-    -- just do them in one go.  THIS MAY CHANGE if we add
-    -- other operators!
-    OpN op ->
-      do noStatic op
-         ty <- one tys
-         let bool = ty { cType = BoolType }
-         es1 <- mapM (`checkExpr1` bool) es
-         ensure (Subtype BoolType (cType ty))
-         pure (eOpN r op es1)
-
+    OpN op -> noStatic op >> checkOpN r op es tys
   where
   noStatic op =
     unless (null as) $
@@ -690,7 +680,7 @@ checkOp1 r op e tys =
 
       Current ->
         do checkTemporalOk "current"
-           tys1 <- forM tys $ \ty ->
+           tys1 <- for tys $ \ty ->
                       do c <- newClockVar
                          pure ty { cClock = c }
            e1 <- checkExpr e tys1
@@ -849,6 +839,20 @@ checkOp2 r op2 e1 e2 tys =
                       [ "Expected:" <+> "array"
                       , "Actual type:" <+> pp t ]
 
+
+-- | Check a variable arity operator.
+checkOpN :: SourceRange -> OpN -> [Expression] -> [CType] -> M Expression
+checkOpN r op es tys =
+  case op of
+    AtMostOne -> boolOp
+    Nor       -> boolOp
+  where
+  boolOp =
+    do ty <- one tys
+       let bool = ty { cType = BoolType }
+       es1 <- for es $ \e -> checkExpr1 e bool
+       ensure (Subtype BoolType (cType ty))
+       pure (eOpN r op es1)
 
 
 
