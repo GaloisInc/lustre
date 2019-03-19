@@ -23,7 +23,6 @@ runTC m =
   ro0 = RO { roConstants  = Map.empty
            , roUserNodes  = Map.empty
            , roIdents     = Map.empty
-           , roOnlyInputs = False
            , roCurRange   = []
            , roTypeNames  = Map.empty
            , roTemporal   = False
@@ -51,13 +50,25 @@ newtype M a = M { unM ::
 
 data RO = RO
   { roConstants   :: Map OrigName (SourceRange, Type)
-  , roUserNodes   :: Map OrigName (SourceRange, Safety,NodeType,NodeProfile)
+    -- ^ Constants that are in scope
+
+  , roUserNodes   :: Map OrigName (SourceRange, Safety, NodeType, NodeProfile)
+    -- ^ User defined nodes in scope, as well as static node parameters.
+
   , roIdents      :: Map OrigName (SourceRange, CType)
+    -- ^ Locals in scope (i.e., arguments and node locals)
+
   , roTypeNames   :: Map OrigName (SourceRange, NamedType) -- no type vars here
-  , roOnlyInputs  :: Bool
+    -- ^ Named types in scope (top level declarations plus static parameters)
+
   , roCurRange    :: [SourceRange]
+    -- ^ The "path" of locations that lead us to where we currently are.
+
   , roTemporal    :: Bool
+    -- ^ Are temporal constructs OK?
+
   , roUnsafe      :: Bool
+    -- ^ Are unsafe constucts OK?
   }
 
 
@@ -108,9 +119,6 @@ inRangeMaybe :: Maybe SourceRange -> M a -> M a
 inRangeMaybe mb m = case mb of
                       Nothing -> m
                       Just r  -> inRange r m
-
-onlyInputs :: M a -> M a
-onlyInputs (M m) = M (mapReader (\ro -> ro { roOnlyInputs = True }) m)
 
 lookupLocal :: Ident -> M CType
 lookupLocal i =

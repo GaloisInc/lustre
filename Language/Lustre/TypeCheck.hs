@@ -272,7 +272,6 @@ checkEquation eqn =
   enterRange $
   case eqn of
     Assert l e ->
-      onlyInputs $
         Assert l <$> checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
 
     Property l e ->
