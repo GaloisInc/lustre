@@ -1,4 +1,4 @@
-{-# Language OverloadedStrings #-}
+{-# Language OverloadedStrings, Rank2Types #-}
 module Language.Lustre.TypeCheck where
 
 import qualified Data.Map as Map
@@ -104,42 +104,64 @@ checkNodeDecl nd k =
     inRange (range (nodeName nd)) $
     allowTemporal (nodeType nd == Node) $
     allowUnsafe   (nodeSafety nd == Unsafe) $
-    do unless (null (nodeStaticInputs nd)) $
-         notYetImplemented "static parameters"
-       when (nodeExtern nd) $
-         case nodeDef nd of
-           Just _ -> reportError $ nestedError
-                     "Extern node with a definition."
-                     ["Node:" <+> pp (nodeName nd)]
-           Nothing -> pure ()
-       let prof = nodeProfile nd
-       (ins,(outs,bod)) <-
-          checkInputBinders  (nodeInputs prof) $
-          checkOutputBinders (nodeOutputs prof) $
-          do case nodeContract nd of
-               Nothing -> pure ()
-               Just _  -> notYetImplemented "Node contracts"
+    do (ps,(prof,bod)) <-
+          checkStaticParams (nodeStaticInputs nd) $
+          do when (nodeExtern nd) $
+               case nodeDef nd of
+                 Just _ -> reportError $ nestedError
+                           "Extern node with a definition."
+                           ["Node:" <+> pp (nodeName nd)]
+                 Nothing -> pure ()
+             let prof = nodeProfile nd
+             (ins,(outs,bod)) <-
+                checkInputBinders  (nodeInputs prof) $
+                checkOutputBinders (nodeOutputs prof) $
+                do case nodeContract nd of
+                     Nothing -> pure ()
+                     Just _  -> notYetImplemented "Node contracts"
 
-             case nodeDef nd of
-               Nothing ->
-                  do unless (nodeExtern nd) $ reportError $ nestedError
-                            "Missing node definition"
-                            ["Node:" <+> pp (nodeName nd)]
-                     pure Nothing
-               Just b -> Just <$> checkNodeBody b
+                   case nodeDef nd of
+                     Nothing ->
+                        do unless (nodeExtern nd) $ reportError $ nestedError
+                                  "Missing node definition"
+                                  ["Node:" <+> pp (nodeName nd)]
+                           pure Nothing
+                     Just b -> Just <$> checkNodeBody b
 
-       let newProf = NodeProfile { nodeInputs = ins
-                                 , nodeOutputs = outs
-                                 }
-       solveConstraints
+             let newProf = NodeProfile { nodeInputs = ins
+                                       , nodeOutputs = outs
+                                       }
+             solveConstraints  -- XXX: we can store constraints on constants
+                               -- and abstact types in the node.
 
-           -- XXX: static inputs
-           -- XXX: contract
-       pure nd { nodeProfile = newProf
-               , nodeDef = bod
-               }
+             -- XXX: contract
+             pure (newProf, bod)
+
+       pure nd { nodeStaticInputs = ps, nodeProfile = prof, nodeDef = bod }
+
+checkStaticParam :: StaticParam -> M a -> M (StaticParam,a)
+checkStaticParam sp m =
+  case sp of
+    TypeParam t ->
+      do a <- withNamedType t AbstractTy m
+         pure (TypeParam t, a)
+
+    ConstParam x t ->
+      do t1 <- checkType t
+         a <- withConst x t1 m
+         pure (ConstParam x t1, a)
+
+    NodeParam safe fun f prof ->
+      do (is,(os,_)) <- checkInputBinders (nodeInputs prof) $
+                        checkOutputBinders (nodeOutputs prof) $
+                        pure ()
+         let prof1 = NodeProfile { nodeInputs = is, nodeOutputs = os }
+         a <- withNode f (safe,fun,prof1) m
+         pure (NodeParam safe fun f prof1, a)
 
 
+checkStaticParams :: [StaticParam] -> M a -> M ([StaticParam],a)
+checkStaticParams = checkNested checkStaticParam
 
 checkNodeBody :: NodeBody -> M NodeBody
 checkNodeBody nb = addLocals (nodeLocals nb)
@@ -213,21 +235,10 @@ checkBinder b m =
      addFst newB $ withLocal (binderDefines b) ty m
 
 checkInputBinders :: [InputBinder] -> M a -> M ([InputBinder],a)
-checkInputBinders bs m =
-  case bs of
-    [] -> do a <- m
-             pure ([],a)
-    b : more -> do (b1,(bs1,a)) <- checkInputBinder b (checkInputBinders more m)
-                   pure (b1:bs1,a)
-
+checkInputBinders = checkNested checkInputBinder
 
 checkOutputBinders :: [Binder] -> M a -> M ([Binder],a)
-checkOutputBinders bs m =
-  case bs of
-    [] -> addFst [] m
-    b : more ->
-      do (b1,(xs,a)) <- checkBinder b (checkOutputBinders more m)
-         pure (b1:xs,a)
+checkOutputBinders = checkNested checkBinder
 
 addFst :: a -> M b -> M (a,b)
 addFst a m =
@@ -239,6 +250,17 @@ apFstM f m =
   do (a,b) <- m
      pure (f a, b)
 
+checkNested :: (forall a. t -> M a -> M (t,a)) -> [t] -> M b -> M ([t],b)
+checkNested work things m =
+  case things of
+
+    [] ->
+      do a <- m
+         pure ([],a)
+
+    t : ts ->
+      do (t1,(ts1,a)) <- work t (checkNested work ts m)
+         pure (t1:ts1,a)
 
 
 
@@ -555,7 +577,7 @@ checkCall f as es0 tys =
        Function -> pure ()
      as1 <- case as of
               [] -> pure as
-              _  -> notYetImplemented "Nodes with static arguments."
+              _  -> notYetImplemented "Calling nodes with static arguments."
      (es1,mp)   <- checkInputs [] Map.empty (nodeInputs prof) es0
      checkOuts mp (nodeOutputs prof)
      pure (Call (NodeInst (CallUser f) as1) es1)
