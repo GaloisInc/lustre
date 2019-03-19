@@ -38,7 +38,7 @@ nodeInstArtiy :: NodeInst -> [Expression] -> M Int
 nodeInstArtiy (NodeInst call as) es =
   case call of
     CallUser f   ->
-      do (_,_,prof) <- lookupNodeProfile f
+      do prof <- niProfile <$> lookupNodeInfo f
          pure $! length (nodeOutputs prof)
     CallPrim r p -> inRange r $ primArity p as es
 

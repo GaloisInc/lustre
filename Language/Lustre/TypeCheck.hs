@@ -95,8 +95,13 @@ checkNodeDecl :: NodeDecl -> M a -> M (NodeDecl,a)
 checkNodeDecl nd k =
   do newNd <- check
      addFst newNd
-       $ withNode (nodeName newNd)
-                  (nodeSafety newNd, nodeType newNd, nodeProfile newNd)
+       $ withNode NodeInfo
+                    { niName         = nodeName newNd
+                    , niSafety       = nodeSafety newNd
+                    , niType         = nodeType newNd
+                    , niStaticParams = nodeStaticInputs newNd
+                    , niProfile      = nodeProfile newNd
+                    }
                   k
   where
   check :: M NodeDecl
@@ -156,7 +161,13 @@ checkStaticParam sp m =
                         checkOutputBinders (nodeOutputs prof) $
                         pure ()
          let prof1 = NodeProfile { nodeInputs = is, nodeOutputs = os }
-         a <- withNode f (safe,fun,prof1) m
+             info = NodeInfo { niName = f
+                             , niSafety = safe
+                             , niType   = fun
+                             , niStaticParams = []
+                             , niProfile = prof1
+                             }
+         a <- withNode info m
          pure (NodeParam safe fun f prof1, a)
 
 
@@ -576,16 +587,17 @@ distinctFields = mapM_ check . group . sort . map fName
 -- | Check the type of a call to a user-defined node.
 checkCall :: Name -> [StaticArg] -> [Expression] -> [CType] -> M Expression
 checkCall f as es0 tys =
-  do (safe,ty,prof) <- lookupNodeProfile f
-     case safe of
+  do info <- lookupNodeInfo f
+     case niSafety info of
        Safe   -> pure ()
        Unsafe -> checkUnsafeOk (pp f)
-     case ty of
+     case niType info of
        Node     -> checkTemporalOk ("node" <+> pp f)
        Function -> pure ()
-     as1 <- case as of
+     as1 <- case niStaticParams info of
               [] -> pure as
               _  -> notYetImplemented "Calling nodes with static arguments."
+     let prof = niProfile info
      (es1,mp)   <- checkInputs [] Map.empty (nodeInputs prof) es0
      checkOuts mp (nodeOutputs prof)
      pure (Call (NodeInst (CallUser f) as1) es1)

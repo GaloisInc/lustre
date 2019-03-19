@@ -48,12 +48,21 @@ newtype M a = M { unM ::
     ] a
   } deriving (Functor,Applicative,Monad)
 
+-- | Information about a node that can be called (i.e., is in scope)
+data NodeInfo = NodeInfo
+  { niName         :: Ident           -- ^ Definition site
+  , niSafety       :: Safety          -- ^ Safe/unsafe
+  , niType         :: NodeType        -- ^ Function/node
+  , niStaticParams :: [StaticParam]   -- ^ Static parametres
+  , niProfile      :: NodeProfile     -- ^ Inputs and ouputs
+  }
+
 data RO = RO
   { roConstants   :: Map OrigName (SourceRange, Type)
     -- ^ Constants that are in scope. These include top-level constants,
     -- constant (i.e., static) parameters, and local constants.
 
-  , roUserNodes   :: Map OrigName (SourceRange, Safety, NodeType, NodeProfile)
+  , roUserNodes   :: Map OrigName NodeInfo
     -- ^ User defined nodes in scope, as well as static node parameters.
 
   , roIdents      :: Map OrigName (SourceRange, CType)
@@ -196,11 +205,11 @@ lookupStruct s =
                           ["Name:" <+> pp s]
 
 
-lookupNodeProfile :: Name -> M (Safety,NodeType,NodeProfile)
-lookupNodeProfile n =
+lookupNodeInfo :: Name -> M NodeInfo
+lookupNodeInfo n =
   do ro <- M ask
      case Map.lookup (nameOrigName n) (roUserNodes ro) of
-       Just (_,x,y,z) -> pure (x,y,z)
+       Just info -> pure info
        Nothing -> panic "lookupNodeProfile" [ "Undefined node: " ++ showPP n ]
 
 withConst :: Ident -> Type -> M a -> M a
@@ -218,12 +227,11 @@ withLocal i t (M m) =
              nm = identOrigName i
          local ro { roIdents = Map.insert nm (range i, t) is } m
 
-withNode :: Ident -> (Safety, NodeType, NodeProfile) -> M a -> M a
-withNode x (a,b,c) (M m) =
+withNode :: NodeInfo -> M a -> M a
+withNode ni (M m) =
   M $ do ro <- ask
-         let nm = identOrigName x
-         local ro { roUserNodes = Map.insert nm (range x,a,b,c)
-                                                (roUserNodes ro) } m
+         let nm = identOrigName (niName ni)
+         local ro { roUserNodes = Map.insert nm ni (roUserNodes ro) } m
 
 withNamedType :: Ident -> NamedType -> M a -> M a
 withNamedType x t (M m) =
