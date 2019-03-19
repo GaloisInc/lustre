@@ -345,8 +345,9 @@ checkConstExpr expr ty =
          ensure (Subtype (ArrayType elT n) ty)
          pure (Array es1)
 
-    Struct {} -> notYetImplemented "structs"
-    UpdateStruct {} -> notYetImplemented "updating structs"
+    Struct s fs -> checkStruct s fs ty checkConstExpr
+
+    UpdateStruct s e fs -> checkStructUpdate s e fs ty checkConstExpr
 
     Select e s ->
       do t <- newTVar
@@ -437,8 +438,15 @@ checkExpr expr tys =
          ensure (Subtype t1 (cType ty))
          pure (Select e1 s1)
 
-    Struct s fs         -> checkStruct s fs tys
-    UpdateStruct s e fs -> checkStructUpdate s e fs tys
+    Struct s fs ->
+      do ty <- one tys
+         checkStruct s fs (cType ty) $ \e t ->
+           checkExpr1 e ty { cType = t }
+
+    UpdateStruct s e fs ->
+      do ty <- one tys
+         checkStructUpdate s e fs (cType ty) $ \ex t ->
+            checkExpr1 ex ty { cType = t }
 
     WithThenElse e1 e2 e3 ->
       WithThenElse <$> checkConstExpr e1 BoolType
@@ -503,11 +511,12 @@ checkStructType s =
 
 
 -- | Check an struct expression. Also fills in defaults for missing fields.
-checkStruct :: Name -> [Field Expression] -> [CType] -> M Expression
-checkStruct s fs tys =
-  do expected <- one tys
-     (actualName, fieldTs) <- checkStructType s
-     ensure (Subtype (NamedType actualName) (cType expected))
+checkStruct :: Name -> [Field Expression] -> Type ->
+               (Expression -> Type -> M Expression) ->
+               M Expression
+checkStruct s fs expected checkF =
+  do (actualName, fieldTs) <- checkStructType s
+     ensure (Subtype (NamedType actualName) expected)
      distinctFields fs
 
      let fieldMap = Map.fromList [ (fName f, f) | f <- fs ]
@@ -526,25 +535,24 @@ checkStruct s fs tys =
                                           }
 
                 Just f -> -- Field initialized
-                  do let ty = expected { cType = fieldType ft }
-                     e1 <- checkExpr1 (fValue f) ty
+                  do e1 <- checkF (fValue f) (fieldType ft)
                      pure f { fValue = e1 }
 
      pure (Struct actualName fs1)
 
 -- | Check a structure updatating expression.
 checkStructUpdate ::
-  Name -> Expression -> [Field Expression] -> [CType] -> M Expression
-checkStructUpdate s e fs tys =
-  do expected <- one tys
-     (actualName, fieldTs) <- checkStructType s
-     e1 <- checkExpr1 e expected
+  Name -> Expression -> [Field Expression] -> Type ->
+  (Expression -> Type -> M Expression) ->
+  M Expression
+checkStructUpdate s e fs expect checkF =
+  do (actualName, fieldTs) <- checkStructType s
+     e1 <- checkF e expect
      distinctFields fs
      fs1 <- for fs $ \f ->
               case find ((fName f ==) . fieldName) fieldTs of
                 Just ft ->
-                  do let ty = expected { cType = fieldType ft }
-                     fe <- checkExpr1 (fValue f) ty
+                  do fe <- checkF (fValue f) (fieldType ft)
                      pure f { fValue = fe }
                 Nothing -> reportError $
                   "Struct"                <+> backticks (pp actualName) <+>
