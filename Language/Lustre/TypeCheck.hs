@@ -1,6 +1,7 @@
 {-# Language OverloadedStrings, Rank2Types #-}
 module Language.Lustre.TypeCheck where
 
+import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           Data.List (find)
@@ -174,31 +175,30 @@ checkStaticParam sp m =
 checkStaticParams :: [StaticParam] -> M a -> M ([StaticParam],a)
 checkStaticParams = checkNested checkStaticParam
 
-checkStaticArg :: StaticArg -> StaticParam -> M StaticArg
+checkStaticArg :: StaticArg -> StaticParam -> M (StaticArg, StaticEnv)
 checkStaticArg arg para =
   case arg of
     ArgRange r a1 -> inRange r (checkStaticArg a1 para)
 
     TypeArg t ->
       case para of
-        TypeParam _ ->
+        TypeParam i ->
           do t1 <- checkType t
-             pure (TypeArg t1)
+             pure (TypeArg t1, sType i t1)
         _ -> mismatch
 
     ExprArg e ->
       case para of
-        ConstParam _ t ->
+        ConstParam x t ->
           do e1 <- checkConstExpr e t
-             pure (ExprArg e1)
+             pure (ExprArg e1, sConst x e1)
         _ -> mismatch
 
-    NodeArg _ (NodeInst c as) ->
+    NodeArg notationTy ni ->
       case para of
         NodeParam safe fun _ prof ->
-          case c of
-            CallUser f -> notYetImplemented "fun node args"
-            CallPrim r op -> notYetImplemented "prim node args"
+          do ni1 <- checkStaticNodeArg ni safe fun prof
+             pure (NodeArg notationTy ni1, sEmpty)
         _ -> mismatch
   where
   mismatch = reportError $ nestedError
@@ -217,6 +217,241 @@ checkStaticArg arg para =
            TypeParam {}  -> "a type"
            ConstParam {} -> "a constant expression"
            NodeParam {}  -> "a node"
+
+
+checkStaticNodeArg ::
+  NodeInst -> Safety -> NodeType -> NodeProfile -> M NodeInst
+checkStaticNodeArg (NodeInst c as) safe fun prof =
+  case c of
+    CallUser f ->
+      do (ni,iprof) <- prepUserNodeInst f as safe fun
+         checkStaticArgTypes iprof prof
+         pure ni
+
+    -- The prims are all safe so we don't need to pass the safety
+    CallPrim _r _op ->
+      notYetImplemented "Passing primitives as static arguments."
+
+prepUserNodeInst ::
+  Name -> [StaticArg] -> Safety -> NodeType -> M (NodeInst, NodeProfile)
+prepUserNodeInst f as safe fun =
+  do fi <- lookupNodeInfo f
+     inRange (range f) $
+       do checkSafetyType fi safe fun
+          checkEnoughStaticArgs fi as
+          (as1,envs) <- unzip <$>
+                        zipWithM checkStaticArg as (niStaticParams fi)
+          let env = sJoin envs
+              iprof = instantiateProfile env (niProfile fi)
+          pure (NodeInst (CallUser f) as1, iprof)
+
+
+
+checkStaticArgTypes :: NodeProfile -> NodeProfile -> M ()
+checkStaticArgTypes actual expected =
+  do unless (haveInNum == needInNum) $
+        reportError $ nestedError
+          "Incorrect number of inputs."
+          [ "Parameter has" <+> int needInNum <+> "inputs."
+          , "Given argument has" <+> int haveInNum <+> "inputs."
+          ]
+     unless (haveOutNum == needOutNum) $
+        reportError $ nestedError
+          "Incorrect number of outputs."
+          [ "Parameter has" <+> int needOutNum <+> "outputs."
+          , "Given argument has" <+> int haveOutNum <+> "outputs."
+          ]
+     zipWithM_ checkIn  (nodeInputs actual)  (nodeInputs  expected)
+     zipWithM_ checkOut (nodeOutputs actual) (nodeOutputs expected)
+
+  where
+  haveInNum = length (nodeInputs actual)
+  haveOutNum = length (nodeOutputs actual)
+  needInNum = length (nodeInputs expected)
+  needOutNum = length (nodeOutputs expected)
+
+  checkIn arg param =
+    case (arg,param) of
+      (InputConst _ t, InputConst _ t1) -> ensure (Subtype t1 t)
+      (InputBinder b, InputBinder b1) -> subCType (cTypeOf b1) (cTypeOf b)
+      (InputBinder {}, InputConst {}) ->
+        reportError "Expected a constant input."
+      (InputConst {}, InputBinder {}) ->
+        reportError "Unexpected constant input." -- XXX: perhaps this is ok?
+
+  checkOut arg param = subCType (cTypeOf arg) (cTypeOf param)
+
+cTypeOf :: Binder -> CType
+cTypeOf b = CType { cType  = binderType b
+                  , cClock = case binderClock b of
+                               Nothing -> BaseClock
+                               Just c  -> KnownClock c }
+
+
+
+
+--------------------------------------------------------------------------------
+{- Example:
+
+f <<const n : int>> (x : Array n bool) returns (y : int)
+g <<node z (x : Array 2 bool) returns (y : int)>> (...) returns (...)
+
+g << f<<2>> >>
+
+NOTE: for the moment we assume that node static arguments don't appear in types.
+-}
+
+data StaticEnv = StaticEnv
+  { sConsts :: Map OrigName Expression
+  , sTypes  :: Map OrigName Type
+  }
+
+sEmpty :: StaticEnv
+sEmpty = StaticEnv { sConsts = Map.empty, sTypes = Map.empty }
+
+sType :: Ident -> Type -> StaticEnv
+sType x t = sEmpty { sTypes = Map.singleton (identOrigName x) t }
+
+sConst :: Ident -> Expression -> StaticEnv
+sConst x e = sEmpty { sConsts = Map.singleton (identOrigName x) e }
+
+sJoin :: [StaticEnv] -> StaticEnv
+sJoin envs = StaticEnv { sConsts = Map.unions (map sConsts envs)
+                       , sTypes = Map.unions (map sTypes envs)
+                       }
+
+--------------------------------------------------------------------------------
+
+instantiateProfile :: StaticEnv -> NodeProfile -> NodeProfile
+instantiateProfile env prof =
+  NodeProfile
+    { nodeInputs  = map (instantiateInputBinder env) (nodeInputs prof)
+    , nodeOutputs = map (instantiateBinder env)      (nodeOutputs prof)
+    }
+
+instantiateInputBinder :: StaticEnv -> InputBinder -> InputBinder
+instantiateInputBinder env inp =
+  case inp of
+    InputConst x t -> InputConst x (instantiateType env t)
+    InputBinder b  -> InputBinder (instantiateBinder env b)
+
+instantiateBinder :: StaticEnv -> Binder -> Binder
+instantiateBinder env b =
+  b { binderType  = iType (binderType b)
+    , binderClock = iClock <$> binderClock b }
+  where
+  iClock (WhenClock r e i) = WhenClock r (iConst e) i
+  iConst = instantiateConst env
+  iType  = instantiateType env
+
+
+-- | Instantiate a type with the given static parameters.
+instantiateType :: StaticEnv -> Type -> Type
+instantiateType env ty
+  | Map.null (sConsts env) && Map.null (sTypes env) = ty -- a very common case
+  | otherwise =
+    case ty of
+      ArrayType t e     -> ArrayType (iType t) (iConst e)
+      NamedType x       -> Map.findWithDefault ty (nameOrigName x) (sTypes env)
+      TypeRange r t     -> TypeRange r (iType t)
+      IntSubrange e1 e2 -> IntSubrange (iConst e1) (iConst e2)
+      IntType           -> ty
+      RealType          -> ty
+      BoolType          -> ty
+      TVar {}           -> ty
+  where
+  iType  = instantiateType env
+  iConst = instantiateConst env
+
+
+-- | Instantiate a constant with the given static parameters.
+-- These are just constants that can appear in types, so pretty much
+-- an expression denoting an `int`.  However, to support selectors and functions
+-- we pretty much do all but the temporal constructs.
+instantiateConst :: StaticEnv -> Expression -> Expression
+instantiateConst env expr
+  | Map.null (sConsts env) && Map.null (sTypes env) = expr -- a very common case
+  | otherwise =
+    case expr of
+      ERange r e -> ERange r (iConst e)
+      Var x -> Map.findWithDefault expr (nameOrigName x) (sConsts env)
+      Lit {} -> expr
+
+      Select e s -> Select (iConst e) (iSelect s)
+      Tuple es -> Tuple (map iConst es)
+      Array es -> Array (map iConst es)
+      Struct s fs -> Struct (iStructTy s) (map iField fs)
+      UpdateStruct s e fs ->
+        UpdateStruct (iStructTy s) (iConst e) (map iField fs)
+
+      WithThenElse e1 e2 e3 -> WithThenElse (iConst e1) (iConst e2) (iConst e3)
+      Call (NodeInst n as) es ->
+        Call (NodeInst n (map iArg as)) (map iConst es)
+
+      When {}       -> bad "WhenClock"
+      CondAct {}    -> bad "CondAct"
+      Merge {}      -> bad "Merge"
+
+  where
+  bad x = panic "instantiateConst" [ "Unexpected construct: " ++ x ]
+
+  iStructTy x = toNameTy (iType (NamedType x))
+  toNameTy ty = case ty of
+                  TypeRange _ t -> toNameTy t
+                  NamedType t   -> t
+                  _             -> bad "Struct type was not a named type?"
+
+  iConst = instantiateConst env
+  iType  = instantiateType env
+  iSelect sel =
+    case sel of
+      SelectField {}  -> sel
+      SelectElement e -> SelectElement (iConst e)
+      SelectSlice s   -> SelectSlice (iSlice s)
+  iSlice sl = ArraySlice { arrayStart = iConst (arrayStart sl)
+                         , arrayEnd   = iConst (arrayEnd sl)
+                         , arrayStep  = iConst <$> arrayStep sl
+                         }
+
+  iField f = f { fValue = iConst (fValue f) }
+  iArg arg = case arg of
+               TypeArg t -> TypeArg (iType t)
+               ExprArg e -> ExprArg (iConst e)
+               NodeArg t ni -> NodeArg t (iInst ni)
+               ArgRange r s -> ArgRange r (iArg s)
+  iInst (NodeInst f as) = NodeInst f (map iArg as)
+
+
+
+checkSafetyType :: NodeInfo -> Safety -> NodeType -> M ()
+checkSafetyType ni safe fun =
+  do case (safe, niSafety ni) of
+       (Safe, Unsafe) ->
+          reportError ("Invalid unsafe node parameter" <+> fDoc)
+       _ -> pure ()
+     case (fun, niType ni) of
+       (Function, Node) ->
+          reportError ("Expected a function parameter, but"
+                                                      <+> fDoc <+> "is a node.")
+       _ -> pure ()
+  where
+  fDoc = backticks (pp (niName ni))
+
+
+checkEnoughStaticArgs :: NodeInfo -> [StaticArg] -> M ()
+checkEnoughStaticArgs ni as =
+  case compare have need of
+    EQ -> pure ()
+    LT -> reportError
+            ("Not enough static arguments in call to"
+                <+> backticks (pp (niName ni)))
+    GT -> reportError $
+            ("Too many static arguments in call to"
+                <+> backticks (pp (niName ni)))
+  where
+  have = length as
+  need = length (niStaticParams ni)
+
 
 
 checkNodeBody :: NodeBody -> M NodeBody
@@ -636,20 +871,12 @@ distinctFields = mapM_ check . group . sort . map fName
 -- | Check the type of a call to a user-defined node.
 checkCall :: Name -> [StaticArg] -> [Expression] -> [CType] -> M Expression
 checkCall f as es0 tys =
-  do info <- lookupNodeInfo f
-     case niSafety info of
-       Safe   -> pure ()
-       Unsafe -> checkUnsafeOk (pp f)
-     case niType info of
-       Node     -> checkTemporalOk ("node" <+> pp f)
-       Function -> pure ()
-     as1 <- case niStaticParams info of
-              [] -> pure as
-              _  -> notYetImplemented "Calling nodes with static arguments."
-     let prof = niProfile info
-     (es1,mp)   <- checkInputs [] Map.empty (nodeInputs prof) es0
+  do reqSafety <- getUnsafeLevel
+     reqTemporal <- getTemporalLevel
+     (ni,prof) <- prepUserNodeInst f as reqSafety reqTemporal
+     (es1,mp) <- checkInputs [] Map.empty (nodeInputs prof) es0
      checkOuts mp (nodeOutputs prof)
-     pure (Call (NodeInst (CallUser f) as1) es1)
+     pure (Call ni es1)
   where
   renBinderClock mp b =
     case binderClock b of

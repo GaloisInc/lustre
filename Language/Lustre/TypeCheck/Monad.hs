@@ -259,17 +259,21 @@ checkTemporalOk msg =
        "Temporal operators are not allowed in a function."
        [ "Operator:" <+> msg ]
 
+getTemporalLevel :: M NodeType
+getTemporalLevel =
+  do ok <- M (roTemporal <$> ask)
+     pure (if ok then Node else Function)
 
 allowUnsafe :: Bool -> M a -> M a
 allowUnsafe b (M m) = M (mapReader upd m)
   where upd ro = ro { roUnsafe = b }
 
-checkUnsafeOk :: Doc -> M ()
-checkUnsafeOk msg =
+getUnsafeLevel :: M Safety
+getUnsafeLevel =
   do ok <- M (roUnsafe <$> ask)
-     unless ok $ reportError $ nestedError
-       "This node does not allow calling unsafe nodes."
-       [ "Unsafe call to:" <+> msg ]
+     pure (if ok then Unsafe else Safe)
+
+
 
 newClockVar :: M IClock
 newClockVar = M $ do n <- inBase L.newInt
