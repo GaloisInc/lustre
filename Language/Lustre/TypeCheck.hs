@@ -174,6 +174,51 @@ checkStaticParam sp m =
 checkStaticParams :: [StaticParam] -> M a -> M ([StaticParam],a)
 checkStaticParams = checkNested checkStaticParam
 
+checkStaticArg :: StaticArg -> StaticParam -> M StaticArg
+checkStaticArg arg para =
+  case arg of
+    ArgRange r a1 -> inRange r (checkStaticArg a1 para)
+
+    TypeArg t ->
+      case para of
+        TypeParam _ ->
+          do t1 <- checkType t
+             pure (TypeArg t1)
+        _ -> mismatch
+
+    ExprArg e ->
+      case para of
+        ConstParam _ t ->
+          do e1 <- checkConstExpr e t
+             pure (ExprArg e1)
+        _ -> mismatch
+
+    NodeArg _ (NodeInst c as) ->
+      case para of
+        NodeParam safe fun _ prof ->
+          case c of
+            CallUser f -> notYetImplemented "fun node args"
+            CallPrim r op -> notYetImplemented "prim node args"
+        _ -> mismatch
+  where
+  mismatch = reportError $ nestedError
+             "Invalid static argument."
+              [ "Expected:" <+> pDoc
+              , "Got:" <+> aDoc
+              ]
+
+  aDoc = case arg of
+           ExprArg {} -> "a constant expression"
+           TypeArg {} -> "a type"
+           NodeArg {} -> "a node"
+           ArgRange {} -> panic "aDoc" ["Unexpected `ArgRange`"]
+
+  pDoc = case para of
+           TypeParam {}  -> "a type"
+           ConstParam {} -> "a constant expression"
+           NodeParam {}  -> "a node"
+
+
 checkNodeBody :: NodeBody -> M NodeBody
 checkNodeBody nb = addLocals (nodeLocals nb)
   where
@@ -339,6 +384,10 @@ checkLHS lhs =
 
 
 -- | Infer the type of a constant expression.
+-- XXX: Perhaps we can eliminate this function by just using `checkExpr`
+-- but disable temporal operators.... We'd have to do something about the
+-- clock (perhaps use the base clock?), and also we'd have to treat local
+-- variables (parameters or locals) as temporal constructs.
 checkConstExpr :: Expression -> Type -> M Expression
 checkConstExpr expr ty =
   case expr of
