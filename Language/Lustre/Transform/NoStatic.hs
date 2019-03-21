@@ -953,7 +953,10 @@ evalDynExpr eloc env expr =
     e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
                           pure (e1' `When` evalClockExpr env e2)
 
-    CondAct c e d   -> desugarCondAct eloc env c e d
+    CondAct c e d mbtys ->
+      case mbtys of
+        Just tys -> desugarCondAct eloc env tys c e d
+        Nothing  -> panic "evalDynExpr" [ "No type annotation on cond act" ]
 
 
     Tuple es -> Tuple <$> mapM (evalDynExpr NestedExpr env) es
@@ -1040,11 +1043,14 @@ evalDynExpr eloc env expr =
 > x = if c then current (e when c)
 >          else d -> pre x
 
+Note that to implement this we need to know the type of `e` so that
+we can declare `x` appropriately.
 -}
 
 desugarCondAct ::
-  ExprLoc -> Env -> ClockExpr -> Expression -> Maybe Expression -> M Expression
-desugarCondAct _ _ _ _ _ =
+  ExprLoc -> Env -> [CType] ->
+  ClockExpr -> Expression -> Maybe Expression -> M Expression
+desugarCondAct _ _ _ _ _ _ =
     panic "desugarCondAct" ["`condact` is not yet implemented"]
 {-
   case mbD of

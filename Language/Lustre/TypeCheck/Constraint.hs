@@ -204,7 +204,10 @@ sameType x y =
 
 
 
--- Subtype is like "subset"
+-- | Subtype is like "subset".
+-- Returns 'True' if the constraint was solved (possibly generating
+-- new sub-constraints).  `False` means that we failed to solved the
+-- constraint and instead it was stored to be solved later.
 subType :: Type -> Type -> M Bool
 subType x y =
   do s <- tidyType x

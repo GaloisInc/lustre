@@ -19,7 +19,7 @@ exprArity expr =
     Var {}              -> pure 1
     Lit {}              -> pure 1
     e `When` _          -> exprArity e
-    CondAct _ e _       -> exprArity e
+    CondAct _ e _ _     -> exprArity e
     Tuple es            -> pure (length es)
     Array {}            -> pure 1
     Select {}           -> pure 1

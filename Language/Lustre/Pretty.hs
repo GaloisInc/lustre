@@ -249,7 +249,7 @@ instance Pretty Expression where
       Lit l         -> pp l
       e `When` ce   -> parenIf (n > 10) doc
         where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce
-      CondAct b e d -> "condact" <> parens (commaSep docs)
+      CondAct b e d _ -> "condact" <> parens (commaSep docs)
         where docs = [ pp b, pp e ] ++ (case d of
                                           Nothing -> []
                                           Just d' -> [pp d'])

@@ -304,9 +304,13 @@ resolveExpr expr =
     Var x                 -> Var <$> inferName x
     Lit _                 -> pure expr
     e1 `When` e2          -> When <$> resolveExpr e1 <*> resolve e2
-    CondAct c e d         -> CondAct <$> resolve c
-                                     <*> resolveExpr e
-                                     <*> traverse resolveExpr d
+    CondAct c e d t       ->
+        case t of
+          Nothing -> CondAct <$> resolve c
+                             <*> resolveExpr e
+                             <*> traverse resolveExpr d
+                             <*> pure Nothing
+          Just _ -> panic "resolveExpr" [ "Condatct with a type annotation?" ]
 
     Tuple es              -> Tuple  <$> traverse resolveExpr es
     Array es              -> Array  <$> traverse resolveExpr es

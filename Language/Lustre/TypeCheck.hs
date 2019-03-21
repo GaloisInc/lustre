@@ -140,6 +140,8 @@ checkNodeDecl nd k =
              solveConstraints  -- XXX: we can store constraints on constants
                                -- and abstact types in the node.
 
+             -- XXX: resolve type variable in the types of the node, if any
+
              -- XXX: contract
              pure (newProf, bod)
 
@@ -627,7 +629,7 @@ checkConstExpr :: Expression -> Type -> M Expression
 checkConstExpr expr ty =
   case expr of
     ERange r e -> inRange r (checkConstExpr e ty)
-    Var x      -> Var <$> checkConstVar x ty
+    Var x      -> checkConstVar x ty
     Lit l      -> do ensure (Subtype (inferLit l) ty)
                      pure (Lit l)
     When {}    -> reportError "`when` is not a constant expression."
@@ -677,7 +679,7 @@ checkExpr expr tys =
     Var x ->
       inRange (range x) $
         do ty <- one tys
-           Var <$> checkVar x ty
+           checkVar x ty
 
     Lit l ->
       do ty <- one tys
@@ -696,7 +698,7 @@ checkExpr expr tys =
          e1 <- checkExpr e tys1
          pure (e1 `When` c1)
 
-    CondAct c e mb ->
+    CondAct c e mb ~Nothing ->
       do checkTemporalOk "when"
          (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
          mb1     <- for mb $ \d -> checkExpr d tys
@@ -706,7 +708,7 @@ checkExpr expr tys =
                       pure ty { cClock = cl }
 
          e1 <- checkExpr e tys1
-         pure (CondAct c1 e1 mb1)
+         pure (CondAct c1 e1 mb1 (Just tys))
 
     Tuple es
       | have == need -> Tuple <$> zipWithM checkExpr1 es tys
@@ -1175,14 +1177,14 @@ checkOpN r op es tys =
 
 
 -- | Check the type of a variable.
-checkVar :: Name -> CType -> M Name
+checkVar :: Name -> CType -> M Expression
 checkVar x ty =
   case x of
     Unqual i ->
       case rnThing (nameOrigName x) of
         AVal   -> do (j,c) <- checkLocalVar i
                      subCType c ty
-                     pure (Unqual j)
+                     pure (Var (Unqual j))
         AConst -> checkConstVar x (cType ty)
         t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
                               , "*** Name: " ++ showPP x
@@ -1194,11 +1196,11 @@ checkVar x ty =
 
 
 -- | Check the type of a named constnat.
-checkConstVar :: Name -> Type -> M Name
+checkConstVar :: Name -> Type -> M Expression
 checkConstVar x ty = inRange (range x) $
                      do t1 <- lookupConst x
                         ensure (Subtype t1 ty)
-                        pure x
+                        pure (Var x)
 
 -- | Check a local variable. Returns the elaborated variable and its type.
 checkLocalVar :: Ident -> M (Ident, CType)

@@ -200,7 +200,9 @@ data Expression = ERange !SourceRange !Expression
                 | Lit !Literal
 
                 | Expression `When` ClockExpr
-                | CondAct ClockExpr Expression (Maybe Expression)
+                | CondAct ClockExpr Expression
+                      (Maybe Expression)
+                      (Maybe [CType])  -- add during type checking
 
                 | Tuple ![Expression]
                   -- ^ These are more like unboxed tuples in Haskell
@@ -353,14 +355,16 @@ data OpN = AtMostOne | Nor
 
 -- | A type, together with its clock.
 data CType      = CType { cType :: Type, cClock :: IClock }
+                  deriving Show
 
 -- | A single clock expression.
 data IClock     = BaseClock
                 | KnownClock ClockExpr
                 | ClockVar CVar         -- ^ Only present during type-checking
+                  deriving Show
 
 -- | A clock variable
-newtype CVar    = CVar Int deriving (Eq,Ord)
+newtype CVar    = CVar Int deriving (Eq,Ord,Show)
 
 
 
