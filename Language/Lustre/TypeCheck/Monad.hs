@@ -333,3 +333,60 @@ addConstraint c =
 resetConstraints :: M [(Maybe SourceRange, Constraint)]
 resetConstraints = M $ sets $ \rw -> (rwCtrs rw, rw { rwCtrs = [] })
 
+
+-- | For now, only CondAct contains type annotations, so
+-- we just traverse parts of the expressoin that may encounter condatct.
+-- In particular we don't traverse constants.
+-- If we add more annotation, this will have to be updated appropriately.
+-- We assume that the input is an alredy type-checked expression.
+zonkExpr :: Expression -> M Expression
+zonkExpr expr =
+  case expr of
+    ERange r e -> ERange r <$> zonkExpr e
+    Var {} -> pure expr
+    Lit {} -> pure expr
+    e `When` c -> When <$> zonkExpr e <*> pure c
+    CondAct c e d t -> CondAct c <$> zonkExpr e
+                                 <*> traverse zonkExpr d
+                                 <*> traverse (traverse zonkCType) t
+
+    Tuple es -> Tuple <$> traverse zonkExpr es
+    Array es -> Array <$> traverse zonkExpr es
+    Select e s -> Select <$> zonkExpr e <*> pure s
+    Struct s fs -> Struct s <$> traverse zonkField fs
+    UpdateStruct s e fs -> UpdateStruct s
+                            <$> zonkExpr e
+                            <*> traverse zonkField fs
+    WithThenElse e1 e2 e3 -> WithThenElse e1 <$> zonkExpr e2
+                                             <*> zonkExpr e3
+    Merge i as -> Merge i <$> traverse zonkMergeCase as
+    Call f es -> Call f <$> traverse zonkExpr es
+
+zonkCType :: CType -> M CType
+zonkCType ct =
+  do t <- tidyType (cType ct)
+     pure ct { cType = t }
+
+zonkField :: Field Expression -> M (Field Expression)
+zonkField f =
+  do e <- zonkExpr (fValue f)
+     pure f { fValue = e }
+
+zonkMergeCase :: MergeCase Expression -> M (MergeCase Expression)
+zonkMergeCase (MergeCase k e) = MergeCase k <$> zonkExpr e
+
+zonkBody :: NodeBody -> M NodeBody
+zonkBody b =
+  do eqs <- traverse zonkEqn (nodeEqns b)
+     pure b { nodeEqns = eqs }
+
+zonkEqn :: Equation -> M Equation
+zonkEqn eqn =
+  case eqn of
+    Assert p e -> Assert p <$> zonkExpr e
+    Property p e -> Property p <$> zonkExpr e
+    IsMain {} -> pure eqn
+    IVC {} -> pure eqn
+    Define lhs e -> Define lhs <$> zonkExpr e
+
+

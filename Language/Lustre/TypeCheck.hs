@@ -140,10 +140,10 @@ checkNodeDecl nd k =
              solveConstraints  -- XXX: we can store constraints on constants
                                -- and abstact types in the node.
 
-             -- XXX: resolve type variable in the types of the node, if any
+             bod1 <- traverse zonkBody bod
 
              -- XXX: contract
-             pure (newProf, bod)
+             pure (newProf, bod1)
 
        pure nd { nodeStaticInputs = ps, nodeProfile = prof, nodeDef = bod }
 
