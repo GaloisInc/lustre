@@ -1,0 +1,16 @@
+node (x : int)
+  returns (y)
+  assumes ()
+  shows ()
+let
+  y = 3
+tel
+--- Step 1 ---
+x : int  = 1
+y = 3
+--- Step 2 ---
+x : int  = 2
+y = 3
+--- Step 3 ---
+x : int  = 3
+y = 3

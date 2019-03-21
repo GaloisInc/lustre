@@ -1,0 +1,13 @@
+
+function f<<const x : int>> () returns (y : int)
+let
+  y = x;
+tel
+
+function main(x : int) returns (y : int)
+let
+  --%MAIN
+  y = f<<3>>();
+tel
+
+
