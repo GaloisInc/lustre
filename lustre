@@ -41,6 +41,9 @@ case $COMMAND in
     echo Building Haddock documentation
     cabal v2-haddock;;
 
+  run)
+    cabal v2-run exe:lustre -- $*;;
+
 
   test)
     echo Running tests
