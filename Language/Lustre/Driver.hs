@@ -7,7 +7,6 @@ import qualified Data.Set as Set
 import Data.List(foldl',sortBy)
 import Data.Text(Text)
 import AlexTools(sourceFrom,sourceIndex)
-import Control.Monad(when)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
@@ -47,19 +46,20 @@ quickDeclsSimp ds =
      let enums = getEnumInfo ds1
 
      tcOn <- lustreTCEnabled
-     when tcOn $ do _ds1 <- quickCheckDecls ds1
-                    pure ()
-     (csMap,ds2) <- noConst ds1
+     ds2 <- if tcOn then quickCheckDecls ds1
+                    else pure ds1
+
+     (csMap,ds3) <- noConst ds2
      let nosIn = NosIn
                    { nosiStructs   = Map.empty
                    , nosiCallSites = csMap
                    }
-     (nosOut,ds3) <- noStruct nosIn ds2
-     (rens,ds4)   <- inlineCalls [] ds3
+     (nosOut,ds4) <- noStruct nosIn ds3
+     (rens,ds5)   <- inlineCalls [] ds4
      pure (Env { envNodes = mfiMap ds1 nosOut rens
                , envEnums = enums
                }
-          , ds4)
+          , ds5)
 
 nodeToCore ::
   Maybe Text {- ^ Node to translate -} ->
