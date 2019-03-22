@@ -48,6 +48,7 @@ import Data.Function(on)
 import Data.Either(partitionEithers)
 import Data.Map(Map)
 import Data.Foldable(foldl')
+import Data.Traversable(for)
 import qualified Data.Map as Map
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
@@ -1050,43 +1051,37 @@ we can declare `x` appropriately.
 desugarCondAct ::
   ExprLoc -> Env -> [CType] ->
   ClockExpr -> Expression -> Maybe Expression -> M Expression
-desugarCondAct _ _ _ _ _ _ =
-    panic "desugarCondAct" ["`condact` is not yet implemented"]
-{-
-  case mbD of
+desugarCondAct loc env tys c e mbDef =
+  case mbDef of
     Nothing -> evalDynExpr loc env cur
     Just d ->
-      -- XXX: Need the type of `e`.  if it is a mult-expr we should
-      -- generate multiple new names here, similar to what we do for functions.
-      do x   <- newIdent r Nothing AVal
+      do xs <- for tys (\_ -> newIdent r Nothing AVal)
+         let var     = Var . origNameToName
+             exprVal = case xs of
+                         [x] -> var x
+                         _   -> Tuple (map var xs)
+
          rhs <- evalDynExpr loc env
-              $ Call pIf [ cb, cur, Call pArr [d, Call pPre [ var x ] ] ]
+              $ eITE r cb cur (eOp2 r FbyArr d (eOp1 r Pre exprVal))
 
-         let b = Binder
-                   { binderDefines = origNameToIdent x
-                   , binderType    = error "XXX: Need type of `e`"
-                   , binderClock   = error "XXX: Need clock of `e`"
-                   }
+         let toB x cty = Binder
+               { binderDefines = origNameToIdent x
+               , binderType    = cType cty
+               , binderClock   = case cClock cty of
+                                   BaseClock -> Nothing
+                                   KnownClock cl -> Just cl
+                                   ClockVar _ -> panic "desugarCondAct"
+                                                      ["Unexpected clock var"]
+               }
 
-          recordCallSite r (LVar (origNameToIdent x))
-          addFunEqn [b] (Define lhs rhs)
-          pure $ case map (Var . Unqual) ns of
-                     [one] -> one
-                     notOne -> Tuple notOne
-
+         let lhs = [ LVar (origNameToIdent x) | x <- xs ]
+         recordCallSite r lhs
+         addFunEqn (zipWith toB xs tys) (Define lhs rhs)
+         pure exprVal
   where
   WhenClock r k i = c
-
-  pCur = NodeInst (Prim r (Op1 Current)) []
-  pIf  = NodeInst (Prim r ITE) []
-  pEq  = NodeInst (Prim r (Op2 Eq)) []
-  pArr = NodeInst (Prim r (Op2 FbyArr)) []
-  pPre = NodeInst (Prim r (Op1 Pre)) []
-  var o = Var (origNameToName o)
-
-  cur   = Call pCur [ e `When` c ]
-  cb    = Call pEq [ k, var (identOrigName i) ]
--}
+  cur             = eOp1 r Current (e `When` c)
+  cb              = eOp2 r Eq k (Var (Unqual i))
 
 -- | Identify which of the inputs are really static constant parameters.
 inputBindersToParams :: [InputBinder] -> ([StaticParam],[InputBinder])

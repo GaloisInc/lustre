@@ -701,13 +701,12 @@ checkExpr expr tys =
     CondAct c e mb ~Nothing ->
       do checkTemporalOk "when"
          (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
-         mb1     <- for mb $ \d -> checkExpr d tys
-
          tys1 <- for tys $ \ty ->
                    do sameClock (cClock ty) cl
                       pure ty { cClock = cl }
 
-         e1 <- checkExpr e tys1
+         mb1 <- for mb $ \d -> checkExpr d tys
+         e1  <- checkExpr e tys1
          pure (CondAct c1 e1 mb1 (Just tys))
 
     Tuple es
