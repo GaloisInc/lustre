@@ -22,3 +22,5 @@ z = -3
 x : real  = -3.5
 y = -3
 z = -4
+--- Step 5 ---
+x : real  = (EOF)

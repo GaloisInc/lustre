@@ -14,3 +14,5 @@ y = 3
 --- Step 3 ---
 x : int  = 3
 y = 3
+--- Step 4 ---
+x : int  = (EOF)

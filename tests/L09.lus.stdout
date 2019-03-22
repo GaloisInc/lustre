@@ -36,3 +36,5 @@ x = 13
 --- Step 9 ---
 a : int  = 0
 x = 21
+--- Step 10 ---
+a : int  = (EOF)

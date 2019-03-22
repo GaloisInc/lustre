@@ -32,3 +32,5 @@ y = 0
 --- Step 9 ---
 x : int  = 11
 y = 0
+--- Step 10 ---
+x : int  = (EOF)

@@ -5,15 +5,14 @@ import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
 import Control.Exception(catches,Handler(..),throwIO,catch)
 import Control.Monad(when)
-import Data.IORef(newIORef,readIORef,atomicModifyIORef')
+import Data.IORef(newIORef,readIORef,writeIORef)
 import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint
                 , openFile, IOMode(..), hGetContents )
-import System.IO.Error(isEOFError)
+import System.IO.Error(isEOFError,mkIOError,eofErrorType)
 import System.Environment
 import qualified Data.Map as Map
 import Numeric(readSigned,readFloat)
 
-import Language.Lustre.Name(Ident)
 import Language.Lustre.AST(Program(..))
 import Language.Lustre.Core
 import Language.Lustre.Semantics.Core
@@ -61,8 +60,7 @@ runFromFile file mbIn =
 
 
 data In = In
-  { hasMore   :: IO Bool
-  , nextToken :: IO String
+  { nextToken :: IO String
   , echo      :: Bool
   }
 
@@ -73,11 +71,14 @@ newIn mb =
                 Just f  -> do h <- openFile f ReadMode
                               pure (h,True)
      ws0 <- words <$> hGetContents h
-     r  <- newIORef ws0
-     pure In { hasMore = not . null <$> readIORef r
-             , nextToken = atomicModifyIORef' r $ \ws -> case ws of
-                                                           [] -> ([],"")
-                                                           w : more -> (more,w)
+     r   <- newIORef ws0
+     pure In { nextToken = -- assumes single threaded
+                do ws <- readIORef r
+                   case ws of
+                     [] -> ioError $ mkIOError eofErrorType
+                                      "(EOF)" Nothing Nothing
+                     w : more -> do writeIORef r more
+                                    pure w
              , echo = e
              }
 
@@ -85,35 +86,29 @@ runNodeIO :: In -> Node -> IO ()
 runNodeIO sIn node =
   do print (ppNode node)
      go (1::Integer) s0
-   `catch` \e -> if isEOFError e then pure () else throwIO e
+   `catch` \e -> if isEOFError e then putStrLn "(EOF)" else throwIO e
   where
   (s0,step)   = initNode node Nothing
 
-  go n s = do more <- hasMore sIn
-              when more $
-                do putStrLn ("--- Step " ++ show n ++ " ---")
-                   s1  <- step s <$> getInputs
-                   mapM_ (showOut s1) (nOutputs node)
-                   go (n+1) s1
+  go n s = do putStrLn ("--- Step " ++ show n ++ " ---")
+              s1  <- step s <$> getInputs
+              mapM_ (showOut s1) (nOutputs node)
+              go (n+1) s1
 
   showOut s x = print (pp x <+> "=" <+> ppValue (evalVar s x))
 
   getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 
-  getInput b@(_ ::: t `On` _) =
-    do putStr (show (ppBinder ppinfo b <+> " = "))
-       hFlush stdout
-       doGet b
-
   ppinfo = identVariants node
 
-  doGet :: Binder -> IO (Ident,Value)
-  doGet b@(x ::: t) =
-    do txt <- nextToken sIn
+  getInput b@(x ::: ct) =
+    do putStr (show (ppBinder ppinfo b <+> " = "))
+       hFlush stdout
+       txt <- nextToken sIn
        when (echo sIn) (putStrLn txt)
-       case parseVal (typeOfCType t) txt of
-         Just ok -> pure (x, ok)
-         Nothing -> do putStrLn ("Invalid " ++ show (ppCType ppinfo t))
+       case parseVal (typeOfCType ct) txt of
+         Just ok -> pure (x,ok)
+         Nothing -> do putStrLn ("Invalid " ++ show (ppCType ppinfo ct))
                        getInput b
 
 parseVal :: Type -> String -> Maybe Value

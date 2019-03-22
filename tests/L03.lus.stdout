@@ -29,3 +29,5 @@ y = 0
 x.x : int  = 6
 x.y : bool  = True
 y = 6
+--- Step 7 ---
+x.x : int  = (EOF)

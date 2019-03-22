@@ -28,3 +28,5 @@ x.y = 0
 i : int  = 5
 x.x = 14
 x.y = 0
+--- Step 6 ---
+i : int  = (EOF)

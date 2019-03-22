@@ -21,3 +21,5 @@ y = 6
 --- Step 4 ---
 x : int  = 4
 y = 8
+--- Step 5 ---
+x : int  = (EOF)
