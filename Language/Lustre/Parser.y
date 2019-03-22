@@ -437,6 +437,7 @@ equation :: { Equation }
   | '--%IVC' SepBy1(',',ident) ';'              { IVC $2 }
   | SepBy1(',',LHS) '=' expression ';'          { Define $1 $3 }
   | '(' SepBy1(',',LHS) ')' '=' expression ';'  { Define $2 $5 }
+  | '(' ')' '=' expression ';'                  { Define [] $4 }
 
 opt_semi :: { () }
   : {- empty -}                                 { () }

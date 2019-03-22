@@ -1,0 +1,14 @@
+node (x : int)
+  returns ()
+  assumes ()
+  shows ()
+let
+tel
+--- Step 1 ---
+x : int  = 1
+--- Step 2 ---
+x : int  = 2
+--- Step 3 ---
+x : int  = 3
+--- Step 4 ---
+x : int  = (EOF)

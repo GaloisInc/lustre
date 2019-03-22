@@ -1,0 +1,4 @@
+function test(x : int) returns ()
+let
+() = ();
+tel
