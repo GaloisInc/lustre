@@ -615,6 +615,15 @@ evalExpr expr =
                    _   -> STuple [ pre <$> e | e <- args ]
                   where pre a = Call f [a]
 
+              -- current [x,y] -> [current x, current y]
+             (NodeInst (CallPrim _ (Op1 Current)) [], args) ->
+                 case args of
+                   [e] -> cur <$> e
+                   _   -> STuple [ cur <$> e | e <- args ]
+                  where cur a = Call f [a]
+
+
+
              -- if a then [x1,x2] else [y1,y2]  ~~>
              -- [ if a then x1 else y1, if a then x2 else y2 ]
              -- XXX: Duplicates `a`
