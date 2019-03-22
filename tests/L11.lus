@@ -1,0 +1,10 @@
+node nats() returns (n : int)
+let
+  n = 0 -> 1 + pre n;
+tel
+
+node f(c : bool) returns (y : int)
+let
+  y = condact(c, nats(), 7);
+tel
+
