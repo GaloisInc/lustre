@@ -89,6 +89,7 @@ import Language.Lustre.Panic
 
   'when'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWhen } }
   'current'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrent } }
+  'condact'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCondact } }
   'pre'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwPre } }
   'fby'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwFby } }
   '->'        { Lexeme { lexemeRange = $$, lexemeToken = TokRightArrow } }
@@ -527,6 +528,12 @@ expression :: { Expression }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
   | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3) }
+  | 'condact' '(' clockExpr ',' expression ',' expression ')'
+                                      { at $1 $8
+                                        (CondAct $3 $5 (Just $7) Nothing) }
+  | 'condact' '(' clockExpr ',' expression ')'
+                                      { at $1 $6
+                                        (CondAct $3 $5 Nothing Nothing) }
   | name '{' '}'                      { at $1 $3 (Struct $1 []) }
   | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
