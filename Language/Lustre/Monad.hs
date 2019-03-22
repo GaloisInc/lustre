@@ -21,6 +21,7 @@ module Language.Lustre.Monad
     -- ** Logging
   , setVerbose
   , logMessage
+  , lustreIfDumpAfter
 
     -- * Name seeds
   , NameSeed
@@ -37,9 +38,12 @@ module Language.Lustre.Monad
 import System.IO(Handle,hPutStrLn,hFlush)
 import MonadLib
 import Control.Exception(throwIO)
+import Data.Set(Set)
+import qualified Data.Set as Set
 
 import Language.Lustre.Error
 import Language.Lustre.Panic
+import Language.Lustre.Phase
 
 -- | A common monad for all lustre passes
 newtype LustreM a = LustreM
@@ -58,6 +62,7 @@ instance BaseM LustreM LustreM where
 data GlobalLustreEnv = GlobalLustreEnv
   { luLogHandle :: !Handle
   , luTCEnabled :: !Bool
+  , luDumpAfter :: !(Set LustrePhase)
   }
 
 
@@ -96,6 +101,7 @@ data LustreConf = LustreConf
   { lustreInitialNameSeed :: Maybe NameSeed
   , lustreLogHandle       :: !Handle
   , lustreNoTC            :: Bool
+  , lustreDumpAfter       :: !(Set LustrePhase)
   }
 
 -- | Execute a Lustre computation.
@@ -104,6 +110,7 @@ runLustre :: LustreConf -> LustreM a -> IO a
 runLustre conf m =
   do let env = GlobalLustreEnv { luLogHandle = lustreLogHandle conf
                                , luTCEnabled = not (lustreNoTC conf)
+                               , luDumpAfter = lustreDumpAfter conf
                                }
          st  = GlobalLustreState
                  { luNameSeed = case lustreInitialNameSeed conf of
@@ -175,3 +182,11 @@ newInt =
 
 lustreTCEnabled :: LustreM Bool
 lustreTCEnabled = LustreM (luTCEnabled <$> ask)
+
+-- | Execute the given action---presumably for printing---only if
+-- dumping after the given phase is enables.
+lustreIfDumpAfter :: LustrePhase -> LustreM () -> LustreM ()
+lustreIfDumpAfter ph (LustreM m) =
+  LustreM $ do du <- luDumpAfter <$> ask
+               when (ph `Set.member` du) m
+

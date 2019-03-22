@@ -7,11 +7,14 @@ import qualified Data.Set as Set
 import Data.List(foldl',sortBy)
 import Data.Text(Text)
 import AlexTools(sourceFrom,sourceIndex)
+import Text.PrettyPrint(Doc)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Name
 import Language.Lustre.Monad
+import Language.Lustre.Pretty(pp,vcatSep)
+import Language.Lustre.Phase
 import Language.Lustre.Transform.OrderDecls
 import Language.Lustre.TypeCheck
 import Language.Lustre.Transform.NoStatic
@@ -44,22 +47,40 @@ quickDeclsSimp :: [P.TopDecl] ->
 quickDeclsSimp ds =
   do ds1 <- quickOrderTopDecl ds
      let enums = getEnumInfo ds1
+     dumpPhase PhaseRename $ vcatSep $ map pp ds1
 
      tcOn <- lustreTCEnabled
      ds2 <- if tcOn then quickCheckDecls ds1
                     else pure ds1
+     dumpPhase PhaseTypecheck $ vcatSep $ map pp ds2
 
      (csMap,ds3) <- noConst ds2
+     dumpPhase PhaseNoStatic $ vcatSep $ map pp ds3
+
      let nosIn = NosIn
                    { nosiStructs   = Map.empty
                    , nosiCallSites = csMap
                    }
      (nosOut,ds4) <- noStruct nosIn ds3
+     dumpPhase PhaseNoStruct $ vcatSep $ map pp ds4
+
      (rens,ds5)   <- inlineCalls [] ds4
+     dumpPhase PhaseInline $ vcatSep $ map pp ds5
+
      pure (Env { envNodes = mfiMap ds1 nosOut rens
                , envEnums = enums
                }
           , ds5)
+
+dumpPhase :: LustrePhase -> Doc -> LustreM ()
+dumpPhase ph doc =
+  lustreIfDumpAfter ph $
+     do let msg = show ph
+        logMessage msg
+        logMessage (replicate (length msg) '=')
+        logMessage ""
+        logMessage (show doc)
+        logMessage ""
 
 nodeToCore ::
   Maybe Text {- ^ Node to translate -} ->
@@ -69,6 +90,7 @@ nodeToCore ::
 nodeToCore mb env ds =
   do nd           <- findNode mb ds
      (varMp,core) <- evalNodeDecl (envEnums env) nd
+     dumpPhase PhaseToCore (pp core)
      pure (ModelInfo { infoNodes = envNodes env
                      , infoTop   = P.identOrigName (P.nodeName nd)
                      , infoCore  = varMp

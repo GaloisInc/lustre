@@ -172,7 +172,10 @@ instance Pretty Equation where
   ppPrec _ eqn =
     case eqn of
       Assert _ e -> "assert" <+> pp e
-      Define ls e -> hsep (punctuate comma (map pp ls)) <+> "=" <+> pp e
+      Define ls e -> lhs <+> "=" <+> pp e
+        where lhs = case ls of
+                      [] -> "()"
+                      _  -> hsep (punctuate comma (map pp ls))
       IsMain _ -> "--%MAIN"
       IVC is   -> "--%IVC" <+> hsep (punctuate comma (map pp is))
       Property _ e -> "--%PROPERTY" <+> pp e

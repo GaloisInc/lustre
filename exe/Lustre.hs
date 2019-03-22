@@ -20,6 +20,7 @@ import Language.Lustre.Parser(parseProgramFromFileLatin1, ParseError)
 import Language.Lustre.Driver
 import Language.Lustre.Monad
 import Language.Lustre.Pretty(pp)
+import Language.Lustre.Phase(noPhases,allPhases)
 
 
 conf :: LustreConf
@@ -27,6 +28,7 @@ conf = LustreConf
   { lustreInitialNameSeed = Nothing
   , lustreLogHandle       = stdout
   , lustreNoTC            = False
+  , lustreDumpAfter       = noPhases -- allPhases
   }
 
 main :: IO ()
@@ -43,7 +45,8 @@ runFromFile file mbIn =
      case a of
        ProgramDecls ds ->
          do (ws,nd) <- runLustre conf $
-                         do (_,nd) <- quickNodeToCore Nothing ds
+                         do setVerbose False -- True
+                            (_,nd) <- quickNodeToCore Nothing ds
                             warns  <- getWarnings
                             pure (warns,nd)
             mapM_ showWarn ws
