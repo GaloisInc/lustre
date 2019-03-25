@@ -893,7 +893,11 @@ checkCall f as es0 tys =
       ([],[]) -> pure (reverse done,mp)
       (b:bs,c:cs) -> do (e,mp1) <- checkIn mp b c
                         checkInputs (e:done) mp1 bs cs
-      _ -> reportError $ text ("Bad arity in call to " ++ showPP f)
+      _ -> reportError $ nestedError
+               ("Bad arity in call to" <+> pp f)
+               [ "Expected:" <+> int (length done + length is)
+               , "Actual:" <+> int (length done + length es)
+               ]
 
   checkIn mp ib e =
     case ib of
