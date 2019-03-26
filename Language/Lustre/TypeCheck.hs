@@ -884,9 +884,16 @@ checkCall f as es0 tys =
       Nothing -> pure BaseClock
       Just (WhenClock r p i) ->
         case Map.lookup i mp of
-          Just j  -> pure (KnownClock (WhenClock r p j))
-          Nothing -> reportError $ text ("Parameter for clock " ++ showPP i ++
-                                                      "is not an identifier.")
+          Just (Right j)            -> pure (KnownClock (WhenClock r p j))
+          Just (Left l) | matches p -> pure BaseClock
+            where matches v = case v of
+                                ERange _ v1 -> matches v1
+                                Lit l1 -> l == l1
+                                _ -> False
+          _ -> reportError $
+            text ("Parameter for clock " ++ show (backticks (pp i)) ++
+             " is not an identifier.")
+
 
   checkInputs done mp is es =
     case (is,es) of
@@ -905,7 +912,7 @@ checkCall f as es0 tys =
         do c  <- renBinderClock mp b
            e1 <- checkExpr1 e CType { cClock = c, cType = binderType b }
            pure ( e1
-                , case isIdent e of
+                , case isClock e of
                     Just k  -> Map.insert (binderDefines b) k mp
                     Nothing -> mp
                 )
@@ -913,10 +920,11 @@ checkCall f as es0 tys =
         do e1 <- checkConstExpr e t
            pure (e1,mp)
 
-  isIdent e =
+  isClock e =
     case e of
-      ERange _ e1    -> isIdent e1
-      Var (Unqual i) -> Just i
+      ERange _ e1    -> isClock e1
+      Var (Unqual i) -> Just (Right i)
+      Lit l          -> Just (Left l)
       _              -> Nothing
 
   checkOuts mp bs

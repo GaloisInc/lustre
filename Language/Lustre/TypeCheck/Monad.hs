@@ -294,9 +294,16 @@ zonkClock :: IClock -> M IClock
 zonkClock c =
   case c of
     BaseClock -> pure c
-    KnownClock {} -> pure c
+    KnownClock (WhenClock _ v i)  -- clocks that are always true
+      | Just j <- isId v, j == i -> pure BaseClock
+    KnownClock _ -> pure c
     ClockVar v -> M $ do su <- rwClockVarSubst <$> get
                          pure (Map.findWithDefault c v su)
+  where
+  isId e = case e of
+             ERange _ e1 -> isId e1
+             Var (Unqual x) -> Just x
+             _ -> Nothing
 
 
 newTVar :: M Type
