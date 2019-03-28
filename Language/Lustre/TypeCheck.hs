@@ -387,11 +387,11 @@ instantiateConst env expr
         UpdateStruct (iStructTy s) (iConst e) (map iField fs)
 
       WithThenElse e1 e2 e3 -> WithThenElse (iConst e1) (iConst e2) (iConst e3)
-      Call (NodeInst n as) es ->
-        Call (NodeInst n (map iArg as)) (map iConst es)
+      Call (NodeInst n as) es Nothing ->
+        Call (NodeInst n (map iArg as)) (map iConst es) Nothing
+      Call {}       -> bad "call with a clock"
 
       When {}       -> bad "WhenClock"
-      CondAct {}    -> bad "CondAct"
       Merge {}      -> bad "Merge"
 
   where
@@ -633,7 +633,6 @@ checkConstExpr expr ty =
     Lit l      -> do ensure (Subtype (inferLit l) ty)
                      pure (Lit l)
     When {}    -> reportError "`when` is not a constant expression."
-    CondAct {} -> reportError "`condact` is not a constant expression."
     Tuple {}   -> reportError "tuples cannot be used in constant expressions."
     Array es   ->
       do elT <- newTVar
@@ -698,17 +697,6 @@ checkExpr expr tys =
          e1 <- checkExpr e tys1
          pure (e1 `When` c1)
 
-    CondAct c e mb ~Nothing ->
-      do checkTemporalOk "when"
-         (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
-         tys1 <- for tys $ \ty ->
-                   do sameClock (cClock ty) cl
-                      pure ty { cClock = cl }
-
-         mb1 <- for mb $ \d -> checkExpr d tys
-         e1  <- checkExpr e tys1
-         pure (CondAct c1 e1 mb1 (Just tys))
-
     Tuple es
       | have == need -> Tuple <$> zipWithM checkExpr1 es tys
       | otherwise    -> reportError $ nestedError "Arity mismatch in tuple"
@@ -758,13 +746,14 @@ checkExpr expr tys =
          as1 <- mapM check as
          pure (Merge j as1)
 
-    Call (NodeInst call as) es
+    Call (NodeInst call as) es cl
 
       -- Special case for @^@ because its second argument is a constant
       -- expression, not an ordinary one.
       | CallPrim r (Op2 Replicate) <- call ->
         inRange r $
-        do unless (null as) $ reportError "`^` does not take static arguments."
+        do notClocked
+           unless (null as) $ reportError "`^` does not take static arguments."
            case es of
              [e1,e2] ->
                do ty <- one tys
@@ -777,8 +766,13 @@ checkExpr expr tys =
 
       | otherwise ->
         case call of
-          CallUser f      -> checkCall f as es tys
-          CallPrim r prim -> checkPrim r prim as es tys
+          CallUser f      -> checkCall f as es cl tys
+          CallPrim r prim -> notClocked >> checkPrim r prim as es tys
+
+      where notClocked =
+              case cl of
+                Nothing -> pure ()
+                Just _  -> reportError "Unexpected clock annotation in call"
 
 -- | Assert that a given expression has only one type (i.e., is not a tuple)
 one :: [CType] -> M CType
@@ -870,46 +864,71 @@ distinctFields = mapM_ check . group . sort . map fName
 
 
 -- | Check the type of a call to a user-defined node.
-checkCall :: Name -> [StaticArg] -> [Expression] -> [CType] -> M Expression
-checkCall f as es0 tys =
+checkCall :: Name ->
+             [StaticArg] ->
+             [Expression] ->
+             Maybe ClockExpr ->
+             [CType] ->
+             M Expression
+checkCall f as es0 cl0 tys =
   do reqSafety <- getUnsafeLevel
      reqTemporal <- getTemporalLevel
+     cl <- case cl0 of
+              Nothing -> pure Nothing
+              Just c  -> case reqTemporal of
+                           Node -> Just . fst <$> checkClockExpr c
+                           Function ->
+                             reportError $ nestedError
+                                "Invalid clocked call"
+                                [ "Expected to be inside a node."
+                                , "We are inside a function."
+                                ]
+
      (ni,prof) <- prepUserNodeInst f as reqSafety reqTemporal
-     (es1,mp) <- checkInputs [] Map.empty (nodeInputs prof) es0
-     checkOuts mp (nodeOutputs prof)
-     pure (Call ni es1)
+     (es1,mp) <- checkInputs cl [] Map.empty (nodeInputs prof) es0
+     checkOuts cl mp (nodeOutputs prof)
+     pure (Call ni es1 cl)
   where
-  renBinderClock mp b =
+  renBinderClock cl mp b =
     case binderClock b of
-      Nothing -> pure BaseClock
+      Nothing -> pure $ case cl of
+                          Nothing -> BaseClock
+                          Just c  -> KnownClock c
       Just (WhenClock r p i) ->
-        case Map.lookup i mp of
-          Just (Right j)            -> pure (KnownClock (WhenClock r p j))
-          Just (Left l) | matches p -> pure BaseClock
-            where matches v = case v of
-                                ERange _ v1 -> matches v1
-                                Lit l1 -> l == l1
-                                _ -> False
-          _ -> reportError $
-            text ("Parameter for clock " ++ show (backticks (pp i)) ++
-             " is not an identifier.")
+        case cl of
+          Just _ ->
+            reportError $ nestedError
+              "Unsupported: nested clocks in call"
+              [ "Please let us know, if you'd find this useful." ]
+
+          Nothing ->
+            case Map.lookup i mp of
+              Just (Right j)            -> pure (KnownClock (WhenClock r p j))
+              Just (Left l) | matches p -> pure BaseClock
+                where matches v = case v of
+                                    ERange _ v1 -> matches v1
+                                    Lit l1 -> l == l1
+                                    _ -> False
+              _ -> reportError $
+                text ("Parameter for clock " ++ show (backticks (pp i)) ++
+                 " is not an identifier.")
 
 
-  checkInputs done mp is es =
+  checkInputs cl done mp is es =
     case (is,es) of
       ([],[]) -> pure (reverse done,mp)
-      (b:bs,c:cs) -> do (e,mp1) <- checkIn mp b c
-                        checkInputs (e:done) mp1 bs cs
+      (b:bs,c:cs) -> do (e,mp1) <- checkIn cl mp b c
+                        checkInputs cl (e:done) mp1 bs cs
       _ -> reportError $ nestedError
                ("Bad arity in call to" <+> pp f)
                [ "Expected:" <+> int (length done + length is)
                , "Actual:" <+> int (length done + length es)
                ]
 
-  checkIn mp ib e =
+  checkIn cl mp ib e =
     case ib of
       InputBinder b ->
-        do c  <- renBinderClock mp b
+        do c  <- renBinderClock cl mp b
            e1 <- checkExpr1 e CType { cClock = c, cType = binderType b }
            pure ( e1
                 , case isClock e of
@@ -927,8 +946,8 @@ checkCall f as es0 tys =
       Lit l          -> Just (Left l)
       _              -> Nothing
 
-  checkOuts mp bs
-    | have == need = zipWithM_ (checkOut mp) bs tys
+  checkOuts cl mp bs
+    | have == need = zipWithM_ (checkOut cl mp) bs tys
     | otherwise = reportError $ nestedError
                   "Arity mistmatch in function call."
                   [ "Function:" <+> pp f
@@ -938,9 +957,9 @@ checkCall f as es0 tys =
             need = length tys
 
 
-  checkOut mp b ty =
+  checkOut cl mp b ty =
     do let t = binderType b
-       c <- renBinderClock mp b
+       c <- renBinderClock cl mp b
        subCType CType { cClock = c, cType = t } ty
 
 
@@ -996,7 +1015,26 @@ checkMergeCase i (MergeCase p e) it ts =
      e1 <- checkExpr e (map toCType ts)
      pure (MergeCase p1 e1)
 
--- | Types of unary opertaors.
+
+
+checkCurrent :: Expression -> [CType] -> M Expression
+checkCurrent e tys =
+  do checkTemporalOk "current"
+     tys1 <- for tys $ \ty ->
+                do c <- newClockVar
+                   pure ty { cClock = c }
+     e1 <- checkExpr e tys1
+
+     -- By now we should have figured out the missing clock,
+     -- so check straight away
+     let checkClock ty newTy =
+            sameClock (cClock ty) =<< clockParent (cClock newTy)
+     zipWithM_ checkClock tys tys1
+     pure e1
+
+
+
+-- | Types of unary operators.
 checkOp1 :: SourceRange -> Op1 -> Expression -> [CType] -> M Expression
 checkOp1 r op e tys =
   do a <- check
@@ -1009,19 +1047,7 @@ checkOp1 r op e tys =
         do checkTemporalOk "pre"
            checkExpr e tys
 
-      Current ->
-        do checkTemporalOk "current"
-           tys1 <- for tys $ \ty ->
-                      do c <- newClockVar
-                         pure ty { cClock = c }
-           e1 <- checkExpr e tys1
-
-           -- By now we should have figured out the missing clock,
-           -- so check straight away
-           let checkClock ty newTy =
-                  sameClock (cClock ty) =<< clockParent (cClock newTy)
-           zipWithM_ checkClock tys tys1
-           pure e1
+      Current -> checkCurrent e tys
 
       Not ->
         do ty <- one tys
@@ -1066,15 +1092,23 @@ checkOp2 r op2 e1 e2 tys =
   where
   check =
     case op2 of
-      FbyArr   -> do checkTemporalOk "->"
-                     a <- checkExpr e1 tys
-                     b <- checkExpr e2 tys
-                     pure (a,b)
+      FbyArr ->
+        do checkTemporalOk "->"
+           a <- checkExpr e1 tys
+           b <- checkExpr e2 tys
+           pure (a,b)
 
-      Fby      -> do checkTemporalOk "fby"
-                     a <- checkExpr e1 tys
-                     b <- checkExpr e2 tys
-                     pure (a,b)
+      Fby ->
+       do checkTemporalOk "fby"
+          a <- checkExpr e1 tys
+          b <- checkExpr e2 tys
+          pure (a,b)
+
+      CurrentWith ->
+        do checkTemporalOk "currentWith"
+           a <- checkExpr    e1 tys
+           b <- checkCurrent e2 tys
+           pure (a,b)
 
       And      -> bool2
       Or       -> bool2

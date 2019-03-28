@@ -48,7 +48,6 @@ import Data.Function(on)
 import Data.Either(partitionEithers)
 import Data.Map(Map)
 import Data.Foldable(foldl')
-import Data.Traversable(for)
 import qualified Data.Map as Map
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
@@ -954,12 +953,6 @@ evalDynExpr eloc env expr =
     e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1
                           pure (e1' `When` evalClockExpr env e2)
 
-    CondAct c e d mbtys ->
-      case mbtys of
-        Just tys -> desugarCondAct eloc env tys c e d
-        Nothing  -> panic "evalDynExpr" [ "No type annotation on cond act" ]
-
-
     Tuple es -> Tuple <$> mapM (evalDynExpr NestedExpr env) es
     Array es -> Array <$> mapM (evalDynExpr NestedExpr env) es
     Select e s      -> do e' <- evalDynExpr NestedExpr env e
@@ -988,8 +981,9 @@ evalDynExpr eloc env expr =
         Just v  -> evalMergeConst env v ms
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
-    Call f es ->
-      do (cs,es0) <-
+    Call f es cl0 ->
+      do let cl = evalClockExpr env <$> cl0
+         (cs,es0) <-
             case f of
               NodeInst (CallUser c) _ ->
                 let nm = nameOrigName c
@@ -1025,8 +1019,8 @@ evalDynExpr eloc env expr =
                                pure False
                          NestedExpr -> pure (nameCallSites env)
          if shouldName
-            then nameCallSite env ni es'
-            else pure (Call ni es')
+            then nameCallSite env ni es' cl
+            else pure (Call ni es' cl0)
 
   where
   isTuple e =
@@ -1036,52 +1030,6 @@ evalDynExpr eloc env expr =
       _           -> Nothing
 
 
-
-{- | Desugar a conditional actiavation:
-
-> condact(c,e,d)
-> ~~>
-> x = if c then current (e when c)
->          else d -> pre x
-
-Note that to implement this we need to know the type of `e` so that
-we can declare `x` appropriately.
--}
-
-desugarCondAct ::
-  ExprLoc -> Env -> [CType] ->
-  ClockExpr -> Expression -> Maybe Expression -> M Expression
-desugarCondAct loc env tys c e mbDef =
-  case mbDef of
-    Nothing -> evalDynExpr loc env cur
-    Just d ->
-      do xs <- for tys (\_ -> newIdent r Nothing AVal)
-         let var     = Var . origNameToName
-             exprVal = case xs of
-                         [x] -> var x
-                         _   -> Tuple (map var xs)
-
-         rhs <- evalDynExpr loc env
-              $ eITE r cb cur (eOp2 r FbyArr d (eOp1 r Pre exprVal))
-
-         let toB x cty = Binder
-               { binderDefines = origNameToIdent x
-               , binderType    = cType cty
-               , binderClock   = case cClock cty of
-                                   BaseClock -> Nothing
-                                   KnownClock cl -> Just cl
-                                   ClockVar _ -> panic "desugarCondAct"
-                                                      ["Unexpected clock var"]
-               }
-
-         let lhs = [ LVar (origNameToIdent x) | x <- xs ]
-         recordCallSite r lhs
-         addFunEqn (zipWith toB xs tys) (Define lhs rhs)
-         pure exprVal
-  where
-  WhenClock r k i = c
-  cur             = eOp1 r Current (e `When` c)
-  cb              = eOp2 r Eq k (Var (Unqual i))
 
 -- | Identify which of the inputs are really static constant parameters.
 inputBindersToParams :: [InputBinder] -> ([StaticParam],[InputBinder])
@@ -1109,8 +1057,9 @@ inputBindersToArgs ins es =
 -- | Name a call site, by adding an additional equation for the call,
 -- and replacing the call with a tuple containing the results.
 -- We leave primitives with a single result as calls though.
-nameCallSite :: Env -> NodeInst -> [Expression] -> M Expression
-nameCallSite env ni es =
+nameCallSite ::
+  Env -> NodeInst -> [Expression] -> Maybe ClockExpr -> M Expression
+nameCallSite env ni es cl =
   do mb <- findInstProf env ni
      case mb of
        Just prof ->
@@ -1125,33 +1074,42 @@ nameCallSite env ni es =
             let nameMap = Map.fromList
                         $ zip names (map isIdent es ++ map Just ns)
 
+                -- NOTE: if `cl` is not 'Nothing' we'd get a nested clock here.
+                -- Since we don't support this yet, the type-checker should
+                -- have checked for that.  We check again, just in case.
                 renClock (WhenClock r e i) =  -- loc?
-                  WhenClock r (evalExpr env e) $
-                    case Map.lookup i nameMap of
-                      Just (Just j) -> j
-                      Just Nothing ->
-                        panic "nameCallSite"
-                          [ "Output's clock depends on an input."
-                          , "The clock parameter must be an identifier."
-                          , "*** Clock: " ++ showPP i
-                          ]
-                      _ -> panic "nameCallSite"
-                            [ "Undefined clock variable."
-                            , "*** Clock: " ++ showPP i ]
+                  case cl of
+                    Just _ -> panic "nameCallSite" [ "Nested clocks." ]
+                    Nothing ->
+                      WhenClock r (evalExpr env e) $
+                        case Map.lookup i nameMap of
+                          Just (Just j) -> j
+                          Just Nothing ->
+                            panic "nameCallSite"
+                              [ "Output's clock depends on an input."
+                              , "The clock parameter must be an identifier."
+                              , "*** Clock: " ++ showPP i
+                              ]
+                          _ -> panic "nameCallSite"
+                                [ "Undefined clock variable."
+                                , "*** Clock: " ++ showPP i ]
 
                 toBind n b = Binder
                                { binderDefines = n
                                , binderType    = binderType b
-                               , binderClock   = renClock <$> binderClock b
+                               , binderClock =
+                                  case binderClock b of
+                                    Nothing -> cl
+                                    Just curCl -> Just (renClock curCl)
                                }
                 binds = zipWith toBind ns outs
             let lhs = map LVar ns
             recordCallSite (range ni) lhs
-            addFunEqn binds (Define lhs (Call ni es))
+            addFunEqn binds (Define lhs (Call ni es cl))
             pure $ case map (Var . Unqual) ns of
                      [one] -> one
                      notOne -> Tuple notOne
-       Nothing -> pure (Call ni es)
+       Nothing -> pure (Call ni es cl)
   where
   isIdent expr =
      case expr of

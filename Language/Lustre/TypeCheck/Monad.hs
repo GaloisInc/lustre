@@ -346,6 +346,7 @@ resetConstraints = M $ sets $ \rw -> (rwCtrs rw, rw { rwCtrs = [] })
 -- In particular we don't traverse constants.
 -- If we add more annotation, this will have to be updated appropriately.
 -- We assume that the input is an alredy type-checked expression.
+-- XXX: PERHAPS WE DON'T NEED THIS ANYMORE
 zonkExpr :: Expression -> M Expression
 zonkExpr expr =
   case expr of
@@ -353,9 +354,6 @@ zonkExpr expr =
     Var {} -> pure expr
     Lit {} -> pure expr
     e `When` c -> When <$> zonkExpr e <*> pure c
-    CondAct c e d t -> CondAct c <$> zonkExpr e
-                                 <*> traverse zonkExpr d
-                                 <*> traverse (traverse zonkCType) t
 
     Tuple es -> Tuple <$> traverse zonkExpr es
     Array es -> Array <$> traverse zonkExpr es
@@ -367,7 +365,7 @@ zonkExpr expr =
     WithThenElse e1 e2 e3 -> WithThenElse e1 <$> zonkExpr e2
                                              <*> zonkExpr e3
     Merge i as -> Merge i <$> traverse zonkMergeCase as
-    Call f es -> Call f <$> traverse zonkExpr es
+    Call f es c -> Call f <$> traverse zonkExpr es <*> pure c
 
 zonkCType :: CType -> M CType
 zonkCType ct =

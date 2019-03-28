@@ -552,8 +552,6 @@ evalExpr expr =
       do e1' <- evalExpr e1
          pure (evalWhen e1' ce)
 
-    CondAct {} -> panic "evalExpr" ["Unexpected `condact`"]
-
     Tuple es -> STuple <$> traverse evalExpr es
     Array es -> SArray <$> traverse evalExpr es
 
@@ -580,8 +578,14 @@ evalExpr expr =
       where evBranch (MergeCase p e) = MergeCase p <$> evalExpr e
 
     -- XXX: ITERATORS
-    Call f es ->
+    Call f es cl ->
       do es' <- traverse evalExpr es
+
+         let bin r op x y =
+               case cl of
+                 Nothing -> eOp2 r op x y
+                 Just _  -> panic "notClocked"
+                              [ "Unexpected clock on primitive call." ]
          pure $
            case (f, es') of
 
@@ -613,22 +617,26 @@ evalExpr expr =
                  case args of
                    [e] -> pre <$> e
                    _   -> STuple [ pre <$> e | e <- args ]
-                  where pre a = Call f [a]
+                  where pre a = Call f [a] cl
 
               -- current [x,y] -> [current x, current y]
              (NodeInst (CallPrim _ (Op1 Current)) [], args) ->
                  case args of
                    [e] -> cur <$> e
                    _   -> STuple [ cur <$> e | e <- args ]
-                  where cur a = Call f [a]
+                  where cur a = Call f [a] cl
 
 
 
              -- if a then [x1,x2] else [y1,y2]  ~~>
              -- [ if a then x1 else y1, if a then x2 else y2 ]
              -- XXX: Duplicates `a`
-             (NodeInst (CallPrim r ITE) [], [e1,e2,e3]) ->
-               evalBin (\a b -> ite r e1 a b) e2 e3
+             (NodeInst (CallPrim r ITE) [], [e1,e2,e3]) -> evalBin ite e2 e3
+               where
+               ite x y =
+                 case e1 of
+                   SLeaf b -> Call (NodeInst (CallPrim r ITE) []) [b,x,y] cl
+                   _ -> panic "evalExpr" [ "ITE expects a boolean" ]
 
              -- [x1, x2] = [y1,y2]  ~~~>  (x1 = x2) && (y1 = y2)
              (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2]) ->
@@ -639,16 +647,10 @@ evalExpr expr =
                SLeaf $ liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2
 
              -- f([x1,x2])  ~~~>  f(x1,x2)
-             (_, evs) -> SLeaf (mkCall f evs)
-
+             (_, evs) -> SLeaf
+                       $ Call f [ v | e <- evs, v <- flatStructData e ] cl
   where
-  mkCall f as = Call f [ v | e <- as, v <- flatStructData e ]
 
-  ite r e1 e2 e3 =
-    case e1 of
-      SLeaf b -> Call (NodeInst (CallPrim r ITE) []) [b,e2,e3]
-      _ -> panic "evalExpr" [ "ITE expects a boolean" ]
-  bin r op e1 e2 = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2]
 
   fTrue = Lit (Bool True)
   fFalse = Lit (Bool False)

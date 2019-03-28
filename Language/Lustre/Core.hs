@@ -37,6 +37,9 @@ data CType    = Type `On` Clock
 typeOfCType :: CType -> Type
 typeOfCType (t `On` _) = t
 
+clockOfCType :: CType -> Clock
+clockOfCType (_ `On` c) = c
+
 data Binder   = Ident ::: CType
                 deriving Show
 

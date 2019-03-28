@@ -1,40 +1,44 @@
 node (c : bool)
-  returns (y)
+  returns (n)
   assumes ()
   shows ()
 let
-  valof_pre___no_static$1 = pre __no_static$1
-  __no_static$1 = 0 -> Add(1, valof_pre___no_static$1)
-  valof_when = __no_static$1 when c
-  valof_current = current valof_when
   valof_pre___no_static = pre __no_static
-  valof_arr = 7 -> valof_pre___no_static
-  __no_static = ITE(Eq(true, c), valof_current, valof_arr)
-  y = __no_static
+  __no_static = 0 -> Add(1, valof_pre___no_static)
+  valof_current = current __no_static
+  valof_pre_n = pre n
+  valof_arr = 42 -> valof_pre_n
+  n = ITE(c, valof_current, valof_arr)
 tel
 --- Step 1 ---
 c : bool  = False
-y = 7
+n = 42
 --- Step 2 ---
 c : bool  = False
-y = 7
+n = 42
 --- Step 3 ---
 c : bool  = True
-y = 2
+n = 0
 --- Step 4 ---
 c : bool  = False
-y = 2
+n = 0
 --- Step 5 ---
-c : bool  = True
-y = 4
+c : bool  = False
+n = 0
 --- Step 6 ---
 c : bool  = True
-y = 5
+n = 1
 --- Step 7 ---
-c : bool  = False
-y = 5
---- Step 8 ---
 c : bool  = True
-y = 7
+n = 2
+--- Step 8 ---
+c : bool  = False
+n = 2
 --- Step 9 ---
+c : bool  = False
+n = 2
+--- Step 10 ---
+c : bool  = False
+n = 2
+--- Step 11 ---
 c : bool  = (EOF)

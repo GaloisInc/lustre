@@ -9,6 +9,7 @@ module Language.Lustre.Transform.ToCore
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Semigroup ( (<>) )
+import Data.Maybe(isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import MonadLib
@@ -304,13 +305,13 @@ evalEqn eqn =
     P.Define ls e ->
       case ls of
         [ P.LVar x ] ->
-            do e1  <- evalExpr e
-               tys <- getSrcLocalTypes
+            do tys <- getSrcLocalTypes
                let t = case Map.lookup (P.identOrigName x) tys of
                          Just ty -> ty
                          Nothing ->
                             panic "evalEqn" [ "Defining unknown variable:"
                                             , "*** Name: " ++ showPP x ]
+               e1  <- evalExpr (Just x) e
                addEqn (x C.::: t C.:= e1)
                clearEqns
 
@@ -343,7 +344,7 @@ evalEqn eqn =
 -- as needed.
 evalExprAtom :: P.Expression -> M C.Atom
 evalExprAtom expr =
-  do e1 <- evalExpr expr
+  do e1 <- evalExpr Nothing expr
      case e1 of
        C.Atom a -> pure a
        _        -> nameExpr e1
@@ -359,13 +360,26 @@ evalClockExprAtom (P.WhenClock _ e1 i) =
        _                   -> pure (C.Prim C.Eq [ a1, a2 ])
 
 
+evalCurrentWith :: Maybe Ident -> C.Atom -> C.Atom -> M C.Expr
+evalCurrentWith xt d e =
+  case xt of
+    Nothing -> panic "evalCurrentWith"
+                [ "Unexpected non-top level currentWith" ]
+    Just x ->
+      do env <- getLocalTypes
+         let ty = C.typeOf env e
+             c  = C.clockOfCType ty
+         cur  <- nameExpr (C.Current e)
+         pre  <- nameExpr (C.Pre (C.Var x))
+         hold <- nameExpr (d C.:->  pre)
+         pure (C.Atom (C.Prim C.ITE [c,cur,hold]))
 
 
 -- | Evaluate a source expression to a core expression.
-evalExpr :: P.Expression -> M C.Expr
-evalExpr expr =
+evalExpr :: Maybe Ident -> P.Expression -> M C.Expr
+evalExpr xt expr =
   case expr of
-    P.ERange _ e -> evalExpr e
+    P.ERange _ e -> evalExpr xt e
 
     P.Var i ->
       do cons <- getEnumCons
@@ -384,8 +398,6 @@ evalExpr expr =
          a2 <- evalClockExprAtom ce
          pure (C.When a1 a2)
 
-    P.CondAct {} -> bad "condact"
-
 
     P.Merge i alts ->
       do let j = C.Var i
@@ -403,7 +415,7 @@ evalExpr expr =
       go j as =
         case as of
           []  -> bad "empty merge"
-          [(_,e)] -> evalExpr e
+          [(_,e)] -> evalExpr Nothing e
           (p,e) : rest ->
              do let b = C.Prim C.Eq [ p, j ]
                 more <- go j rest
@@ -420,8 +432,9 @@ evalExpr expr =
     P.UpdateStruct {} -> bad "update-struct"
     P.WithThenElse {} -> bad "with-then-else"
 
-    P.Call ni es ->
-      do as <- mapM evalExprAtom es
+    P.Call ni es cl ->
+      do unless (isNothing cl) (bad "call with a clock")
+         as <- mapM evalExprAtom es
          let prim x = pure (C.Atom (C.Prim x as))
          case ni of
            P.NodeInst (P.CallPrim _ p) [] ->
@@ -445,6 +458,7 @@ evalExpr expr =
                                 P.Fby       -> do v3 <- nameExpr (C.Pre v2)
                                                   pure (v1 C.:-> v3)
                                 P.FbyArr    -> pure (v1 C.:-> v2)
+                                P.CurrentWith -> evalCurrentWith xt v1 v2
                                 P.And       -> prim C.And
                                 P.Or        -> prim C.Or
                                 P.Xor       -> prim C.Xor

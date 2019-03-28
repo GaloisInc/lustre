@@ -270,7 +270,6 @@ resolveConstExpr expr =
     Var x                 -> Var <$> resolveName x AConst
     Lit _                 -> pure expr
     When {}               -> bad "when"
-    CondAct {}            -> bad "condact"
     Tuple es              -> Tuple  <$> traverse resolveConstExpr es
     Array es              -> Array  <$> traverse resolveConstExpr es
     Select e s            -> Select <$> resolveConstExpr e <*> resolve s
@@ -304,13 +303,6 @@ resolveExpr expr =
     Var x                 -> Var <$> inferName x
     Lit _                 -> pure expr
     e1 `When` e2          -> When <$> resolveExpr e1 <*> resolve e2
-    CondAct c e d t       ->
-        case t of
-          Nothing -> CondAct <$> resolve c
-                             <*> resolveExpr e
-                             <*> traverse resolveExpr d
-                             <*> pure Nothing
-          Just _ -> panic "resolveExpr" [ "Condatct with a type annotation?" ]
 
     Tuple es              -> Tuple  <$> traverse resolveExpr es
     Array es              -> Array  <$> traverse resolveExpr es
@@ -331,8 +323,9 @@ resolveExpr expr =
       WithThenElse <$> resolveConstExpr e1
                    <*> resolveExpr e2 <*> resolveExpr e3
 
-    Merge x es -> Merge <$> inferIdent x <*> traverse resolve es
-    Call f es  -> Call <$> resolve f <*> traverse resolveExpr es
+    Merge x es  -> Merge <$> inferIdent x <*> traverse resolve es
+    Call f es c -> Call <$> resolve f <*> traverse resolveExpr es
+                                      <*> traverse resolve c
 
 
 instance (e ~ Expression) => Resolve (MergeCase e) where

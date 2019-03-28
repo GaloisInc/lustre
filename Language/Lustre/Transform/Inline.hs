@@ -13,6 +13,7 @@ module Language.Lustre.Transform.Inline (inlineCalls, AllRenamings) where
 import Data.Map (Map)
 import qualified Data.Map as Map
 import MonadLib
+import Data.Traversable(for)
 
 import Language.Lustre.AST
 import Language.Lustre.Monad
@@ -50,7 +51,7 @@ node g (...) returns (..)
 
 let
   ...
-  x,y = f (e1,e2)
+  x,y = f ((e1,e2) when t)
   ...
 tel
 
@@ -68,9 +69,9 @@ Transform `g` as follows:
 
 node g(...) returns (...)
   var ...
-  var a1 : A;   -- non-clashing names for params
-  var b1 : B;   -- non-clashing names for params
-  var e1 : E;   -- non-clashing names for locals
+  var a1 when t : A;   -- non-clashing names for params
+  var b1 when t : B;   -- non-clashing names for params
+  var e1 when t : E;   -- non-clashing names for locals
 let
   ...
   a1 = e1       -- renamed params
@@ -99,14 +100,23 @@ type Renaming = Map OrigName OrigName
 
 -- | Compute the renaming to be used when instantiating the given node.
 computeRenaming ::
+  Maybe ClockExpr       {- ^ Clock at the call site -} ->
   [LHS Expression]      {- ^ LHS of call site -} ->
   NodeDecl              {- ^ Function being called -} ->
   InM (Renaming, [LocalDecl], [OrigName])
   -- ^ new used, renaming of identifiers, new locals to add
   -- Last argument is a "call site id",  which is used for showing traces
   -- (i.e., a kind of inverse)
-computeRenaming lhs nd =
-  do newBinders <- mapM freshBinder oldBinders
+computeRenaming cl lhs nd =
+  do newBinders <- for oldBinders $ \b ->
+                      do n <- freshBinder b
+                         pure $ case cl of
+                                  Nothing -> n
+                                  Just c ->
+                                    case binderClock n of
+                                      Nothing -> n { binderClock = Just c }
+                                      Just _ -> panic "computeRenaming"
+                                                  [ "nested binders" ]
      let renaming = Map.fromList $
                       zipExact renOut (nodeOutputs prof) lhs ++
                       zipExact renBind oldBinders newBinders
@@ -189,10 +199,9 @@ instance Rename Expression where
       Lit _           -> expr
 
       e `When` ce     -> rename su e `When` rename su ce
-      CondAct {}      -> bad "condact"
 
       Merge i ms      -> Merge (rename su i) (rename su ms)
-      Call ni es      -> Call ni (rename su es)
+      Call ni es c     -> Call ni (rename su es) (rename su <$> c)
 
       Tuple {}        -> bad "tuple"
       Array {}        -> bad "array"
@@ -256,7 +265,7 @@ inlineCallsNode nd =
   isCall e =
     case e of
       ERange _ e1   -> isCall e1
-      Call (NodeInst (CallUser f) []) es -> Just (f,es)
+      Call (NodeInst (CallUser f) []) es cl -> Just (f,es,cl)
       _             -> Nothing
 
   renameEqns ready eqns =
@@ -265,12 +274,12 @@ inlineCallsNode nd =
       eqn : more ->
         case eqn of
           Define ls e
-            | Just (f,es) <- isCall e
+            | Just (f,es,cl) <- isCall e -- XXX
             , let fo = nameOrigName f
             , Just cnd <- Map.lookup fo ready
             , Just def <- nodeDef cnd ->
             do let prof = nodeProfile cnd
-               (su, newLocals, key) <- computeRenaming ls cnd
+               (su, newLocals, key) <- computeRenaming cl ls cnd
                let paramDef b p = Define [LVar (rename su (binderDefines b))] p
                    paramDefs    = zipExact paramDef
                                         (map inputBinder (nodeInputs prof)) es
@@ -286,13 +295,12 @@ inlineCallsNode nd =
 
   updateProps eqns =
     let asmps = [ e | Assert _ e <- eqns ]
-        bin r f a b = Call (NodeInst (CallPrim r (Op2 f)) []) [a,b]
 
         addAsmps e1 = case asmps of
                         [] -> e1
-                        [a] -> bin (range e1) Implies a e1
-                        as  -> bin (range e1) Implies
-                                   (foldr1 (bin (range e1) And) as)
+                        [a] -> eOp2 (range e1) Implies a e1
+                        as  -> eOp2 (range e1) Implies
+                                   (foldr1 (eOp2 (range e1) And) as)
                                    e1
         upd eqn = case eqn of
                     Assert x e   -> Property x e

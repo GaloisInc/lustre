@@ -528,13 +528,12 @@ expression :: { Expression }
   | expression '[' arraySel ']'       { at $1 $4 (Select $1 $3) }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
-  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3) }
+  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3 Nothing) }
+
   | 'condact' '(' clockExpr ',' expression ',' expression ')'
-                                      { at $1 $8
-                                        (CondAct $3 $5 (Just $7) Nothing) }
+                                      {%  mkCondact $1 $8 $3 $5 (Just $7) }
   | 'condact' '(' clockExpr ',' expression ')'
-                                      { at $1 $6
-                                        (CondAct $3 $5 Nothing Nothing) }
+                                      {% mkCondact $1 $6 $3 $5 Nothing }
   | name '{' '}'                      { at $1 $3 (Struct $1 []) }
   | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
@@ -910,7 +909,8 @@ opIf r     = primArg r ITE
 
 -- | Call a primitive with no static parameters
 callPrim :: SourceRange -> PrimNode -> [Expression] -> Expression
-callPrim r p es = Call (NodeInst (CallPrim r p) []) es
+callPrim r p es = Call (NodeInst (CallPrim r p) []) es Nothing
+
 
 --------------------------------------------------------------------------------
 
@@ -926,6 +926,23 @@ mkContract :: SourceRange -> [ContractItem] -> SourceRange -> Contract
 mkContract r1 cs r2 = Contract { contractRange = r1 <-> r2
                                , contractItems = cs }
 
+
+--------------------------------------------------------------------------------
+
+mkCondact :: SourceRange -> SourceRange ->
+                ClockExpr -> Expression -> Maybe Expression -> Parser Expression
+mkCondact r1 r2 c e mb =
+  do e1 <- checkCall r1 e
+     pure $ at r1 r2
+          $ case mb of
+              Nothing -> eOp1 r1 Current e1
+              Just d  -> eOp2 r1 CurrentWith d e1
+  where
+  checkCall l e =
+    case e of
+      ERange r e1 -> ERange r <$> checkCall r e1
+      Call f es Nothing -> pure (Call f es (Just c))
+      _ -> happyErrorAt (sourceFrom l)
 
 --------------------------------------------------------------------------------
 

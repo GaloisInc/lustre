@@ -19,7 +19,6 @@ exprArity expr =
     Var {}              -> pure 1
     Lit {}              -> pure 1
     e `When` _          -> exprArity e
-    CondAct _ e _ _     -> exprArity e
     Tuple es            -> pure (length es)
     Array {}            -> pure 1
     Select {}           -> pure 1
@@ -31,7 +30,7 @@ exprArity expr =
         []    -> reportError "Malformed `merge`---empty alternatives"
         e : _ -> mergeCaseArity e
 
-    Call ni es -> nodeInstArtiy ni es
+    Call ni es _ -> nodeInstArtiy ni es
 
 -- | Compute the arity of the given node instantiation when applied to the given argument.
 nodeInstArtiy :: NodeInst -> [Expression] -> M Int
@@ -87,6 +86,9 @@ primArity prim as es =
         Fby         -> case es of
                          [e, _] -> exprArity e
                          _      -> malformed "fby" 2
+        CurrentWith -> case es of
+                         [e, _] -> exprArity e
+                         _      -> malformed "currentWith" 2
         And         -> pure 1
         Or          -> pure 1
         Xor         -> pure 1

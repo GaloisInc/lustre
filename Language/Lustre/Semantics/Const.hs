@@ -3,8 +3,9 @@ module Language.Lustre.Semantics.Const
   where
 
 import Data.Map ( Map )
+import Data.Maybe (isNothing)
 import qualified Data.Map as Map
-import Control.Monad(msum)
+import Control.Monad(msum,unless)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty(showPP)
@@ -52,7 +53,6 @@ evalConst env expr =
            _       -> typeError "with-then-else" "A `bool`"
 
     When {}    -> bad "`when` is not a constant expression."
-    CondAct {} -> bad "`condact` is not a constant expression."
     Merge {}   -> bad "`merge` is not a constant expression."
 
     Var x ->
@@ -96,8 +96,10 @@ evalConst env expr =
       do s <- evalSel env sel
          evalSelFun s =<< evalConst env e
 
-    Call (NodeInst (CallPrim _ p) []) es ->
-      do vs <- mapM (evalConst env) es
+    Call (NodeInst (CallPrim _ p) []) es cl ->
+      do unless (isNothing cl) $
+           bad "calls with a clock do not make sense for constants"
+         vs <- mapM (evalConst env) es
          case (p, vs) of
 
            (ITE, [b,t,e]) -> sITE b t e
@@ -117,6 +119,7 @@ evalConst env expr =
              case op of
                Fby        -> bad "`fby` is not a constant"
                FbyArr     -> bad "`->` is not a constant"
+               CurrentWith-> bad "`current` is not a constant"
 
                And        -> sAnd x y
                Or         -> sOr x y

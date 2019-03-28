@@ -11,6 +11,7 @@ import Numeric(showGFloat)
 import Data.Ratio(numerator,denominator)
 
 import Language.Lustre.AST
+import Language.Lustre.Panic(panic)
 import AlexTools(prettySourceRange)
 
 class Pretty t where
@@ -252,11 +253,6 @@ instance Pretty Expression where
       Lit l         -> pp l
       e `When` ce   -> parenIf (n > 10) doc
         where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce
-      CondAct b e d _ -> "condact" <> parens (commaSep docs)
-        where docs = [ pp b, pp e ] ++ (case d of
-                                          Nothing -> []
-                                          Just d' -> [pp d'])
-
 
       Tuple es      -> parens (commaSep (map pp es))
       Array es      -> brackets (commaSep (map pp es))
@@ -272,9 +268,9 @@ instance Pretty Expression where
       Merge i as  -> parenIf (n > 1) doc
         where doc = "merge" <+> pp i $$ nest 2 (vcat (map pp as))
 
-      Call f es ->
-        case f of
-          NodeInst (CallPrim _ prim) [] ->
+      Call f es cl ->
+        case (f,cl) of
+          (NodeInst (CallPrim _ prim) [], Nothing) ->
             case (prim, es) of
 
               (Op1 op, [e]) -> parenIf (n >= p) doc
@@ -288,6 +284,8 @@ instance Pretty Expression where
                               Pre      -> 13
                               Current  -> 13
 
+              (Op2 CurrentWith,_) -> dflt -- not infix
+
               (Op2 op, [e1,e2]) -> parenIf (n >= p) doc
                  where doc = ppPrec lp e1 <+> pp op <+> ppPrec rp e2
                        left x  = (x-1,x,x)
@@ -298,6 +296,7 @@ instance Pretty Expression where
                                      Concat  -> left 1
                                      FbyArr  -> non 2
                                      Implies -> right 3
+                                     CurrentWith -> panic "pp" ["currentWith?"]
                                      Or      -> left 4
                                      Xor     -> left 4
                                      And     -> left 5
@@ -320,9 +319,14 @@ instance Pretty Expression where
                 where doc = "if" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
                                            $$ nest 2 ("else" <+> ppPrec 0 e3)
 
-              _ -> pp f <+> parens (hsep (punctuate comma (map pp es)))
+              _ -> dflt
 
-          _ -> pp f <+> parens (hsep (punctuate comma (map pp es)))
+          _ -> dflt
+        where
+        argTuple = parens (commaSep (map pp es))
+        dflt     = case cl of
+                     Nothing -> pp f <+> argTuple
+                     Just c  -> pp f <+> parens (argTuple <+> "when" <+> pp c)
 
 parenIf :: Bool -> Doc -> Doc
 parenIf p d = if p then parens d else d
@@ -430,6 +434,7 @@ instance Pretty Op2 where
     case op of
       FbyArr      -> "->"
       Fby         -> "fby"
+      CurrentWith -> "currentWith"
       And         -> "and"
       Or          -> "or"
       Xor         -> "xor"
