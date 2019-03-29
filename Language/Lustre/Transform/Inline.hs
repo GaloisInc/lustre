@@ -14,6 +14,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import MonadLib
 import Data.Traversable(for)
+import Text.PrettyPrint(hsep)
 
 import Language.Lustre.AST
 import Language.Lustre.Monad
@@ -108,15 +109,22 @@ computeRenaming ::
   -- Last argument is a "call site id",  which is used for showing traces
   -- (i.e., a kind of inverse)
 computeRenaming cl lhs nd =
-  do newBinders <- for oldBinders $ \b ->
-                      do n <- freshBinder b
-                         pure $ case cl of
-                                  Nothing -> n
-                                  Just c ->
-                                    case binderClock n of
-                                      Nothing -> n { binderClock = Just c }
-                                      Just _ -> panic "computeRenaming"
-                                                  [ "nested binders" ]
+  do newBinders <-
+       for oldBinders $ \b ->
+         do n <- freshBinder b
+            pure $ case cl of
+                     Nothing -> n
+                     Just c ->
+                       case binderClock n of
+                         Nothing -> n { binderClock = Just c }
+                         Just _ -> panic "computeRenaming"
+                           [ "Nested clocks"
+                           , "Call to: " ++ showPP (nodeName nd)
+                           , "Defined at: " ++ showPP (range (nodeName nd))
+                           , "Binder: " ++ showPP b
+                           , "LHS: " ++ show (hsep (map (pp.range) lhs))
+                           ]
+
      let renaming = Map.fromList $
                       zipExact renOut (nodeOutputs prof) lhs ++
                       zipExact renBind oldBinders newBinders
