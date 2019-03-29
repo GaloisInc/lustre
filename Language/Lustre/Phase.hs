@@ -17,3 +17,6 @@ noPhases = Set.empty
 allPhases :: Set LustrePhase
 allPhases = Set.fromList [ minBound .. maxBound ]
 
+phases :: [LustrePhase] -> Set LustrePhase
+phases = Set.fromList
+
