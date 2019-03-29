@@ -115,7 +115,9 @@ runNodeIO sIn node =
                        getInput b
 
 parseVal :: Type -> String -> Maybe Value
-parseVal t s =
+parseVal t s
+  | ["-"] == words s = Just VNil
+  | otherwise =
   case t of
     TBool -> VBool <$> readMaybe s
     TInt  -> VInt  <$> readMaybe s
