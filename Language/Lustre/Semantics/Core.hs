@@ -120,7 +120,7 @@ evalEqn :: State           {- ^ Old state              -} ->
 evalEqn old new (x ::: _ `On` c := expr) =
   case expr of
 
-    Atom a    -> done (evalAtom new a)
+    Atom a    -> guarded $ done $ evalAtom new a
     Current a -> done (evalAtom new a)
 
     a `When` _  ->
