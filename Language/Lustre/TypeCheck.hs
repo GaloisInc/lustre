@@ -874,15 +874,15 @@ checkCall f as es0 cl0 tys =
   do reqSafety <- getUnsafeLevel
      reqTemporal <- getTemporalLevel
      cl <- case cl0 of
-              Nothing -> pure Nothing
-              Just c  -> case reqTemporal of
-                           Node -> Just . fst <$> checkClockExpr c
-                           Function ->
-                             reportError $ nestedError
-                                "Invalid clocked call"
-                                [ "Expected to be inside a node."
-                                , "We are inside a function."
-                                ]
+             Nothing -> pure Nothing
+             Just c  -> case reqTemporal of
+                          Node -> Just . fst <$> checkClockExpr c
+                          Function ->
+                            reportError $ nestedError
+                               "Invalid clocked call"
+                               [ "Expected to be inside a node."
+                               , "We are inside a function."
+                               ]
 
      (ni,prof) <- prepUserNodeInst f as reqSafety reqTemporal
      (es1,mp) <- checkInputs cl [] Map.empty (nodeInputs prof) es0
@@ -929,7 +929,13 @@ checkCall f as es0 cl0 tys =
     case ib of
       InputBinder b ->
         do c  <- renBinderClock cl mp b
-           e1 <- checkExpr1 e CType { cClock = c, cType = binderType b }
+           e1 <- case c of
+                   BaseClock ->
+                      checkExpr1 e CType { cClock = c, cType = binderType b }
+                   KnownClock c1 ->
+                      checkExpr1 (e `When` c1)
+                            CType { cClock = c, cType = binderType b }
+                   ClockVar _ -> panic "checkIn" [ "Unexpectd clock var." ]
            pure ( e1
                 , case isClock e of
                     Just k  -> Map.insert (binderDefines b) k mp
