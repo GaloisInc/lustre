@@ -17,10 +17,6 @@ import Language.Lustre.Name
 import Language.Lustre.Pretty
 import Language.Lustre.Panic(panic)
 
-{-
-data Ident    = Ident Text
-                deriving (Show,Eq,Ord)
--}
 
 -- XXX: Support for integer ranges.
 -- This would be useful to model enums, as well as "subrange [x,y] of int"
