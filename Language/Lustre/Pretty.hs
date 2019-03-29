@@ -326,7 +326,8 @@ instance Pretty Expression where
         argTuple = parens (commaSep (map pp es))
         dflt     = case cl of
                      Nothing -> pp f <+> argTuple
-                     Just c  -> pp f <+> parens (argTuple <+> "when" <+> pp c)
+                     Just c  -> "callWhen" <+>
+                                    parens (commaSep [ pp c, pp f <+> argTuple])
 
 parenIf :: Bool -> Doc -> Doc
 parenIf p d = if p then parens d else d
