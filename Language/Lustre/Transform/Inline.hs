@@ -113,7 +113,7 @@ computeRenaming cl lhs nd =
        for oldBinders $ \b ->
          do n <- freshBinder b
             pure $ case cl of
-                     Nothing -> n
+                     Nothing -> n -- still need to apply subst to clocks
                      Just c ->
                        case binderClock n of
                          Nothing -> n { binderClock = Just c }
@@ -128,7 +128,8 @@ computeRenaming cl lhs nd =
      let renaming = Map.fromList $
                       zipExact renOut (nodeOutputs prof) lhs ++
                       zipExact renBind oldBinders newBinders
-     pure (renaming, map LocalVar newBinders, map lhsIdent lhs)
+         renB b = b { binderClock = rename renaming <$> binderClock b }
+     pure (renaming, map (LocalVar . renB) newBinders, map lhsIdent lhs)
   where
   prof = nodeProfile nd
   def  = case nodeDef nd of
@@ -282,7 +283,7 @@ inlineCallsNode nd =
       eqn : more ->
         case eqn of
           Define ls e
-            | Just (f,es,cl) <- isCall e -- XXX
+            | Just (f,es,cl) <- isCall e
             , let fo = nameOrigName f
             , Just cnd <- Map.lookup fo ready
             , Just def <- nodeDef cnd ->
