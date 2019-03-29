@@ -941,7 +941,7 @@ mkCondact r1 r2 c e mb =
   checkCall l e =
     case e of
       ERange r e1 -> ERange r <$> checkCall r e1
-      Call f es Nothing -> pure (Call f es (Just c))
+      Call f es Nothing -> pure (Call f [ e `When` c | e <- es ] (Just c))
       _ -> happyErrorAt (sourceFrom l)
 
 --------------------------------------------------------------------------------

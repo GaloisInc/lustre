@@ -929,13 +929,7 @@ checkCall f as es0 cl0 tys =
     case ib of
       InputBinder b ->
         do c  <- renBinderClock cl mp b
-           e1 <- case c of
-                   BaseClock ->
-                      checkExpr1 e CType { cClock = c, cType = binderType b }
-                   KnownClock c1 ->
-                      checkExpr1 (e `When` c1)
-                            CType { cClock = c, cType = binderType b }
-                   ClockVar _ -> panic "checkIn" [ "Unexpectd clock var." ]
+           e1 <- checkExpr1 e CType { cClock = c, cType = binderType b }
            pure ( e1
                 , case isClock e of
                     Just k  -> Map.insert (binderDefines b) k mp
