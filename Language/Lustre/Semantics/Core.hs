@@ -1,4 +1,4 @@
-{-# Language MultiWayIf #-}
+{-# Language MultiWayIf, OverloadedStrings #-}
 module Language.Lustre.Semantics.Core where
 
 import Data.List(foldl')
@@ -7,7 +7,7 @@ import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Set ( Set )
 import qualified Data.Set as Set
-import Text.PrettyPrint(integer,double,text,Doc)
+import Text.PrettyPrint
 
 import Language.Lustre.Panic
 import Language.Lustre.Pretty
@@ -44,6 +44,7 @@ ppValue val =
 instance Pretty Value where
   ppPrec _ = ppValue
 
+
 data State = State
   { sValues :: Map Ident Value
     -- ^ Values for identifiers.
@@ -54,6 +55,14 @@ data State = State
     -- Contains the identifiers that have transition to the second phase.
   }
 
+instance Pretty State where
+  ppPrec _ s =
+    vcat [ "values:"
+         , nest 2 (vcat (map ppV (Map.toList (sValues s))))
+         , "initialized:" <+> commaSep (map pp (Set.toList (sInitialized s)))
+         ]
+    where
+    ppV (x,y) = pp x <+> "=" <+> pp y
 
 initNode :: Node ->
             Maybe (Map Ident Value) {- Optional inital values -} ->
