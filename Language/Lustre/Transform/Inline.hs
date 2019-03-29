@@ -14,7 +14,6 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import MonadLib
 import Data.Traversable(for)
-import Text.PrettyPrint(hsep)
 
 import Language.Lustre.AST
 import Language.Lustre.Monad
@@ -117,13 +116,7 @@ computeRenaming cl lhs nd =
                      Just c ->
                        case binderClock n of
                          Nothing -> n { binderClock = Just c }
-                         Just _ -> panic "computeRenaming"
-                           [ "Nested clocks"
-                           , "Call to: " ++ showPP (nodeName nd)
-                           , "Defined at: " ++ showPP (range (nodeName nd))
-                           , "Binder: " ++ showPP b
-                           , "LHS: " ++ show (hsep (map (pp.range) lhs))
-                           ]
+                         Just _ -> n -- still need to apply su
 
      let renaming = Map.fromList $
                       zipExact renOut (nodeOutputs prof) lhs ++

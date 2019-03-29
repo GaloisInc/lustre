@@ -895,23 +895,20 @@ checkCall f as es0 cl0 tys =
                           Nothing -> BaseClock
                           Just c  -> KnownClock c
       Just (WhenClock r p i) ->
-        case cl of
-          Just _ ->
-            reportError $ nestedError
-              "Unsupported: nested clocks in call"
-              [ "Please let us know, if you'd find this useful." ]
-
-          Nothing ->
-            case Map.lookup i mp of
-              Just (Right j)            -> pure (KnownClock (WhenClock r p j))
-              Just (Left l) | matches p -> pure BaseClock
-                where matches v = case v of
-                                    ERange _ v1 -> matches v1
-                                    Lit l1 -> l == l1
-                                    _ -> False
-              _ -> reportError $
-                text ("Parameter for clock " ++ show (backticks (pp i)) ++
-                 " is not an identifier.")
+        -- We don't consider `cl` for binder that have an explicit clock,
+        -- as it only affects the "base" clock.  Of course, the clocks will
+        -- probably be inderectly affected anyway as the clock of the clock
+        -- would change (etc.).
+        case Map.lookup i mp of
+          Just (Right j)            -> pure (KnownClock (WhenClock r p j))
+          Just (Left l) | matches p -> pure BaseClock
+            where matches v = case v of
+                                ERange _ v1 -> matches v1
+                                Lit l1 -> l == l1
+                                _ -> False
+          _ -> reportError $
+            text ("Parameter for clock " ++ show (backticks (pp i)) ++
+             " is not an identifier.")
 
 
   checkInputs cl done mp is es =

@@ -56,10 +56,7 @@ evalNodeDecl enumCs nd
       do let prof = P.nodeProfile nd
          ins  <- mapM evalInputBinder (P.nodeInputs prof)
          outs <- mapM evalBinder (P.nodeOutputs prof)
-         mapM_ addBinder ins
-         mapM_ addBinder outs
          locs <- mapM evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
-         mapM_ addBinder locs
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
          props <- getPropertyNames
@@ -278,18 +275,15 @@ evalBinder :: P.Binder -> M C.Binder
 evalBinder b =
   do c <- case P.binderClock b of
             Nothing -> pure (C.Lit (C.Bool True))
-            Just (P.WhenClock _ e i) ->
-              do e1 <- evalExprAtom e
-                 let i1 = C.Var i
-                 case e1 of
-                   C.Lit (C.Bool True) -> pure i1
-                   _ -> pure (C.Prim C.Eq [ i1,e1 ])
+            Just c  -> evalClockExprAtom c
      let t = evalType (P.binderType b) `C.On` c
      let xi = P.binderDefines b
          xo = P.identOrigName xi
      addSrcLocal xo t
      rememberMapping xo xi
-     pure (xi C.::: t)
+     let bn = xi C.::: t
+     addBinder bn
+     pure bn
 
 -- | Translate an equation.
 -- Invariant: 'stEqns' should be empty before and after this executes.
@@ -355,9 +349,14 @@ evalClockExprAtom :: P.ClockExpr -> M C.Atom
 evalClockExprAtom (P.WhenClock _ e1 i) =
   do a1 <- evalExprAtom e1
      let a2 = C.Var i
-     case a1 of
-       C.Lit (C.Bool True) -> pure a2
-       _                   -> pure (C.Prim C.Eq [ a1, a2 ])
+         cl = case a1 of
+                C.Lit (C.Bool True) -> a2
+                _                   -> C.Prim C.Eq [ a1, a2 ]
+     env <- getLocalTypes
+     pure $ case C.clockOfCType (C.typeOf env a2) of
+              C.Lit (C.Bool True) -> cl
+              C.Prim C.And cs     -> C.Prim C.And (cl:cs)
+              c                   -> C.Prim C.And [cl,c]
 
 
 evalCurrentWith :: Maybe Ident -> C.Atom -> C.Atom -> M C.Expr

@@ -1074,25 +1074,19 @@ nameCallSite env ni es cl =
             let nameMap = Map.fromList
                         $ zip names (map isIdent es ++ map Just ns)
 
-                -- NOTE: if `cl` is not 'Nothing' we'd get a nested clock here.
-                -- Since we don't support this yet, the type-checker should
-                -- have checked for that.  We check again, just in case.
                 renClock (WhenClock r e i) =  -- loc?
-                  case cl of
-                    Just _ -> panic "nameCallSite" [ "Nested clocks." ]
-                    Nothing ->
-                      WhenClock r (evalExpr env e) $
-                        case Map.lookup i nameMap of
-                          Just (Just j) -> j
-                          Just Nothing ->
-                            panic "nameCallSite"
-                              [ "Output's clock depends on an input."
-                              , "The clock parameter must be an identifier."
-                              , "*** Clock: " ++ showPP i
-                              ]
-                          _ -> panic "nameCallSite"
-                                [ "Undefined clock variable."
-                                , "*** Clock: " ++ showPP i ]
+                  WhenClock r (evalExpr env e) $
+                    case Map.lookup i nameMap of
+                      Just (Just j) -> j
+                      Just Nothing ->
+                        panic "nameCallSite"
+                          [ "Output's clock depends on an input." -- ?
+                          , "The clock parameter must be an identifier."
+                          , "*** Clock: " ++ showPP i
+                          ]
+                      _ -> panic "nameCallSite"
+                            [ "Undefined clock variable."
+                            , "*** Clock: " ++ showPP i ]
 
                 toBind n b = Binder
                                { binderDefines = n
