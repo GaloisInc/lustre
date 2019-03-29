@@ -1,0 +1,19 @@
+node nats () returns (n : int)
+let
+  n = 0 -> 1 + pre n;
+tel
+
+node id (from : int) returns (n : int)
+let
+  n = from;
+tel
+
+
+node main(c : bool) returns (n : int)
+let
+  n = condact(c,id(nats()),42);
+tel
+
+
+
+
