@@ -1,0 +1,44 @@
+node (puase : int)
+  returns (y)
+  assumes ()
+  shows ()
+let
+  valof_pre___no_static = pre __no_static
+  __no_static = 0 -> Add(1, valof_pre___no_static)
+  valof_pre_c = pre c
+  c = true -> Not(valof_pre_c)
+  x = __no_static when c
+  y = current x
+tel
+--- Step 1 ---
+puase : int  = 0
+y = 0
+--- Step 2 ---
+puase : int  = 0
+y = 0
+--- Step 3 ---
+puase : int  = 0
+y = 2
+--- Step 4 ---
+puase : int  = 0
+y = 2
+--- Step 5 ---
+puase : int  = 0
+y = 4
+--- Step 6 ---
+puase : int  = 0
+y = 4
+--- Step 7 ---
+puase : int  = 0
+y = 6
+--- Step 8 ---
+puase : int  = 0
+y = 6
+--- Step 9 ---
+puase : int  = 0
+y = 8
+--- Step 10 ---
+puase : int  = 0
+y = 8
+--- Step 11 ---
+puase : int  = (EOF)

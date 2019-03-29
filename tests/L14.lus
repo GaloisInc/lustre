@@ -1,0 +1,21 @@
+node nats() returns (n : int);
+let
+  n = 0 -> 1 + pre n;
+tel
+
+node f() returns (y : int);
+  var c : bool;
+  var x : int when c;
+let
+  c = true -> not pre c;
+  x = nats () when c;
+  y = current x;
+tel
+
+node main(puase : int) returns (y : int);
+let
+  --%MAIN;
+  y = f();
+tel
+
+
