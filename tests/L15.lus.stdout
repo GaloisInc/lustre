@@ -1,0 +1,41 @@
+node (c : bool)
+  returns (n)
+  assumes ()
+  shows ()
+let
+  valof_pre_x = pre x
+  x = 0 -> Add(1, valof_pre_x)
+  valof_current = current x
+  valof_pre_n = pre n
+  valof_arr = 17 -> valof_pre_n
+  n = ITE(c, valof_current, valof_arr)
+tel
+--- Step 1 ---
+c : bool  = False
+n = 17
+--- Step 2 ---
+c : bool  = False
+n = 17
+--- Step 3 ---
+c : bool  = True
+n = 0
+--- Step 4 ---
+c : bool  = False
+n = 0
+--- Step 5 ---
+c : bool  = False
+n = 0
+--- Step 6 ---
+c : bool  = True
+n = 1
+--- Step 7 ---
+c : bool  = True
+n = 2
+--- Step 8 ---
+c : bool  = False
+n = 2
+--- Step 9 ---
+c : bool  = False
+n = 2
+--- Step 10 ---
+c : bool  = (EOF)

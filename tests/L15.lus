@@ -1,0 +1,12 @@
+node nats() returns (n : int)
+let
+  n = 0 -> 1 + pre n;
+tel
+
+node main(c : bool) returns (n : int)
+  var x : int when c;
+let
+  x = callWhen(c,nats());
+  n = currentWith(17,x);
+tel
+

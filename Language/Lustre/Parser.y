@@ -89,7 +89,9 @@ import Language.Lustre.Panic
 
   'when'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWhen } }
   'current'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrent } }
+  'currentWith'{ Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrentWith } }
   'condact'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCondact } }
+  'callWhen'  { Lexeme { lexemeRange = $$, lexemeToken = TokKwCallWhen } }
   'pre'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwPre } }
   'fby'       { Lexeme { lexemeRange = $$, lexemeToken = TokKwFby } }
   '->'        { Lexeme { lexemeRange = $$, lexemeToken = TokRightArrow } }
@@ -528,6 +530,12 @@ expression :: { Expression }
   | expression '[' arraySel ']'       { at $1 $4 (Select $1 $3) }
   | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
 
+
+  | 'currentWith' '(' expression ',' expression ')'
+                                      { at $1 $6 (eOp2 $1 CurrentWith $3 $5) }
+  | 'callWhen' '(' clockExpr ',' expression ')'
+                                      {% mkCallWhen $1 $6 $3 $5 }
+
   | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3 Nothing) }
 
   | 'condact' '(' clockExpr ',' expression ',' expression ')'
@@ -943,6 +951,17 @@ mkCondact r1 r2 c e mb =
       ERange r e1 -> ERange r <$> checkCall r e1
       Call f es Nothing -> pure (Call f [ e `When` c | e <- es ] (Just c))
       _ -> happyErrorAt (sourceFrom l)
+
+mkCallWhen ::
+  SourceRange -> SourceRange -> ClockExpr -> Expression -> Parser Expression
+mkCallWhen r1 r2 c e = at r1 r2 <$> checkCall r1 e
+  where
+  checkCall l e =
+    case e of
+      ERange r e1 -> ERange r <$> checkCall r e1
+      Call f es Nothing -> pure (Call f es (Just c))
+      _ -> happyErrorAt (sourceFrom l)
+
 
 --------------------------------------------------------------------------------
 

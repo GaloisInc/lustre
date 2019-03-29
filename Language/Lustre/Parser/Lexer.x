@@ -83,7 +83,9 @@ $white+         { return [] }
 
 "when"              { lexeme TokKwWhen }
 "current"           { lexeme TokKwCurrent }
+"currentWith"       { lexeme TokKwCurrentWith }
 "condact"           { lexeme TokKwCondact }
+"callWhen"          { lexeme TokKwCallWhen }
 "pre"               { lexeme TokKwPre }
 "fby"               { lexeme TokKwFby }
 "->"                { lexeme TokRightArrow }
@@ -228,7 +230,9 @@ data Token =
 
 
   | TokKwCurrent
+  | TokKwCurrentWith
   | TokKwCondact
+  | TokKwCallWhen
   | TokKwPre
   | TokKwWhen
 
