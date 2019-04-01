@@ -1,0 +1,78 @@
+node (c : bool)
+  returns (x, y)
+  assumes ()
+  shows ()
+let
+  valof_pre___no_static$1 : int
+    = pre __no_static$1
+   
+  __no_static$1 : int
+    = 0 -> Add(1, valof_pre___no_static$1)
+   
+  valof_when : int when c
+    = __no_static$1 when c
+   
+  valof_current$1 : int
+    = current valof_when
+   
+  valof_pre_x : int
+    = pre x
+   
+  valof_arr$1 : int
+    = 100 -> valof_pre_x
+   
+  x : int
+    = ITE(c, valof_current$1, valof_arr$1)
+   
+  valof_pre___no_static : int when c
+    = pre __no_static
+   
+  __no_static : int when c
+    = 0 -> Add(1, valof_pre___no_static)
+   
+  valof_current : int
+    = current __no_static
+   
+  valof_pre_y : int
+    = pre y
+   
+  valof_arr : int
+    = 200 -> valof_pre_y
+   
+  y : int
+    = ITE(c, valof_current, valof_arr)
+tel
+--- Step 1 ---
+c : bool  = False
+x = 100
+y = 200
+--- Step 2 ---
+c : bool  = False
+x = 100
+y = 200
+--- Step 3 ---
+c : bool  = True
+x = 2
+y = 0
+--- Step 4 ---
+c : bool  = False
+x = 2
+y = 0
+--- Step 5 ---
+c : bool  = False
+x = 2
+y = 0
+--- Step 6 ---
+c : bool  = True
+x = 5
+y = 1
+--- Step 7 ---
+c : bool  = True
+x = 6
+y = 2
+--- Step 8 ---
+c : bool  = False
+x = 6
+y = 2
+--- Step 9 ---
+c : bool  = (EOF)

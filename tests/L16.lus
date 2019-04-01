@@ -1,0 +1,13 @@
+node nats() returns (n : int)
+let
+  n = 0 -> 1 + pre n;
+tel
+
+
+node main(c : bool) returns (x : int; y : int)
+let
+  x,y = currentWith ((100,200), (nats() when c, callWhen(c,nats())));
+tel
+
+
+

@@ -626,6 +626,9 @@ evalExpr expr =
                    _   -> STuple [ cur <$> e | e <- args ]
                   where cur a = Call f [a] cl
 
+              -- currentWith [a,b] [x,y] -> [currentWith a x, currentWith b y]
+             (NodeInst (CallPrim r (Op2 CurrentWith)) [], [e1,e2]) ->
+                evalBin (bin r CurrentWith) e1 e2
 
 
              -- if a then [x1,x2] else [y1,y2]  ~~>
