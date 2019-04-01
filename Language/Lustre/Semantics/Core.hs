@@ -67,22 +67,24 @@ instance Pretty State where
 initNode :: Node ->
             Maybe (Map Ident Value) {- Optional inital values -} ->
             (State, State -> Map Ident Value -> State)
-initNode node mbStart = (s0, stepNode node1)
+initNode node mbStart = (s0, stepNode node1 env)
   where
   s0     = State { sInitialized = Set.empty
                  , sValues = fromMaybe Map.empty mbStart
                  }
+  env    = nodeEnv node
   node1  = case orderedEqns (nEqns node) of
              Right ok -> node { nEqns = ok }
              Left err -> panic "initNode" [ "Failed to order equations"
                                           , "*** Recursive: " ++ show err ]
 
 
-stepNode :: Node            {- ^ Node, with equations properly ordered -} ->
-            State           {- ^ Current state -} ->
-            Map Ident Value {- ^ Inputs -} ->
-            State           {- ^ Next state -}
-stepNode node old ins = foldl' (evalEqn old) new (nEqns node)
+stepNode :: Node              {- ^ Node, with equations properly ordered -} ->
+            (Map Ident CType) {- ^ Types of identifiers -} ->
+            State             {- ^ Current state -} ->
+            Map Ident Value   {- ^ Inputs -} ->
+            State             {- ^ Next state -}
+stepNode node env old ins = foldl' (evalEqn env old) new (nEqns node)
   where
   new = State { sInitialized = sInitialized old
               , sValues      = ins
@@ -112,12 +114,13 @@ evalAtom s atom =
     Prim op as -> evalPrimOp op (map (evalAtom s) as)
 
 
-evalEqn :: State           {- ^ Old state              -} ->
+evalEqn :: Map Ident CType {- ^ Types of identifier    -} ->
+           State           {- ^ Old state              -} ->
            State           {- ^ New state (partial)    -} ->
            Eqn             {- ^ Equation to evaluate   -} ->
            State           {- ^ Updated new state      -}
 
-evalEqn old new (x ::: _ `On` c := expr) =
+evalEqn env old new (x ::: _ `On` c := expr) =
   case expr of
 
     Atom a    -> guarded $ done $ evalAtom new a
@@ -150,10 +153,20 @@ evalEqn old new (x ::: _ `On` c := expr) =
   done v        = new { sValues = Map.insert x v (sValues new) }
   initialized s = s { sInitialized = Set.insert x (sInitialized s) }
 
-  guarded v =
-    case evalAtom new c of
-     VBool True -> v
-     _ ->   new { sValues = Map.insert x (evalVar old x) (sValues new) }
+  guarded = guardedOn c
+
+  guardedOn cl v =
+    case cl of
+      Lit b -> case b of
+                 Bool True  -> v    -- base clock
+                 Bool False -> hold -- weird always false clock
+                 _ -> panic "guardedOn" [ "Non boolean clock" ]
+      _ -> case evalAtom new cl of
+             VBool True -> guardedOn (clockOfCType (typeOf env cl)) v
+             _ -> hold
+    where hold = new { sValues = Map.insert x (evalVar old x) (sValues new) }
+
+
 
 
 
