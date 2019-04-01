@@ -1,3 +1,6 @@
+PhaseToCore
+===========
+
 node (c : bool)
   returns (x, y)
   assumes ()
@@ -42,6 +45,7 @@ let
   y : int
     = ITE(c, valof_current, valof_arr)
 tel
+
 --- Step 1 ---
 c : bool  = False
 x = 100

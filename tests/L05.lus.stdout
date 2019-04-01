@@ -1,3 +1,6 @@
+PhaseToCore
+===========
+
 node (x : real)
   returns (y, z)
   assumes ()
@@ -9,6 +12,7 @@ let
   z : int
     = FloorCast(x)
 tel
+
 --- Step 1 ---
 x : real  = 2.5
 y = 2

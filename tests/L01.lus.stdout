@@ -1,3 +1,6 @@
+PhaseToCore
+===========
+
 node (a : int, b : int)
   returns (c)
   assumes ()
@@ -6,6 +9,7 @@ let
   c : int
     = Add(a, b)
 tel
+
 --- Step 1 ---
 a : int  = 1
 b : int  = 2

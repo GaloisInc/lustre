@@ -4,14 +4,16 @@ module Main(main) where
 import Text.Read(readMaybe)
 import Text.PrettyPrint((<+>))
 import Control.Exception(catches,Handler(..),throwIO,catch)
-import Control.Monad(when)
+import Control.Monad(when,unless)
 import Data.IORef(newIORef,readIORef,writeIORef)
 import System.IO(stdin,stdout,stderr,hFlush,hPutStrLn,hPrint
                 , openFile, IOMode(..), hGetContents )
 import System.IO.Error(isEOFError,mkIOError,eofErrorType)
-import System.Environment
+import System.Exit(exitSuccess)
 import qualified Data.Map as Map
 import Numeric(readSigned,readFloat)
+import SimpleGetOpt
+import qualified Data.Set as Set
 
 import Language.Lustre.AST(Program(..))
 import Language.Lustre.Core
@@ -20,45 +22,58 @@ import Language.Lustre.Parser(parseProgramFromFileLatin1, ParseError)
 import Language.Lustre.Driver
 import Language.Lustre.Monad
 import Language.Lustre.Pretty(pp)
-import Language.Lustre.Phase(noPhases,allPhases)
+
+import Options
 
 
-conf :: LustreConf
-conf = LustreConf
-  { lustreInitialNameSeed = Nothing
-  , lustreLogHandle       = stdout
-  , lustreNoTC            = False
-  , lustreDumpAfter       = noPhases -- allPhases
-  }
+computeConf :: Options -> IO LustreConf
+computeConf opts =
+  do logH <- case logFile opts of
+               Nothing -> pure stdout
+               Just f  -> openFile f WriteMode
+     pure LustreConf { lustreInitialNameSeed = Nothing
+                     , lustreLogHandle = logH
+                     , lustreNoTC = False
+                     , lustreDumpAfter = dumpAfter opts
+                     }
+
 
 main :: IO ()
 main =
-  do args <- getArgs
-     case args of
-       [f]   -> runFromFile f Nothing
-       [f,i] -> runFromFile f (Just i)
-       _     -> hPutStrLn stderr "USAGE: lustre FILE [INPUT_FILE]"
+  do opts <- getOptsX options
+     when (showHelp opts) $
+       do putStrLn (usageString options)
+          exitSuccess
 
-runFromFile :: FilePath -> Maybe FilePath -> IO ()
-runFromFile file mbIn =
-  do a <- parseProgramFromFileLatin1 file
+     a <- case progFile opts of
+            Nothing ->
+              throwIO (GetOptException ["No Lustre file was speicifed."])
+            Just f -> parseProgramFromFileLatin1 f
+
      case a of
        ProgramDecls ds ->
-         do (ws,nd) <- runLustre conf $
-                         do setVerbose False -- True
+         do conf <- computeConf opts
+            (ws,nd) <- runLustre conf $
+                         do unless (Set.null (lustreDumpAfter conf))
+                                   (setVerbose True)
                             (_,nd) <- quickNodeToCore Nothing ds
                             warns  <- getWarnings
                             pure (warns,nd)
             mapM_ showWarn ws
-            sIn <- newIn mbIn
+            sIn <- newIn (inputFile opts)
             runNodeIO sIn nd
        _ -> hPutStrLn stderr "We don't support packages for the moment."
    `catches`
      [ Handler $ \e -> showErr (e :: ParseError)
      , Handler $ \e -> showErr (e :: LustreError)
+     , Handler $ \(GetOptException es) ->
+                    do mapM_ (hPutStrLn stderr) es
+                       hPutStrLn stderr ""
+                       hPutStrLn stderr (usageString options)
+
      ]
   where
-  showErr e = hPrint stderr (pp e)
+  showErr e  = hPrint stderr (pp e)
   showWarn w = hPrint stderr (pp w)
 
 
@@ -87,8 +102,7 @@ newIn mb =
 
 runNodeIO :: In -> Node -> IO ()
 runNodeIO sIn node =
-  do print (ppNode node)
-     go (1::Integer) s0
+  go (1::Integer) s0
    `catch` \e -> if isEOFError e then putStrLn "(EOF)" else throwIO e
   where
   (s0,step)   = initNode node Nothing

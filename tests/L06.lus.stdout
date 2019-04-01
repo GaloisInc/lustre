@@ -1,3 +1,6 @@
+PhaseToCore
+===========
+
 node (x : int, y : int)
   returns (q, r)
   assumes ()
@@ -9,6 +12,7 @@ let
   r : int
     = Mod(x, y)
 tel
+
 --- Step 1 ---
 x : int  = 7
 y : int  = 3

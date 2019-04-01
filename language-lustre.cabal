@@ -56,9 +56,18 @@ library
 executable lustre
   hs-source-dirs: exe
   main-is: Lustre.hs
-  build-depends: base, containers, pretty, language-lustre
+
+  other-modules:
+    Options
+
+  build-depends:
+    base,
+    containers,
+    pretty,
+    simple-get-opt,
+    language-lustre
+
   ghc-options:         -Wall
-
-
+  default-language:    Haskell2010
 
 

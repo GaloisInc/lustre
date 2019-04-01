@@ -1,3 +1,6 @@
+PhaseToCore
+===========
+
 node (i : int)
   returns (x.x, x.y)
   assumes ()
@@ -15,6 +18,7 @@ let
   x.y : int
     = 0 -> valof_pre_x.y
 tel
+
 --- Step 1 ---
 i : int  = 1
 x.x = 0

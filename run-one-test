@@ -1,4 +1,4 @@
 #!/bin/bash
 
-cabal v2-run --verbose=0 exe:lustre $1 $1.stdin
+cabal v2-run --verbose=0 exe:lustre -- $1 --input=$1.stdin --dump-core
 
