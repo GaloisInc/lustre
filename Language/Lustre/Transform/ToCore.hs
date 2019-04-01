@@ -352,12 +352,7 @@ evalClockExprAtom (P.WhenClock _ e1 i) =
          cl = case a1 of
                 C.Lit (C.Bool True) -> a2
                 _                   -> C.Prim C.Eq [ a1, a2 ]
-     env <- getLocalTypes
-     pure $ case C.clockOfCType (C.typeOf env a2) of
-              C.Lit (C.Bool True) -> cl
-              C.Prim C.And cs     -> C.Prim C.And (cl:cs)
-              c                   -> C.Prim C.And [cl,c]
-
+     pure cl
 
 evalCurrentWith :: Maybe Ident -> C.Atom -> C.Atom -> M C.Expr
 evalCurrentWith xt d e =
