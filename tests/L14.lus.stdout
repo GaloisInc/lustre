@@ -3,12 +3,23 @@ node (puase : int)
   assumes ()
   shows ()
 let
-  valof_pre___no_static = pre __no_static
-  __no_static = 0 -> Add(1, valof_pre___no_static)
-  valof_pre_c = pre c
-  c = true -> Not(valof_pre_c)
-  x = __no_static when c
-  y = current x
+  valof_pre___no_static : int
+    = pre __no_static
+   
+  __no_static : int
+    = 0 -> Add(1, valof_pre___no_static)
+   
+  valof_pre_c : bool
+    = pre c
+   
+  c : bool
+    = true -> Not(valof_pre_c)
+   
+  x : int when c
+    = __no_static when c
+   
+  y : int
+    = current x
 tel
 --- Step 1 ---
 puase : int  = 0

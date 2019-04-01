@@ -3,7 +3,8 @@ node (x.x : int, x.y : bool)
   assumes ()
   shows ()
 let
-  y = ITE(x.y, x.x, 0)
+  y : int
+    = ITE(x.y, x.x, 0)
 tel
 --- Step 1 ---
 x.x : int  = 1

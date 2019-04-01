@@ -3,8 +3,11 @@ node (x : real)
   assumes ()
   shows ()
 let
-  y = IntCast(x)
-  z = FloorCast(x)
+  y : int
+    = IntCast(x)
+   
+  z : int
+    = FloorCast(x)
 tel
 --- Step 1 ---
 x : real  = 2.5

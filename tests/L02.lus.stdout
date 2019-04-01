@@ -3,11 +3,20 @@ node (x : int)
   assumes ()
   shows ()
 let
-  a = x
-  b = x
-  c = Sub(a, b)
-  d = Add(a, b)
-  y = Add(c, d)
+  a : int
+    = x
+   
+  b : int
+    = x
+   
+  c : int
+    = Sub(a, b)
+   
+  d : int
+    = Add(a, b)
+   
+  y : int
+    = Add(c, d)
 tel
 --- Step 1 ---
 x : int  = 1

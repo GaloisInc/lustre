@@ -3,7 +3,8 @@ node (x : int)
   assumes ()
   shows ()
 let
-  y = 3
+  y : int
+    = 3
 tel
 --- Step 1 ---
 x : int  = 1

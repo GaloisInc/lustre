@@ -3,10 +3,17 @@ node (i : int)
   assumes ()
   shows ()
 let
-  valof_pre_x.x = pre x.x
-  x.x = 0 -> Add(valof_pre_x.x, i)
-  valof_pre_x.y = pre x.y
-  x.y = 0 -> valof_pre_x.y
+  valof_pre_x.x : int
+    = pre x.x
+   
+  x.x : int
+    = 0 -> Add(valof_pre_x.x, i)
+   
+  valof_pre_x.y : int
+    = pre x.y
+   
+  x.y : int
+    = 0 -> valof_pre_x.y
 tel
 --- Step 1 ---
 i : int  = 1

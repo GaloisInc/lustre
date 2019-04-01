@@ -3,7 +3,8 @@ node (a : int, b : int)
   assumes ()
   shows ()
 let
-  c = Add(a, b)
+  c : int
+    = Add(a, b)
 tel
 --- Step 1 ---
 a : int  = 1

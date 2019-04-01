@@ -9,7 +9,7 @@ import qualified Data.Set as Set
 import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
 import Text.PrettyPrint( Doc, text, (<+>)
-                       , hsep, vcat, nest, parens, punctuate, comma, ($$) )
+                       , hsep, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
 
 import Language.Lustre.AST (Literal(..),PropName(..))
@@ -174,8 +174,9 @@ ppTuple :: [Doc] -> Doc
 ppTuple ds = parens (hsep (punctuate comma ds))
 
 ppEqn :: PPInfo -> Eqn -> Doc
-ppEqn env (x ::: t := e) =
-  ppIdent env x <+> "=" <+> ppExpr env e -- <+> "//" <+> ppCType env t
+ppEqn env (b := e) =
+  ppBinder env b $$ nest 2 ("=" <+> ppExpr env e)
+
 
 ppNode :: Node -> Doc
 ppNode node =
@@ -186,7 +187,7 @@ ppNode node =
             $$ text "shows" <+> ppTuple (map (ppIdent env .snd) (nShows node))
             )
   $$ text "let"
-  $$ nest 2 (vcat (map (ppEqn env) (nEqns node)))
+  $$ nest 2 (vcatSep (map (ppEqn env) (nEqns node)))
   $$ text "tel"
   where env = identVariants node
 
