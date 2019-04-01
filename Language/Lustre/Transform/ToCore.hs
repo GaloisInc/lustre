@@ -233,12 +233,12 @@ nameExpr expr =
                          _ -> panic "nameExpr" [ "Naming a simple atom?"
                                                , "*** Atom:" ++ showPP a ]
            C.Pre a -> case a of
-                         C.Var i -> "valof_pre_" <> identText i
-                         _ -> "valof_pre"
-           _ C.:->      _ -> "valof_arr"
-           C.When {}    -> "valof_when"
-           C.Current {} -> "valof_current"
-           C.Merge {}   -> "valof_merge"
+                         C.Var i -> "pre_" <> identText i
+                         _ -> "pre"
+           _ C.:->      _ -> "arr"
+           C.When {}    -> "when"
+           C.Current {} -> "current"
+           C.Merge {}   -> "merge"
 
 -- | Remember that the given identifier was used for an assert.
 addAssertName :: P.PropName -> Ident -> M ()

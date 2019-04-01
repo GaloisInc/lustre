@@ -49,6 +49,8 @@ import Data.Either(partitionEithers)
 import Data.Map(Map)
 import Data.Foldable(foldl')
 import qualified Data.Map as Map
+import           Data.Text (Text)
+import qualified Data.Text as Text
 import MonadLib
 import Text.PrettyPrint(punctuate,comma,hsep)
 
@@ -1066,10 +1068,14 @@ nameCallSite env ni es cl =
          do let ins  = map inB (nodeInputs prof)
                 outs = nodeOutputs prof
 
-            -- XXX: we could try to use names derived from the outpus
-            -- for more readable Sally code.
-            let newId = origNameToIdent <$> newIdent (range ni) Nothing AVal
-            ns <- replicateM (length outs) newId
+            let baseName = Text.pack (show (pp ni))
+                oName o = case outs of
+                            [_] -> baseName
+                            _ -> Text.concat
+                                  [ baseName, "_", identText (binderDefines o) ]
+            let newId o = do i <- newIdent (range ni) Nothing (oName o) AVal
+                             pure (origNameToIdent i)
+            ns <- mapM newId outs
             let names = map binderDefines (ins ++ outs)
             let nameMap = Map.fromList
                         $ zip names (map isIdent es ++ map Just ns)
@@ -1263,7 +1269,7 @@ safety & functionality of declarations.
 addNameInstDecl :: Callable -> [StaticArg] -> M Name
 addNameInstDecl c as =
   do cm <- ask
-     i <- newIdent (range c) cm ANode
+     i <- newIdent (range c) cm (Text.pack (show (pp c))) ANode
      addInst NodeInstDecl
                 { nodeInstSafety        = Safe
                 , nodeInstType          = Node
@@ -1278,11 +1284,11 @@ addNameInstDecl c as =
 
 
 -- | Generate a fresh name associated with the given source location.
-newIdent :: SourceRange -> Maybe ModName -> Thing -> M OrigName
-newIdent r md th = sets $ \s ->
+newIdent :: SourceRange -> Maybe ModName -> Text -> Thing -> M OrigName
+newIdent r md txt th = sets $ \s ->
   let uid     = nameSeed s
       origI   = Ident { identRange    = r
-                      , identText     = "__no_static"
+                      , identText     = txt
                       , identPragmas  = []
                       , identResolved = Nothing
                       }
