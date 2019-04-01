@@ -356,17 +356,25 @@ evalClockExprAtom (P.WhenClock _ e1 i) =
 
 evalCurrentWith :: Maybe Ident -> C.Atom -> C.Atom -> M C.Expr
 evalCurrentWith xt d e =
-  case xt of
-    Nothing -> panic "evalCurrentWith"
-                [ "Unexpected non-top level currentWith" ]
-    Just x ->
-      do env <- getLocalTypes
-         let ty = C.typeOf env e
-             c  = C.clockOfCType ty
-         cur  <- nameExpr (C.Current e)
-         pre  <- nameExpr (C.Pre (C.Var x))
-         hold <- nameExpr (d C.:->  pre)
-         pure (C.Atom (C.Prim C.ITE [c,cur,hold]))
+  do env <- getLocalTypes
+     let ty = C.typeOf env e
+         c  = C.clockOfCType ty
+         cc = C.clockOfCType (C.typeOf env c)
+     case xt of
+       Just x -> desugar x c
+       Nothing ->
+         do i  <- newIdentFrom "curW"
+            let thisTy = C.typeOfCType ty `C.On` cc
+            addLocal i thisTy
+            e1 <- desugar i c
+            addEqn (i C.::: thisTy C.:= e1)
+            pure (C.Atom (C.Var i))
+  where
+  desugar x c =
+    do cur  <- nameExpr (C.Current e)
+       pre  <- nameExpr (C.Pre (C.Var x))
+       hold <- nameExpr (d C.:->  pre)
+       pure (C.Atom (C.Prim C.ITE [c,cur,hold]))
 
 
 -- | Evaluate a source expression to a core expression.
