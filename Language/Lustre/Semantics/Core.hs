@@ -55,14 +55,20 @@ data State = State
     -- Contains the identifiers that have transition to the second phase.
   }
 
-instance Pretty State where
-  ppPrec _ s =
+ppState :: PPInfo -> State -> Doc
+ppState info s =
     vcat [ "values:"
          , nest 2 (vcat (map ppV (Map.toList (sValues s))))
-         , "initialized:" <+> commaSep (map pp (Set.toList (sInitialized s)))
+         , "initialized:" <+> commaSep (map ppI (Set.toList (sInitialized s)))
          ]
     where
-    ppV (x,y) = pp x <+> "=" <+> pp y
+    ppI = ppIdent info
+    ppV (x,y) = ppI x <+> "=" <+> pp y
+
+
+
+instance Pretty State where
+  ppPrec _ = ppState noInfo
 
 initNode :: Node ->
             Maybe (Map Ident Value) {- Optional inital values -} ->

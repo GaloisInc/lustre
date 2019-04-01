@@ -11,6 +11,7 @@ data Options = Options
   , inputFile :: Maybe FilePath
   , logFile   :: Maybe FilePath
   , dumpAfter :: Set LustrePhase
+  , dumpState :: Bool
   , showHelp  :: Bool
   }
 
@@ -20,6 +21,7 @@ defaultOptions = Options
   , inputFile   = Nothing
   , logFile     = Nothing
   , dumpAfter   = noPhases
+  , dumpState   = False
   , showHelp    = False
   }
 
@@ -52,6 +54,10 @@ options = OptSpec
       , dumpOpt PhaseNoStruct  "no-struct"   "elimininating strucutred data"
       , dumpOpt PhaseNoStruct  "inlined"     "inlining nodes"
       , dumpOpt PhaseToCore    "core"        "translating to core"
+
+      , Option [] ["dump-state"]
+        "Dump state before each step."
+        $ NoArg $ \s -> Right s { dumpState = True }
 
       , Option [] ["help"]
         "Show this helps message."

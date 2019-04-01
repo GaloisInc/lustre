@@ -61,7 +61,7 @@ main =
                             pure (warns,nd)
             mapM_ showWarn ws
             sIn <- newIn (inputFile opts)
-            runNodeIO sIn nd
+            runNodeIO (dumpState opts) sIn nd
        _ -> hPutStrLn stderr "We don't support packages for the moment."
    `catches`
      [ Handler $ \e -> showErr (e :: ParseError)
@@ -100,14 +100,15 @@ newIn mb =
              , echo = e
              }
 
-runNodeIO :: In -> Node -> IO ()
-runNodeIO sIn node =
+runNodeIO :: Bool -> In -> Node -> IO ()
+runNodeIO dumpS sIn node =
   go (1::Integer) s0
    `catch` \e -> if isEOFError e then putStrLn "(EOF)" else throwIO e
   where
   (s0,step)   = initNode node Nothing
 
   go n s = do putStrLn ("--- Step " ++ show n ++ " ---")
+              when dumpS $ print $ ppState ppinfo s
               s1  <- step s <$> getInputs
               mapM_ (showOut s1) (nOutputs node)
               go (n+1) s1
