@@ -158,7 +158,7 @@ instance Pretty NodeDecl where
 
 instance Pretty NodeBody where
   ppPrec _ nb =
-    vcat [ pp d <> semi | d <- nodeLocals nb ] $$
+    nest 2 (vcat [ pp d <> semi | d <- nodeLocals nb ]) $$
     "let" $$
     nest 2 (vcat [ pp d <> semi | d <- nodeEqns nb ]) $$
     "tel"
