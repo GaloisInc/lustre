@@ -6,23 +6,23 @@ node (c : bool)
   assumes ()
   shows ()
 let
-  valof_pre_x : int when c
+  pre_x : int when c
     = pre x
    
   x : int when c
-    = 0 -> Add(1, valof_pre_x)
+    = 0 -> Add(1, pre_x)
    
-  valof_current : int
+  current : int
     = current x
    
-  valof_pre_n : int
+  pre_n : int
     = pre n
    
-  valof_arr : int
-    = 17 -> valof_pre_n
+  arr : int
+    = 17 -> pre_n
    
   n : int
-    = ITE(c, valof_current, valof_arr)
+    = ITE(c, current, arr)
 tel
 
 --- Step 1 ---

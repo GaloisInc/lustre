@@ -6,20 +6,20 @@ node (puase : int)
   assumes ()
   shows ()
 let
-  valof_pre___no_static : int
-    = pre __no_static
+  pre_nats : int
+    = pre nats
    
-  __no_static : int
-    = 0 -> Add(1, valof_pre___no_static)
+  nats : int
+    = 0 -> Add(1, pre_nats)
    
-  valof_pre_c : bool
+  pre_c : bool
     = pre c
    
   c : bool
-    = true -> Not(valof_pre_c)
+    = true -> Not(pre_c)
    
   x : int when c
-    = __no_static when c
+    = nats when c
    
   y : int
     = current x

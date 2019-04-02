@@ -6,20 +6,20 @@ node (a : int)
   assumes ()
   shows ()
 let
-  valof_pre_y$1 : int
+  pre_y$1 : int
     = pre y
    
   x : int
-    = 0 -> valof_pre_y$1
+    = 0 -> pre_y$1
    
-  valof_pre_x : int
+  pre_x : int
     = pre x
    
-  valof_pre_y : int
+  pre_y : int
     = pre y
    
   y : int
-    = 1 -> Add(valof_pre_x, valof_pre_y)
+    = 1 -> Add(pre_x, pre_y)
 tel
 
 --- Step 1 ---

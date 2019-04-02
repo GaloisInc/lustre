@@ -6,44 +6,44 @@ node (c : bool)
   assumes ()
   shows ()
 let
-  valof_pre___no_static$1 : int
-    = pre __no_static$1
+  pre_nats$1 : int
+    = pre nats$1
    
-  __no_static$1 : int
-    = 0 -> Add(1, valof_pre___no_static$1)
+  nats$1 : int
+    = 0 -> Add(1, pre_nats$1)
    
-  valof_when : int when c
-    = __no_static$1 when c
+  when : int when c
+    = nats$1 when c
    
-  valof_current$1 : int
-    = current valof_when
+  current$1 : int
+    = current when
    
-  valof_pre_x : int
+  pre_x : int
     = pre x
    
-  valof_arr$1 : int
-    = 100 -> valof_pre_x
+  arr$1 : int
+    = 100 -> pre_x
    
   x : int
-    = ITE(c, valof_current$1, valof_arr$1)
+    = ITE(c, current$1, arr$1)
    
-  valof_pre___no_static : int when c
-    = pre __no_static
+  pre_nats : int when c
+    = pre nats
    
-  __no_static : int when c
-    = 0 -> Add(1, valof_pre___no_static)
+  nats : int when c
+    = 0 -> Add(1, pre_nats)
    
-  valof_current : int
-    = current __no_static
+  current : int
+    = current nats
    
-  valof_pre_y : int
+  pre_y : int
     = pre y
    
-  valof_arr : int
-    = 200 -> valof_pre_y
+  arr : int
+    = 200 -> pre_y
    
   y : int
-    = ITE(c, valof_current, valof_arr)
+    = ITE(c, current, arr)
 tel
 
 --- Step 1 ---

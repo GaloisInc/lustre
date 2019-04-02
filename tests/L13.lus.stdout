@@ -6,29 +6,29 @@ node (c : bool)
   assumes ()
   shows ()
 let
-  valof_pre___no_static : int
-    = pre __no_static$1
+  pre_nats : int
+    = pre nats
    
-  __no_static$1 : int
-    = 0 -> Add(1, valof_pre___no_static)
+  nats : int
+    = 0 -> Add(1, pre_nats)
    
   from : int when c
-    = __no_static$1 when c
+    = nats when c
    
-  __no_static : int when c
+  id : int when c
     = from
    
-  valof_current : int
-    = current __no_static
+  current : int
+    = current id
    
-  valof_pre_n : int
+  pre_n : int
     = pre n
    
-  valof_arr : int
-    = 42 -> valof_pre_n
+  arr : int
+    = 42 -> pre_n
    
   n : int
-    = ITE(c, valof_current, valof_arr)
+    = ITE(c, current, arr)
 tel
 
 --- Step 1 ---
