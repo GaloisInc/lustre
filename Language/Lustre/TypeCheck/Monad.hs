@@ -2,6 +2,7 @@
 module Language.Lustre.TypeCheck.Monad where
 
 import Data.Set(Set)
+import qualified Data.Set as Set
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Maybe(listToMaybe)
@@ -30,6 +31,7 @@ runTC m =
            }
 
   rw0 = RW { rwClockVarSubst = Map.empty
+           , rwClockVars = Set.empty
            , rwTyVarSubst = Map.empty
            , rwCtrs = []
            }
@@ -84,6 +86,10 @@ data RO = RO
 
 data RW = RW
   { rwClockVarSubst  :: Map CVar IClock
+  , rwClockVars       :: Set CVar
+    -- ^ Clock variables in the current node.
+    -- Ones that don't get bound are defaulted to the base clocks.
+
   , rwTyVarSubst     :: Map TVar Type   -- ^ tv equals
   , rwCtrs           :: [(Maybe SourceRange, Constraint)]
                         -- ^ delayed constraints
@@ -275,9 +281,13 @@ getUnsafeLevel =
 
 
 
+-- | Generate a fresh clock variable.
 newClockVar :: M IClock
-newClockVar = M $ do n <- inBase L.newInt
-                     pure (ClockVar (CVar n))
+newClockVar = M $
+  do n <- inBase L.newInt
+     let cv = CVar n
+     sets_ $ \rw -> rw { rwClockVars = Set.insert cv (rwClockVars rw) }
+     pure (ClockVar cv)
 
 
 -- | Assumes that the clock is zonked
@@ -286,7 +296,23 @@ bindClockVar x c =
   case c of
     ClockVar y | x == y -> pure ()
     _ -> M $ sets_ $ \rw -> rw { rwClockVarSubst = Map.insert x c
-                                                 $ rwClockVarSubst rw }
+                                                 $ rwClockVarSubst rw
+                               , rwClockVars = Set.delete x (rwClockVars rw)
+                               }
+
+
+-- | Generate a new scope of clock variables.  Variables that are not defined
+-- by the parameter computation will be defaulted to "base clock"
+inClockScope :: M a -> M a
+inClockScope (M m) = M $
+  do old <- sets $ \rw -> (rwClockVars rw, rw { rwClockVars = Set.empty })
+     a <- m
+     leftover <- rwClockVars <$> get
+     let mp = Map.fromList [ (x,BaseClock) | x <- Set.toList leftover ]
+     sets_ $ \rw -> rw { rwClockVars = old
+                       , rwClockVarSubst = Map.union mp (rwClockVarSubst rw)
+                       }
+     pure a
 
 
 

@@ -108,6 +108,7 @@ checkNodeDecl nd k =
   check :: M NodeDecl
   check =
     inRange (range (nodeName nd)) $
+    inClockScope $
     allowTemporal (nodeType nd == Node) $
     allowUnsafe   (nodeSafety nd == Unsafe) $
     do (ps,(prof,bod)) <-
