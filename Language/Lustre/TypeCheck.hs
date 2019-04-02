@@ -367,10 +367,10 @@ instantiateType env ty
   iConst = instantiateConst env
 
 
--- | Instantiate a constant with the given static parameters.
--- These are just constants that can appear in types, so pretty much
--- an expression denoting an `int`.  However, to support selectors and functions
--- we pretty much do all but the temporal constructs.
+{- | Instantiate a constant with the given static parameters.
+These are just constants that can appear in types, so pretty much
+an expression denoting an `int`.  However, to support selectors and functions
+we pretty much do all but the temporal constructs. -}
 instantiateConst :: StaticEnv -> Expression -> Expression
 instantiateConst env expr
   | Map.null (sConsts env) && Map.null (sTypes env) = expr -- a very common case
@@ -394,6 +394,7 @@ instantiateConst env expr
 
       When {}       -> bad "WhenClock"
       Merge {}      -> bad "Merge"
+      Const {}      -> panic "instantiateConst" [ "Unexpected `Const`" ]
 
   where
   bad x = panic "instantiateConst" [ "Unexpected construct: " ++ x ]
@@ -658,8 +659,9 @@ checkConstExpr expr ty =
                    <*> checkConstExpr e2 ty
                    <*> checkConstExpr e3 ty
 
-    Merge {}   -> reportError "`merge` is not a constant expression."
+    Merge {}  -> reportError "`merge` is not a constant expression."
     Call {}   -> reportError "constant expressions do not support calls."
+    Const {}  -> panic "checkConstExpr" [ "Unexpected `Const`" ]
 
 -- | Check that the expression has the given type.
 checkExpr1 :: Expression -> CType -> M Expression
@@ -685,7 +687,7 @@ checkExpr expr tys =
       do ty <- one tys
          let lt = inferLit l
          ensure (Subtype lt (cType ty))
-         pure (Lit l)
+         pure (Const (Lit l))
 
     e `When` c ->
       do checkTemporalOk "when"
@@ -774,6 +776,8 @@ checkExpr expr tys =
               case cl of
                 Nothing -> pure ()
                 Just _  -> reportError "Unexpected clock annotation in call"
+
+    Const {} -> panic "checkExpr" [ "Unexpected `Const` expression." ]
 
 -- | Assert that a given expression has only one type (i.e., is not a tuple)
 one :: [CType] -> M CType
@@ -1228,7 +1232,7 @@ checkVar x ty =
         AVal   -> do (j,c) <- checkLocalVar i
                      subCType c ty
                      pure (Var (Unqual j))
-        AConst -> checkConstVar x (cType ty)
+        AConst -> Const <$> checkConstVar x (cType ty)
         t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
                               , "*** Name: " ++ showPP x
                               , "*** Thing: " ++ showPP t ]

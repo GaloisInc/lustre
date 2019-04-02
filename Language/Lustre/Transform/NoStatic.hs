@@ -944,12 +944,11 @@ evalDynExpr eloc env expr =
   case expr of
     ERange r e -> ERange r <$> evalDynExpr eloc (inRange r env) e
 
-    Var x ->
-      pure $ case Map.lookup (nameOrigName x) (C.envConsts (cEnv env)) of
-               Just v  -> valToExpr env v
-               Nothing -> expr
+    Const e -> pure (Const (evalExpr env e))
 
-    Lit _ -> pure expr
+    Var {} -> pure expr
+
+    Lit _ -> panic "evalDynExpr" [ "Unexpected `Lit` outside `Const`" ]
 
 
     e1 `When` e2    -> do e1' <- evalDynExpr NestedExpr env e1

@@ -377,6 +377,7 @@ zonkExpr :: Expression -> M Expression
 zonkExpr expr =
   case expr of
     ERange r e -> ERange r <$> zonkExpr e
+    Const {} -> pure expr
     Var {} -> pure expr
     Lit {} -> pure expr
     e `When` c -> When <$> zonkExpr e <*> pure c

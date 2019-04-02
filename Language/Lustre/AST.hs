@@ -199,6 +199,10 @@ data Expression = ERange !SourceRange !Expression
                 | Var !Name
                 | Lit !Literal
 
+                | Const Expression
+                  {- ^ A use of a constant expression. These are introduced
+                     by the type checker---the parser does not generate them.-}
+
                 | Expression `When` ClockExpr
 
                 | Tuple ![Expression]
@@ -384,6 +388,8 @@ exprRangeMaybe expr =
     ERange r _      -> Just r
     Var x           -> Just (range x)
     e `When` c      -> Just (e  <-> c)
+
+    Const e         -> exprRangeMaybe e
 
     Lit {}          -> Nothing
     Tuple {}        -> Nothing

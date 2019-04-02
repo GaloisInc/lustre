@@ -544,6 +544,8 @@ evalExpr expr =
                  Nothing -> SLeaf expr
                  Just y  -> Var . origNameToName <$> y)
 
+    Const {} -> pure (SLeaf expr)
+
     Lit _ -> pure (SLeaf expr)
 
     -- The clock expression are syntactically restricted to not

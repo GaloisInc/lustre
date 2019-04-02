@@ -250,6 +250,7 @@ instance Pretty Expression where
     case expr of
       ERange _ e    -> ppPrec n e
       Var x         -> pp x
+      Const e       -> pp e -- <+> "/*k*/"
       Lit l         -> pp l
       e `When` ce   -> parenIf (n > 10) doc
         where doc = ppPrec 11 e <+> "when" <+> ppPrec 11 ce

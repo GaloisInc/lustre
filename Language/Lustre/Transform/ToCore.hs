@@ -347,7 +347,7 @@ evalExprAtom expr =
 -- | Evaluate a clock-expression to an atom.
 evalClockExprAtom :: P.ClockExpr -> M C.Atom
 evalClockExprAtom (P.WhenClock _ e1 i) =
-  do a1 <- evalExprAtom e1
+  do a1 <- evalConstExprAtom e1
      let a2 = C.Var i
          cl = case a1 of
                 C.Lit (C.Bool True) -> a2
@@ -376,6 +376,30 @@ evalCurrentWith xt d e =
        hold <- nameExpr (d C.:->  pre)
        pure (C.Atom (C.Prim C.ITE [c,cur,hold]))
 
+evalConstExpr :: P.Expression -> M C.Expr
+evalConstExpr expr =
+  case expr of
+    P.ERange _ e -> evalConstExpr e
+    P.Var i ->
+      do cons <- getEnumCons
+         case Map.lookup (P.nameOrigName i) cons of
+          Just e -> pure e
+          Nothing -> bad "undefined constant symbol"
+    P.Lit l -> pure (C.Atom (C.Lit l))
+    _ -> bad "constant expression"
+
+  where
+  bad msg = panic "evalConstExpr" [ "Unexpected " ++ msg
+                             , "*** Expression: " ++ showPP expr
+                             ]
+
+evalConstExprAtom :: P.Expression -> M C.Atom
+evalConstExprAtom expr =
+  do e <- evalConstExpr expr
+     case e of
+       C.Atom a -> pure a
+       _  -> nameExpr e
+
 
 -- | Evaluate a source expression to a core expression.
 evalExpr :: Maybe Ident -> P.Expression -> M C.Expr
@@ -392,8 +416,10 @@ evalExpr xt expr =
                P.Unqual j -> pure (C.Atom (C.Var j))
                _          -> bad "qualified name"
 
+    P.Const e -> evalConstExpr e
 
-    P.Lit l -> pure (C.Atom (C.Lit l))
+
+    P.Lit {} -> bad "literal outside `Const`."
 
     e `P.When` ce ->
       do a1 <- evalExprAtom e
@@ -494,6 +520,6 @@ evalExpr xt expr =
            _ -> bad "function call"
 
   where
-  bad msg = panic "evalExpr" [ "Unexpected " ++ msg
-                             , "*** Expression: " ++ showPP expr
-                             ]
+  bad msg = panic "ToCore.evalExpr" [ "Unexpected " ++ msg
+                                    , "*** Expression: " ++ showPP expr
+                                    ]

@@ -197,6 +197,7 @@ instance Rename Expression where
   rename su expr =
     case expr of
       ERange r e      -> ERange r (rename su e)
+      Const e         -> Const e
       Var x           -> Var (rename su x)
       Lit _           -> expr
 

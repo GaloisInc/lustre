@@ -54,6 +54,7 @@ evalConst env expr =
 
     When {}    -> bad "`when` is not a constant expression."
     Merge {}   -> bad "`merge` is not a constant expression."
+    Const {}   -> bad "`const` is not a constant expression."
 
     Var x ->
       case Map.lookup (nameOrigName x) (envConsts env) of

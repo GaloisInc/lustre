@@ -291,6 +291,7 @@ resolveConstExpr expr =
 
     Merge {}  -> bad "merge"
     Call {}   -> bad "call to a node"
+    Const {}  -> panic "resolveConstExpr" [ "Unexpected `Const` expresssion." ]
 
   where
   bad = reportError . InvalidConstantExpression
@@ -327,6 +328,7 @@ resolveExpr expr =
     Call f es c -> Call <$> resolve f <*> traverse resolveExpr es
                                       <*> traverse resolve c
 
+    Const {}  -> panic "resolveConstExpr" [ "Unexpected `Const` expresssion." ]
 
 instance (e ~ Expression) => Resolve (MergeCase e) where
   resolveDef _ (MergeCase c v) =
