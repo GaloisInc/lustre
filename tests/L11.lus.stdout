@@ -12,17 +12,17 @@ let
   nats : int when c
     = 0 -> Add(1, pre_nats)
    
-  current : int
+  current_nats : int
     = current nats
    
   pre_n : int
     = pre n
    
-  arr : int
+  init_pre_n : int
     = 42 -> pre_n
    
   n : int
-    = ITE(c, current, arr)
+    = ITE(c, current_nats, init_pre_n)
 tel
 
 --- Step 1 ---

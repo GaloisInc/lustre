@@ -12,17 +12,17 @@ let
   x : int when c
     = 0 -> Add(1, pre_x)
    
-  current : int
+  current_x : int
     = current x
    
   pre_n : int
     = pre n
    
-  arr : int
+  init_pre_n : int
     = 17 -> pre_n
    
   n : int
-    = ITE(c, current, arr)
+    = ITE(c, current_x, init_pre_n)
 tel
 
 --- Step 1 ---

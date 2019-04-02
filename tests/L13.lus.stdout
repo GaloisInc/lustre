@@ -18,17 +18,17 @@ let
   id : int when c
     = from
    
-  current : int
+  current_id : int
     = current id
    
   pre_n : int
     = pre n
    
-  arr : int
+  init_pre_n : int
     = 42 -> pre_n
    
   n : int
-    = ITE(c, current, arr)
+    = ITE(c, current_id, init_pre_n)
 tel
 
 --- Step 1 ---

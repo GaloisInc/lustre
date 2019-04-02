@@ -12,20 +12,20 @@ let
   nats$1 : int
     = 0 -> Add(1, pre_nats$1)
    
-  when : int when c
+  when_c : int when c
     = nats$1 when c
    
-  current$1 : int
-    = current when
+  current_when_c : int
+    = current when_c
    
   pre_x : int
     = pre x
    
-  arr$1 : int
+  init_pre_x : int
     = 100 -> pre_x
    
   x : int
-    = ITE(c, current$1, arr$1)
+    = ITE(c, current_when_c, init_pre_x)
    
   pre_nats : int when c
     = pre nats
@@ -33,17 +33,17 @@ let
   nats : int when c
     = 0 -> Add(1, pre_nats)
    
-  current : int
+  current_nats : int
     = current nats
    
   pre_y : int
     = pre y
    
-  arr : int
+  init_pre_y : int
     = 200 -> pre_y
    
   y : int
-    = ITE(c, current, arr)
+    = ITE(c, current_nats, init_pre_y)
 tel
 
 --- Step 1 ---
