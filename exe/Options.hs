@@ -52,7 +52,7 @@ options = OptSpec
       , dumpOpt PhaseTypecheck "typechecked" "type checking"
       , dumpOpt PhaseNoStatic  "no-static"   "elimininating constants"
       , dumpOpt PhaseNoStruct  "no-struct"   "elimininating strucutred data"
-      , dumpOpt PhaseNoStruct  "inlined"     "inlining nodes"
+      , dumpOpt PhaseInline    "inlined"     "inlining nodes"
       , dumpOpt PhaseToCore    "core"        "translating to core"
 
       , Option [] ["dump-state"]
