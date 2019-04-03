@@ -1,4 +1,4 @@
-{-# Language MultiWayIf, OverloadedStrings #-}
+{-# Language OverloadedStrings #-}
 module Language.Lustre.Semantics.Core where
 
 import Data.List(foldl')
@@ -142,10 +142,9 @@ evalEqn env old new (x ::: _ `On` c := expr) =
 
     a :-> b ->
       guarded $
-       if | x `Set.member` sInitialized old -> done (evalAtom new b)
-          | VBool True <- evalAtom new c    -> initialized new'
-          | otherwise                       -> new'
-      where new' = done (evalAtom new a)
+       if x `Set.member` sInitialized old
+          then done (evalAtom new b)
+          else initialized $ done $ evalAtom new a
 
     Merge a ifT ifF ->
       guarded $ done $
