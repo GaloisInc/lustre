@@ -216,22 +216,24 @@ data Expression = ERange !SourceRange !Expression
 
                 | UpdateStruct Name Expression [Field Expression]
                   {- ^ Update a struct.
-                  The first 'Name' is the field type.
-                  The second one is the name of the struct being updated. -}
+                    The 'Name' is the struct type.
+                    The expression is the struct being updated. -}
 
                 | WithThenElse Expression Expression Expression
                   {- ^ Used for recursive definitions.
                     The decision is evaluated in an earlier phase (i.e.,
-                    it is static), and then we get wither the one stream or
+                    it is static), and then we get either the one stream or
                     the other (i.e., it is not done point-wise as
                     for if-then-else) -}
 
                 | Merge Ident [MergeCase Expression]
+                  {- ^ Merge different clocked values.  The branches are
+                       clocked on different values for the ident. -}
 
                 | Call NodeInst [Expression] (Maybe ClockExpr)
-                  -- ^ Call a function.
-                  -- The optional clock expression allows for the node to
-                  -- be called only when the clock is active.
+                  {- ^ Call a function.
+                      The optional clock expression allows for the node to
+                      be called only when the clock is active. -}
                   deriving Show
 
 -- | The first expression (the "pattern") should be a constant.
