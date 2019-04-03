@@ -24,7 +24,8 @@ data Type     = TInt | TReal | TBool
                 deriving Show
 
 -- | A boolean clock.  The base clock is always @true@.
-type Clock    = Atom
+data Clock    = BaseClock | WhenTrue Atom
+                deriving Show
 
 -- | Type on a boolean clock.
 data CType    = Type `On` Clock
@@ -39,7 +40,7 @@ clockOfCType (_ `On` c) = c
 data Binder   = Ident ::: CType
                 deriving Show
 
-data Atom     = Lit Literal
+data Atom     = Lit Literal CType
               | Var Ident
               | Prim Op [Atom]
                 deriving Show
@@ -86,7 +87,7 @@ data Node     = Node { nInputs      :: [Binder]
 usesAtom :: Atom -> Set Ident
 usesAtom atom =
   case atom of
-    Lit _     -> Set.empty
+    Lit _ _   -> Set.empty
     Var x     -> Set.singleton x
     Prim _ as -> Set.unions (map usesAtom as)
 
@@ -100,13 +101,19 @@ usesExpr expr =
     Current a     -> usesAtom a
     Merge a b c   -> Set.unions (map usesAtom [a,b,c])
 
+usesClock :: Clock -> Set Ident
+usesClock c =
+  case c of
+    BaseClock -> Set.empty
+    WhenTrue a -> usesAtom a
+
 -- | Order the equations.  Returns cycles on the left, if there are some.
 orderedEqns :: [Eqn] -> Either [ [Binder] ] [ Eqn ]
 orderedEqns eqns
   | null bad  = Right good
   | otherwise = Left bad
   where
-  graph = [ (eqn, x, Set.toList (Set.union (usesAtom c) (usesExpr e)))
+  graph = [ (eqn, x, Set.toList (Set.union (usesClock c) (usesExpr e)))
               | eqn <- eqns, let (x ::: _ `On` c) := e = eqn ]
 
   comps = stronglyConnComp graph
@@ -145,8 +152,8 @@ ppType ty =
 ppCType :: PPInfo -> CType -> Doc
 ppCType env (t `On` c) =
   case c of
-    Lit (Bool True) -> ppType t
-    _ -> ppType t <+> "when" <+> ppAtom env c
+    BaseClock  -> ppType t
+    WhenTrue a -> ppType t <+> "when" <+> ppAtom env a
 
 ppBinder :: PPInfo -> Binder -> Doc
 ppBinder env (x ::: t) = ppIdent env x <+> text ":" <+> ppCType env t
@@ -154,9 +161,11 @@ ppBinder env (x ::: t) = ppIdent env x <+> text ":" <+> ppCType env t
 ppAtom :: PPInfo -> Atom -> Doc
 ppAtom env atom =
   case atom of
-    Lit l -> pp l
-    Var x -> ppIdent env x
-    Prim f as   -> ppPrim f PP.<> ppTuple (map (ppAtom env) as)
+    Lit l c   -> case clockOfCType c of
+                   BaseClock  -> pp l
+                   WhenTrue a -> pp l <+> "/* when" <+> ppAtom env a <+> "*/"
+    Var x     -> ppIdent env x
+    Prim f as -> ppPrim f PP.<> ppTuple (map (ppAtom env) as)
 
 ppExpr :: PPInfo -> Expr -> Doc
 ppExpr env expr =
@@ -247,19 +256,15 @@ nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++ map fromE (nEqns nd)
   fromB (x ::: t) = (x,t)
   fromE (b := _)  = fromB b
 
+clockParent :: Map Ident CType -> Clock -> Maybe Clock
+clockParent env c =
+  case c of
+    BaseClock -> Nothing
+    WhenTrue a -> Just (clockOfCType (typeOf env a))
 
 class TypeOf t where
   -- | Get the type of something well-formed (panics if not).
   typeOf :: Map Ident CType -> t -> CType
-
--- XXX: These seem to have "polymorphic clocks"
-instance TypeOf Literal where
-  typeOf _ lit =
-    case lit of
-      Int _  -> base TInt
-      Real _ -> base TReal
-      Bool _ -> base TBool
-    where base t = t `On` Lit (Bool True)
 
 instance TypeOf Atom where
   typeOf env atom =
@@ -267,7 +272,8 @@ instance TypeOf Atom where
       Var x -> case Map.lookup x env of
                  Just t -> t
                  Nothing -> panic "typeOf" ["Undefined variable: " ++ showPP x]
-      Lit l -> typeOf env l
+      Lit _ ty -> ty
+
       Prim op as  ->
         case as of
           a : _ ->
@@ -307,7 +313,6 @@ instance TypeOf Atom where
 
 
 
-
 instance TypeOf Expr where
   typeOf env expr =
     case expr of
@@ -315,9 +320,9 @@ instance TypeOf Expr where
       a :-> _     -> typeOf env a
       Pre a       -> typeOf env a
       a `When` b  -> let t `On` _ = typeOf env a
-                     in t `On` b
+                     in t `On` WhenTrue b
       Current a   -> let t `On` c  = typeOf env a
-                         _ `On` c1 = typeOf env c
+                         Just c1   = clockParent env c
                       in t `On` c1
       Merge c b _ -> let _ `On` c1 = typeOf env c
                          t `On` _  = typeOf env b

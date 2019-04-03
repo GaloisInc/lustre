@@ -36,7 +36,7 @@ quickNodeToCore mb ds =
 
 data Env = Env
   { envNodes :: Map P.OrigName ModelFunInfo
-  , envEnums :: Map P.OrigName C.Expr
+  , envEnums :: Map P.OrigName C.Literal
   }
 
 -- | Process a bunch of declarations in preparation for translating to core.

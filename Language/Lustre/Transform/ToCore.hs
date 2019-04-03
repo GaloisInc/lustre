@@ -26,7 +26,7 @@ import Language.Lustre.Pretty(showPP)
 -- | Compute info about enums from some top-level declarations.
 -- The result maps the original names of enum constructors, to numeric
 -- expressions that should represent them.
-getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> Map P.OrigName C.Expr
+getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> Map P.OrigName C.Literal
 getEnumInfo tds = foldr addDefs Map.empty enums
   where
   enums = [ is | P.DeclareType
@@ -35,7 +35,7 @@ getEnumInfo tds = foldr addDefs Map.empty enums
   -- The constructors of an enum are represented by 0, 1, .. etc
   addDefs is m = foldr addDef m (zipWith mkDef is [ 0 .. ])
 
-  mkDef i n = (P.identOrigName i, C.Atom (C.Lit (C.Int n)))
+  mkDef i n = (P.identOrigName i, C.Int n)
 
   addDef (i,n) = Map.insert i n
 
@@ -44,8 +44,8 @@ getEnumInfo tds = foldr addDefs Map.empty enums
 -- We also return a mapping from original name to core names for translating
 -- models back.
 evalNodeDecl ::
-  Map P.OrigName C.Expr {- ^ Enum constructor -> expr to represent it -} ->
-  P.NodeDecl          {- ^ Simplified source Lustre -} ->
+  Map P.OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
+  P.NodeDecl               {- ^ Simplified source Lustre -} ->
   LustreM (Map P.OrigName Ident, C.Node)
     -- ^ Mapping from original names to core names, 
     -- and a node translate to Core notation.
@@ -103,7 +103,7 @@ evalType ty =
 type M = StateT St LustreM
 
 
-runProcessNode :: Map P.OrigName C.Expr -> M a -> LustreM a
+runProcessNode :: Map P.OrigName C.Literal -> M a -> LustreM a
 runProcessNode enumCs m =
   do (a,_finS) <- runStateT st m
      pure a
@@ -126,7 +126,7 @@ data St = St
     -- ^ Types of local variables from the source.
     -- These shouldn't change.
 
-  , stGlobEnumCons  :: Map P.OrigName C.Expr
+  , stGlobEnumCons  :: Map P.OrigName C.Literal
     -- ^ Definitions for enum constants.
     -- Currently we assume that these would be int constants.
 
@@ -157,7 +157,7 @@ getPropertyNames :: M [(P.PropName,Ident)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
-getEnumCons :: M (Map P.OrigName C.Expr)
+getEnumCons :: M (Map P.OrigName C.Literal)
 getEnumCons = stGlobEnumCons <$> get
 
 -- | Get the collection of local types.
@@ -276,8 +276,8 @@ evalInputBinder inp =
 evalBinder :: P.Binder -> M C.Binder
 evalBinder b =
   do c <- case P.binderClock b of
-            Nothing -> pure (C.Lit (C.Bool True))
-            Just c  -> evalClockExprAtom c
+            Nothing -> pure C.BaseClock
+            Just c  -> C.WhenTrue <$> evalClockExpr c
      let t = evalType (P.binderType b) `C.On` c
      let xi = P.binderDefines b
          xo = P.identOrigName xi
@@ -325,7 +325,7 @@ evalEqn eqn =
          C.Var i ->
            do f i
               clearEqns
-         C.Lit n ->
+         C.Lit n _ ->
           case n of
             C.Bool True  -> pure []
             _ -> panic ("Constant in " ++ x) [ "*** Constant: " ++ show n ]
@@ -347,28 +347,36 @@ evalExprAtom expr =
 
 
 -- | Evaluate a clock-expression to an atom.
-evalClockExprAtom :: P.ClockExpr -> M C.Atom
-evalClockExprAtom (P.WhenClock _ e1 i) =
-  do a1 <- evalConstExprAtom e1
+evalClockExpr :: P.ClockExpr -> M C.Atom
+evalClockExpr (P.WhenClock _ e1 i) =
+  do a1  <- evalConstExpr e1
+     env <- getLocalTypes
      let a2 = C.Var i
-         cl = case a1 of
-                C.Lit (C.Bool True) -> a2
-                _                   -> C.Prim C.Eq [ a1, a2 ]
-     pure cl
+         ty = C.typeOf env a2
+     pure $ case a1 of
+              C.Bool True -> a2
+              _           -> C.Prim C.Eq [ C.Lit a1 ty, a2 ]
+
+evalIClock :: P.IClock -> M C.Clock
+evalIClock clo =
+  case clo of
+    P.BaseClock -> pure C.BaseClock
+    P.KnownClock c -> C.WhenTrue <$> evalClockExpr c
+    P.ClockVar {} -> panic "evalIClockExpr" [ "Unexpectec clock variable." ]
 
 evalCurrentWith :: Maybe Ident -> C.Atom -> C.Atom -> M C.Expr
 evalCurrentWith xt d e =
   do env <- getLocalTypes
      let ty = C.typeOf env e
-         c  = C.clockOfCType ty
-         cc = C.clockOfCType (C.typeOf env c)
+         c@(C.WhenTrue ca) = C.clockOfCType ty
+         Just cc = C.clockParent env c
      case xt of
-       Just x -> desugar x c
+       Just x -> desugar x ca
        Nothing ->
          do i  <- newIdentFrom "curW"
             let thisTy = C.typeOfCType ty `C.On` cc
             addLocal i thisTy
-            e1 <- desugar i c
+            e1 <- desugar i ca
             addEqn (i C.::: thisTy C.:= e1)
             pure (C.Atom (C.Var i))
   where
@@ -378,7 +386,7 @@ evalCurrentWith xt d e =
        hold <- nameExpr (d C.:->  pre)
        pure (C.Atom (C.Prim C.ITE [c,cur,hold]))
 
-evalConstExpr :: P.Expression -> M C.Expr
+evalConstExpr :: P.Expression -> M C.Literal
 evalConstExpr expr =
   case expr of
     P.ERange _ e -> evalConstExpr e
@@ -387,7 +395,7 @@ evalConstExpr expr =
          case Map.lookup (P.nameOrigName i) cons of
           Just e -> pure e
           Nothing -> bad "undefined constant symbol"
-    P.Lit l -> pure (C.Atom (C.Lit l))
+    P.Lit l -> pure l
     _ -> bad "constant expression"
 
   where
@@ -395,13 +403,10 @@ evalConstExpr expr =
                              , "*** Expression: " ++ showPP expr
                              ]
 
-evalConstExprAtom :: P.Expression -> M C.Atom
-evalConstExprAtom expr =
-  do e <- evalConstExpr expr
-     case e of
-       C.Atom a -> pure a
-       _  -> nameExpr e
-
+evalCType :: P.CType -> M C.CType
+evalCType t =
+  do c <- evalIClock (P.cClock t)
+     pure (evalType (P.cType t) `C.On` c)
 
 -- | Evaluate a source expression to a core expression.
 evalExpr :: Maybe Ident -> P.Expression -> M C.Expr
@@ -410,52 +415,45 @@ evalExpr xt expr =
     P.ERange _ e -> evalExpr xt e
 
     P.Var i ->
-      do cons <- getEnumCons
-         case Map.lookup (P.nameOrigName i) cons of
-           Just e -> pure e
-           Nothing ->
-             case i of
-               P.Unqual j -> pure (C.Atom (C.Var j))
-               _          -> bad "qualified name"
+      case i of
+        P.Unqual j -> pure (C.Atom (C.Var j))
+        _          -> bad "qualified name"
 
     P.Const e t ->
-      case P.cClock t of
-        P.BaseClock    -> evalConstExpr e
-        P.KnownClock c ->
-          do a1 <- evalConstExprAtom e
-             a2 <- evalClockExprAtom c
-             pure (C.When a1 a2)
-        P.ClockVar {} -> bad "clock variable"
-
+      do l <- evalConstExpr e
+         ty <- evalCType t
+         pure (C.Atom (C.Lit l ty))
 
     P.Lit {} -> bad "literal outside `Const`."
 
     e `P.When` ce ->
       do a1 <- evalExprAtom e
-         a2 <- evalClockExprAtom ce
+         a2 <- evalClockExpr ce
          pure (C.When a1 a2)
 
 
     P.Merge i alts ->
       do let j = C.Var i
-         as <- forM alts $ \(P.MergeCase k e) -> do p  <- evalExprAtom k
+         env <- getLocalTypes
+         let ty = C.typeOf env j
+         as <- forM alts $ \(P.MergeCase k e) -> do p  <- evalConstExpr k
                                                     pure (p,e)
          case as of
-           [ (C.Lit (C.Bool b) ,e1), (_,e2) ] ->
+           [ (C.Bool b, e1), (_,e2) ] ->
               do e1' <- evalExprAtom e1
                  e2' <- evalExprAtom e2
                  pure $ if b then C.Merge j e1' e2' else C.Merge j e2' e1'
-           _ -> go j as
+           _ -> go ty j as
 
 
       where
-      go j as =
+      go ty j as =
         case as of
           []  -> bad "empty merge"
           [(_,e)] -> evalExpr Nothing e
           (p,e) : rest ->
-             do let b = C.Prim C.Eq [ p, j ]
-                more <- go j rest
+             do let b = C.Prim C.Eq [ C.Lit p ty, j ]
+                more <- go ty j rest
                 l    <- evalExprAtom e
                 r    <- case more of
                           C.Atom x -> pure x

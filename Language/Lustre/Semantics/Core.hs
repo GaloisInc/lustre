@@ -115,7 +115,7 @@ evalAtom :: State {-^ Environment to for values of variables -} ->
             Value {-^ Value of the atom -}
 evalAtom s atom =
   case atom of
-    Lit l -> evalLit l
+    Lit l _ -> evalLit l
     Var x -> evalVar s x
     Prim op as -> evalPrimOp op (map (evalAtom s) as)
 
@@ -162,13 +162,12 @@ evalEqn env old new (x ::: _ `On` c := expr) =
 
   guardedOn cl v =
     case cl of
-      Lit b -> case b of
-                 Bool True  -> v    -- base clock
-                 Bool False -> hold -- weird always false clock
-                 _ -> panic "guardedOn" [ "Non boolean clock" ]
-      _ -> case evalAtom new cl of
-             VBool True -> guardedOn (clockOfCType (typeOf env cl)) v
-             _ -> hold
+      BaseClock -> v
+      WhenTrue a ->
+        case evalAtom new a of
+          VBool True -> guardedOn cl1 v
+            where Just cl1 = clockParent env cl
+          _          -> hold
     where hold = new { sValues = Map.insert x (evalVar old x) (sValues new) }
 
 

@@ -6,17 +6,11 @@ node (c : bool)
   assumes ()
   shows ()
 let
-  when_c$1 : int when c
-    = 0 when c
-   
-  when_c : int when c
-    = 1 when c
-   
   pre_x : int when c
     = pre x
    
   x : int when c
-    = when_c$1 -> Add(when_c, pre_x)
+    = 0 /* when c */ -> Add(1 /* when c */, pre_x)
    
   current_x : int
     = current x
