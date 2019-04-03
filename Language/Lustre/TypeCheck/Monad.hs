@@ -367,30 +367,25 @@ resetConstraints :: M [(Maybe SourceRange, Constraint)]
 resetConstraints = M $ sets $ \rw -> (rwCtrs rw, rw { rwCtrs = [] })
 
 
--- | For now, only CondAct contains type annotations, so
--- we just traverse parts of the expressoin that may encounter condatct.
--- In particular we don't traverse constants.
--- If we add more annotation, this will have to be updated appropriately.
--- We assume that the input is an alredy type-checked expression.
--- XXX: PERHAPS WE DON'T NEED THIS ANYMORE
+-- | Apply the substitution to types in the AST.
+-- Currently, only the 'Const' construct contains a type.
 zonkExpr :: Expression -> M Expression
 zonkExpr expr =
   case expr of
     ERange r e -> ERange r <$> zonkExpr e
-    Const {} -> pure expr
-    Var {} -> pure expr
-    Lit {} -> pure expr
+    Const e ty -> Const e <$> zonkCType ty
+    Var {}     -> pure expr
+    Lit {}     -> pure expr
     e `When` c -> When <$> zonkExpr e <*> pure c
 
-    Tuple es -> Tuple <$> traverse zonkExpr es
-    Array es -> Array <$> traverse zonkExpr es
-    Select e s -> Select <$> zonkExpr e <*> pure s
-    Struct s fs -> Struct s <$> traverse zonkField fs
+    Tuple es            -> Tuple <$> traverse zonkExpr es
+    Array es            -> Array <$> traverse zonkExpr es
+    Select e s          -> Select <$> zonkExpr e <*> pure s
+    Struct s fs         -> Struct s <$> traverse zonkField fs
     UpdateStruct s e fs -> UpdateStruct s
                             <$> zonkExpr e
                             <*> traverse zonkField fs
-    WithThenElse e1 e2 e3 -> WithThenElse e1 <$> zonkExpr e2
-                                             <*> zonkExpr e3
+    WithThenElse e1 e2 e3 -> WithThenElse e1 <$> zonkExpr e2 <*> zonkExpr e3
     Merge i as -> Merge i <$> traverse zonkMergeCase as
     Call f es c -> Call f <$> traverse zonkExpr es <*> pure c
 

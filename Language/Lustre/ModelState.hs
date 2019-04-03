@@ -19,6 +19,7 @@ import Language.Lustre.Name(Ident)
 import qualified Language.Lustre.AST  as P
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
+import Language.Lustre.Transform.Inline(Renaming(..))
 import Language.Lustre.Driver(ModelInfo(..), ModelFunInfo(..))
 import qualified Language.Lustre.Semantics.Core as L
 import qualified Language.Lustre.Semantics.Value as V
@@ -83,7 +84,8 @@ enterCall :: Loc -> CallSiteId -> Maybe Loc
 enterCall l cs =
   do let mf = lFunInfo l
      xs     <- Map.lookup cs (mfiCallSites mf)
-     (f,su) <- Map.lookup xs (mfiInlined mf)
+     (f,ren) <- Map.lookup xs (mfiInlined mf)
+     let su = renVarMap ren
      let mi = lModel l
      fi <- Map.lookup f (infoNodes mi)
      let nd = mfiSource fi

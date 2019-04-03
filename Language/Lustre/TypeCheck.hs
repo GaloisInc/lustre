@@ -687,7 +687,7 @@ checkExpr expr tys =
       do ty <- one tys
          let lt = inferLit l
          ensure (Subtype lt (cType ty))
-         pure (Const (Lit l))
+         pure (Const (Lit l) ty)
 
     e `When` c ->
       do checkTemporalOk "when"
@@ -1232,7 +1232,8 @@ checkVar x ty =
         AVal   -> do (j,c) <- checkLocalVar i
                      subCType c ty
                      pure (Var (Unqual j))
-        AConst -> Const <$> checkConstVar x (cType ty)
+        AConst -> do y <- checkConstVar x (cType ty)
+                     pure (Const y ty)
         t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
                               , "*** Name: " ++ showPP x
                               , "*** Thing: " ++ showPP t ]

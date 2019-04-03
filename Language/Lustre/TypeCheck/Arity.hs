@@ -16,7 +16,7 @@ exprArity :: Expression -> M Int
 exprArity expr =
   case expr of
     ERange r e          -> inRange r (exprArity e)  
-    Const _             -> pure 1
+    Const {}            -> pure 1
     Var {}              -> pure 1
     Lit {}              -> pure 1
     e `When` _          -> exprArity e

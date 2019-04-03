@@ -420,6 +420,18 @@ evalSlice env s = ArraySlice { arrayStart = evalIntExpr env (arrayStart s)
 evalClockExpr :: Env -> ClockExpr -> ClockExpr
 evalClockExpr env (WhenClock r e i) = WhenClock r (evalExpr env e) i
 
+evalCType :: Env -> CType -> CType
+evalCType env ct = CType { cType = evalType env (cType ct)
+                         , cClock = evalIClock env (cClock ct)
+                         }
+
+evalIClock :: Env -> IClock -> IClock
+evalIClock env clk =
+  case clk of
+    BaseClock -> BaseClock
+    KnownClock c -> KnownClock (evalClockExpr env c)
+    ClockVar {} -> panic "NoStatic.evalIClock" [ "Unexpected clock variable." ]
+
 
 
 --------------------------------------------------------------------------------
@@ -944,7 +956,7 @@ evalDynExpr eloc env expr =
   case expr of
     ERange r e -> ERange r <$> evalDynExpr eloc (inRange r env) e
 
-    Const e -> pure (Const (evalExpr env e))
+    Const e t -> pure (Const (evalExpr env e) (evalCType env t))
 
     Var {} -> pure expr
 

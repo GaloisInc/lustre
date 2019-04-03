@@ -199,7 +199,7 @@ data Expression = ERange !SourceRange !Expression
                 | Var !Name
                 | Lit !Literal
 
-                | Const Expression
+                | Const Expression CType
                   {- ^ A use of a constant expression. These are introduced
                      by the type checker---the parser does not generate them.-}
 
@@ -391,7 +391,7 @@ exprRangeMaybe expr =
     Var x           -> Just (range x)
     e `When` c      -> Just (e  <-> c)
 
-    Const e         -> exprRangeMaybe e
+    Const e _        -> exprRangeMaybe e
 
     Lit {}          -> Nothing
     Tuple {}        -> Nothing

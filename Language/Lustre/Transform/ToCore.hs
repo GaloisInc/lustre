@@ -418,7 +418,14 @@ evalExpr xt expr =
                P.Unqual j -> pure (C.Atom (C.Var j))
                _          -> bad "qualified name"
 
-    P.Const e -> evalConstExpr e
+    P.Const e t ->
+      case P.cClock t of
+        P.BaseClock    -> evalConstExpr e
+        P.KnownClock c ->
+          do a1 <- evalConstExprAtom e
+             a2 <- evalClockExprAtom c
+             pure (C.When a1 a2)
+        P.ClockVar {} -> bad "clock variable"
 
 
     P.Lit {} -> bad "literal outside `Const`."

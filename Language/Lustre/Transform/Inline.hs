@@ -8,7 +8,8 @@ Assumptions:
   * Equations contan only simple (i.e., 'LVar') 'LHS's.
   * No constants
 -}
-module Language.Lustre.Transform.Inline (inlineCalls, AllRenamings) where
+module Language.Lustre.Transform.Inline
+        (inlineCalls, AllRenamings, Renaming(..)) where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -95,7 +96,15 @@ freshBinder b = do n <- freshName (binderDefines b)
 
 
 -- | A mapping from old names to their clash-avoiding versions.
-type Renaming = Map OrigName OrigName
+data Renaming = Renaming
+  { renVarMap :: Map OrigName OrigName
+    -- ^ Mapping of names.
+
+  , renClock  :: Maybe ClockExpr
+    -- ^ Clock at the call site, if any.
+    -- If this is set, then we have to replace base clocks with this clock
+    -- in the inlined code.
+  }
 
 
 -- | Compute the renaming to be used when instantiating the given node.
@@ -118,9 +127,12 @@ computeRenaming cl lhs nd =
                          Nothing -> n { binderClock = Just c }
                          Just _ -> n -- still need to apply su
 
-     let renaming = Map.fromList $
-                      zipExact renOut (nodeOutputs prof) lhs ++
-                      zipExact renBind oldBinders newBinders
+     let renaming = Renaming
+                      { renVarMap = Map.fromList $
+                                    zipExact renOut (nodeOutputs prof) lhs ++
+                                    zipExact renBind oldBinders newBinders
+                      , renClock = cl
+                      }
          renB b = b { binderClock = rename renaming <$> binderClock b }
      pure (renaming, map (LocalVar . renB) newBinders, map lhsIdent lhs)
   where
@@ -184,12 +196,12 @@ instance Rename a => Rename (Maybe a) where
   rename su xs = rename su <$> xs
 
 instance Rename Ident where
-  rename su i = case Map.lookup (identOrigName i) su of
+  rename su i = case Map.lookup (identOrigName i) (renVarMap su) of
                   Just n  -> origNameToIdent n
                   Nothing -> i
 
 instance Rename Name where
-  rename su x = case Map.lookup (nameOrigName x) su of
+  rename su x = case Map.lookup (nameOrigName x) (renVarMap su) of
                   Just n  -> origNameToName n
                   Nothing -> x
 
@@ -197,9 +209,9 @@ instance Rename Expression where
   rename su expr =
     case expr of
       ERange r e      -> ERange r (rename su e)
-      Const e         -> Const e
+      Const e t       -> Const e (rename su t)
       Var x           -> Var (rename su x)
-      Lit _           -> expr
+      Lit _           -> bad "literal, not under Const"
 
       e `When` ce     -> rename su e `When` rename su ce
 
@@ -221,8 +233,22 @@ instance Rename e => Rename (Field e) where
 instance Rename ClockExpr where
   rename su (WhenClock r e i) = WhenClock r e (rename su i)
 
+instance Rename CType where
+  rename su ct = ct { cClock = rename su (cClock ct) }
+
+instance Rename IClock where
+  rename su clk =
+    case clk of
+      BaseClock ->
+        case renClock su of
+          Nothing -> BaseClock
+          Just c   -> KnownClock c
+      KnownClock c -> KnownClock (rename su c)
+      ClockVar {}  -> panic "Inline.rename" [ "Unexpected clock variable." ]
+
 instance Rename e => Rename (MergeCase e) where
   rename su (MergeCase a b) = MergeCase a (rename su b)
+
 
 instance Rename a => Rename (LHS a) where
   rename su lhs =
@@ -323,8 +349,14 @@ inlineDecl d =
 --------------------------------------------------------------------------------
 -- Resugar
 
--- | Maps (node name, call_site as list of ident, function called, renamed)
-type AllRenamings = Map OrigName (Map [OrigName] (OrigName,Renaming))
+-- | Maps (node name, call_site as list of name, function called, renamed)
+-- XXX: Identifying call sites by something other than list of ids.
+type AllRenamings = Map OrigName    {-node name-} (
+                    Map [OrigName]  {-call site-}
+                        ( OrigName  {-called node-}
+                        , Renaming  {-how names changed, and we called-}
+                        )
+                    )
 
 --------------------------------------------------------------------------------
 

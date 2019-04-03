@@ -162,7 +162,7 @@ data ModelFunInfo = ModelFunInfo
          we did that: the key is a value of a strucutred type, and
          the entry in the map is the value for it -}
 
-  , mfiInlined :: Map [P.OrigName] (P.OrigName, Map P.OrigName P.OrigName)
+  , mfiInlined :: Map [P.OrigName] (P.OrigName, Renaming)
     {- ^ Information about what we called, and how things got renamed
          when we inlined things.
          For each call site (identified by its return values),
@@ -177,13 +177,12 @@ data ModelFunInfo = ModelFunInfo
 
 
 mfiMap :: [P.TopDecl] -> NosOut -> AllRenamings -> Map P.OrigName ModelFunInfo
-mfiMap ordDs
-        nos rens = Map.fromList
-                $ map build
-                $ Set.toList
-                $ Set.unions [ Map.keysSet (nosoCallSites nos)
-                             , Map.keysSet (nosoExpanded nos)
-                             , Map.keysSet rens ]
+mfiMap ordDs nos rens =
+  Map.fromList $ map build
+               $ Set.toList
+               $ Set.unions [ Map.keysSet (nosoCallSites nos)
+                            , Map.keysSet (nosoExpanded nos)
+                            , Map.keysSet rens ]
   where
   build k = (k, ModelFunInfo { mfiCallSites = lkpMap k (nosoCallSites nos)
                              , mfiStructs   = lkpMap k (nosoExpanded nos)

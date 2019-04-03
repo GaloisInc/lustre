@@ -12,11 +12,11 @@ let
   nats$1 : int
     = 0 -> Add(1, pre_nats$1)
    
-  when_c : int when c
+  when_c$2 : int when c
     = nats$1 when c
    
   current_when_c : int
-    = current when_c
+    = current when_c$2
    
   pre_x : int
     = pre x
@@ -27,11 +27,17 @@ let
   x : int
     = ITE(c, current_when_c, init_pre_x)
    
+  when_c$1 : int when c
+    = 0 when c
+   
+  when_c : int when c
+    = 1 when c
+   
   pre_nats : int when c
     = pre nats
    
   nats : int when c
-    = 0 -> Add(1, pre_nats)
+    = when_c$1 -> Add(when_c, pre_nats)
    
   current_nats : int
     = current nats
