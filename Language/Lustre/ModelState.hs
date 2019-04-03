@@ -15,7 +15,7 @@ module Language.Lustre.ModelState
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Language.Lustre.Name(Ident)
+import Language.Lustre.Name(Ident,origNameToIdent)
 import qualified Language.Lustre.AST  as P
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
@@ -127,8 +127,7 @@ lookupVar l s i0 =
       do si1 <- traverse (lookupVar l s) si
          pure (restruct si1)
     Nothing ->
-      do ci <- Map.lookup i (infoCore (lModel l))
-         v1 <- Map.lookup ci s
+      do v1 <- Map.lookup (origNameToIdent i) s
          reval v1
   where
   i = Map.findWithDefault i0 i0 (lSubst l)

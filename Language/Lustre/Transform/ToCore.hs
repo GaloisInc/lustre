@@ -12,10 +12,12 @@ import Data.Semigroup ( (<>) )
 import Data.Maybe(isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Graph.SCC(stronglyConnComp)
+import Data.Graph(SCC(..))
 import MonadLib
 import AlexTools(SourceRange(..),SourcePos(..))
 
-import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..))
+import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..), identUID)
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Monad
@@ -46,9 +48,7 @@ getEnumInfo tds = foldr addDefs Map.empty enums
 evalNodeDecl ::
   Map P.OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
   P.NodeDecl               {- ^ Simplified source Lustre -} ->
-  LustreM (Map P.OrigName Ident, C.Node)
-    -- ^ Mapping from original names to core names, 
-    -- and a node translate to Core notation.
+  LustreM C.Node
 evalNodeDecl enumCs nd
   | null (P.nodeStaticInputs nd)
   , Just def <- P.nodeDef nd =
@@ -56,29 +56,45 @@ evalNodeDecl enumCs nd
       do let prof = P.nodeProfile nd
          ins  <- mapM evalInputBinder (P.nodeInputs prof)
          outs <- mapM evalBinder (P.nodeOutputs prof)
-         locs <- mapM evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
+
+
+
+         locs <- mapM evalBinder
+              $ orderBinders [ b | P.LocalVar b <- P.nodeLocals def ]
+
+
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
          props <- getPropertyNames
-         varMp <- getVarMap
          eqs <- case C.orderedEqns (concat eqnss) of
                  Left rs -> panic "evalNodeDecl" [ "recursive eqns"
                                                  , "TODO: report properly" ]
                  Right as -> pure as
-         pure (varMp
-              , C.Node { C.nInputs   = ins
+         pure C.Node { C.nInputs   = ins
                      , C.nOutputs  = [ i | i C.::: _ <- outs ]
                      , C.nAssuming = asts
                      , C.nShows    = props
                      , C.nEqns     = eqs
-                     })
+                     }
 
   | otherwise = panic "evalNodeDecl"
                 [ "Unexpected node declaration"
                 , "*** Node: " ++ showPP nd
                 ]
 
-
+orderBinders :: [P.Binder] -> [P.Binder]
+orderBinders = map fromSCC . stronglyConnComp . map depNode
+  where
+  fromSCC s = case s of
+                AcyclicSCC x -> x
+                CyclicSCC xs -> panic "ToCore.orderBinders"
+                                  ( "Unexpected recursive binder group"
+                                  : map (showPP . P.binderDefines) xs
+                                  )
+  depNode b = (b, identUID (P.binderDefines b),
+                  case P.binderClock b of
+                    Nothing -> []
+                    Just (P.WhenClock _ _ i) -> [identUID i])
 
 
 -- | Rewrite a type, replacing named enumeration types with @int@.
@@ -164,23 +180,12 @@ getEnumCons = stGlobEnumCons <$> get
 getLocalTypes :: M (Map Ident C.CType)
 getLocalTypes = stLocalTypes <$> get
 
--- | Get the types of the untranslated locals.
-getSrcLocalTypes :: M (Map P.OrigName C.CType)
-getSrcLocalTypes = stSrcLocalTypes <$> get
-
 -- | Record the type of a local.
 addLocal :: Ident -> C.CType -> M ()
 addLocal i t = sets_ $ \s -> s { stLocalTypes = Map.insert i t (stLocalTypes s)}
 
 addBinder :: C.Binder -> M ()
 addBinder (i C.::: t) = addLocal i t
-
--- | Add a type for a declared local.
-addSrcLocal :: P.OrigName -> C.CType -> M ()
-addSrcLocal x t = sets_ $ \s ->
-  s { stSrcLocalTypes = Map.insert x t (stSrcLocalTypes s)
-    , stGlobEnumCons  = Map.delete x (stGlobEnumCons s)
-    }
 
 -- | Generate a fresh local name with the given stemp
 newIdentFrom :: Text -> M Ident
@@ -251,13 +256,6 @@ addPropertyName :: P.PropName -> Ident -> M ()
 addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 
--- | Remember that a source variable got mapped to the given core variable.
-rememberMapping :: P.OrigName -> Ident -> M ()
-rememberMapping x y =
-  sets_ $ \s -> s { stVarMap = Map.insert x y (stVarMap s) }
-
-getVarMap :: M (Map P.OrigName Ident)
-getVarMap = stVarMap <$> get
 
 --------------------------------------------------------------------------------
 
@@ -280,9 +278,7 @@ evalBinder b =
             Just c  -> C.WhenTrue <$> evalClockExpr c
      let t = evalType (P.binderType b) `C.On` c
      let xi = P.binderDefines b
-         xo = P.identOrigName xi
-     addSrcLocal xo t
-     rememberMapping xo xi
+     addLocal xi t
      let bn = xi C.::: t
      addBinder bn
      pure bn
@@ -301,8 +297,8 @@ evalEqn eqn =
     P.Define ls e ->
       case ls of
         [ P.LVar x ] ->
-            do tys <- getSrcLocalTypes
-               let t = case Map.lookup (P.identOrigName x) tys of
+            do tys <- getLocalTypes
+               let t = case Map.lookup x tys of
                          Just ty -> ty
                          Nothing ->
                             panic "evalEqn" [ "Defining unknown variable:"

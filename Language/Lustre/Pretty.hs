@@ -51,7 +51,7 @@ instance Pretty SourceRange where
   ppPrec _ = text . prettySourceRange
 
 instance Pretty Ident where
-  ppPrec n i = ppPrec n (identText i)
+  ppPrec n i = ppPrec n (identText i) <> int (identUID i)
 
 instance Pretty Name where
   ppPrec n nam =

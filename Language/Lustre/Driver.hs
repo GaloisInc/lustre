@@ -11,7 +11,6 @@ import Text.PrettyPrint(Doc)
 
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
-import Language.Lustre.Name
 import Language.Lustre.Monad
 import Language.Lustre.Pretty(pp,vcatSep)
 import Language.Lustre.Phase
@@ -88,12 +87,11 @@ nodeToCore ::
   [P.TopDecl]                 {- ^ Simplified top decls -} ->
   LustreM (ModelInfo, C.Node)
 nodeToCore mb env ds =
-  do nd           <- findNode mb ds
-     (varMp,core) <- evalNodeDecl (envEnums env) nd
+  do nd  <- findNode mb ds
+     core <- evalNodeDecl (envEnums env) nd
      dumpPhase PhaseToCore (pp core)
      pure (ModelInfo { infoNodes = envNodes env
                      , infoTop   = P.identOrigName (P.nodeName nd)
-                     , infoCore  = varMp
                      }
           , core)
 
@@ -137,10 +135,6 @@ data ModelInfo = ModelInfo
 
   , infoTop     :: P.OrigName
     -- ^ Name for top node
-
-  , infoCore    :: Map P.OrigName Ident
-    -- ^ Mapping between identifiers in top-level node
-
   }
 
 
