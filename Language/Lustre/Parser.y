@@ -542,6 +542,8 @@ expression :: { Expression }
                                       {%  mkCondact $1 $8 $3 $5 (Just $7) }
   | 'condact' '(' clockExpr ',' expression ')'
                                       {% mkCondact $1 $6 $3 $5 Nothing }
+  | 'condact' '(' BOOL',' expression ',' expression ')'
+                                      { mkConstCondact $3 $5 $7 }
   | name '{' '}'                      { at $1 $3 (Struct $1 []) }
   | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
@@ -936,6 +938,13 @@ mkContract r1 cs r2 = Contract { contractRange = r1 <-> r2
 
 
 --------------------------------------------------------------------------------
+
+
+mkConstCondact :: Lexeme Token -> Expression -> Expression -> Expression
+mkConstCondact l e1 e2 =
+  case lexemeToken l of
+    TokBool b   -> if b then e1 else e2
+    _           -> panic "mkConstCondact" [ "Unexcpected literal", show l ]
 
 mkCondact :: SourceRange -> SourceRange ->
                 ClockExpr -> Expression -> Maybe Expression -> Parser Expression
