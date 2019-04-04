@@ -544,8 +544,7 @@ evalExpr expr =
                  Nothing -> SLeaf expr
                  Just y  -> Var . origNameToName <$> y)
 
-    -- XXX: THIS IS WRONG BECAUSE THE CONSTANT EXPRESSION MAY BE A STRUCUTRE
-    Const e _ -> pure (SLeaf expr)
+    Const e t -> liftConst t =<< evalExpr e
 
     Lit _ -> pure (SLeaf expr)
 
@@ -671,6 +670,60 @@ evalExpr expr =
 
 evalField :: Field Expression -> NosM (Field (StructData Expression))
 evalField (Field l e) = Field l <$> evalExpr e
+
+
+liftConst :: CType -> StructData Expression -> NosM (StructData Expression)
+liftConst ty str =
+
+  case cType ty of
+    TypeRange _ t1 -> liftConst ty { cType = t1 } str -- XXX: loooses location?
+
+    ArrayType t _ ->
+      case str of
+        SArray es -> SArray <$> traverse (liftConst ty { cType = t }) es
+        _ -> bad "array"
+
+    NamedType x ->
+      case str of
+        SStruct y fs | nameOrigName x == y ->
+          do env <- getStructInfo
+             case Map.lookup y env of
+               -- assumes struct fields are in their declared order
+               Just fsTs -> SStruct y <$> zipWithM (liftF y) fsTs fs
+               Nothing   -> err [ "Undefined structure type: " ++ showPP y ]
+
+        _ -> bad ("struct " ++ showPP x)
+
+    _ ->
+      case str of
+        SLeaf e -> pure (SLeaf (Const e ty))
+        _ -> bad "leaf"
+
+  where
+  liftF x (f,t) fi
+    | f == fName fi = traverse (liftConst ty { cType = t }) fi
+    | otherwise     = err [ "Field order mismatch:"
+                          , "*** Struct: " ++ showPP x
+                          , "*** Expected: " ++ showPP f
+                          , "*** Got: " ++ showPP (fName fi)
+                          ]
+
+  err = panic "NoStruct.liftConst"
+
+  bad want = err [ "Type mismatch:"
+                 , "*** Expected: " ++ want
+                 , "*** Got: " ++ sh
+                 ]
+
+  sh = case str of
+         SArray {}   -> "array"
+         STuple {}   -> "tuple"
+         SStruct x _ -> "struct " ++ showPP x
+         SLeaf {}    -> "leaf"
+
+
+
+
 
 --------------------------------------------------------------------------------
 
@@ -839,8 +892,7 @@ newSubName b (p,t) = NosM $
                StructEl f -> "." `Text.append` identText f
 
 
--- | Lookup the definition of a struct type, or 'Nothing' if the
--- name of the type is not a struct (i.e., it is an enum).
+-- | Get information about the struct types that are in scope.
 getStructInfo :: NosM (Map OrigName [ (Ident,Type)])
 getStructInfo = NosM (roStructs <$> ask)
 
