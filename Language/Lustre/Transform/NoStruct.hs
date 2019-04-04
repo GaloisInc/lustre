@@ -544,7 +544,8 @@ evalExpr expr =
                  Nothing -> SLeaf expr
                  Just y  -> Var . origNameToName <$> y)
 
-    Const {} -> pure (SLeaf expr)
+    -- XXX: THIS IS WRONG BECAUSE THE CONSTANT EXPRESSION MAY BE A STRUCUTRE
+    Const e _ -> pure (SLeaf expr)
 
     Lit _ -> pure (SLeaf expr)
 
