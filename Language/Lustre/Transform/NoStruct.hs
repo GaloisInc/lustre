@@ -672,32 +672,32 @@ evalField :: Field Expression -> NosM (Field (StructData Expression))
 evalField (Field l e) = Field l <$> evalExpr e
 
 
+{- | Lift a type annotation through a structured expression.
+Assumes that there are no 'TypeRange' in the types and names refer
+directly to their types (see 'tidyType' in "Language.Lustre.TypeCheck.Monad") -}
 liftConst :: CType -> StructData Expression -> NosM (StructData Expression)
 liftConst ty str =
 
-  case cType ty of
-    TypeRange _ t1 -> liftConst ty { cType = t1 } str -- XXX: loooses location?
-
-    ArrayType t _ ->
-      case str of
-        SArray es -> SArray <$> traverse (liftConst ty { cType = t }) es
+  case str of
+    SArray es ->
+      case cType ty of
+        ArrayType t _ -> SArray <$> traverse (liftConst ty { cType = t }) es
         _ -> bad "array"
 
-    NamedType x ->
-      case str of
-        SStruct y fs | nameOrigName x == y ->
-          do env <- getStructInfo
-             case Map.lookup y env of
-               -- assumes struct fields are in their declared order
-               Just fsTs -> SStruct y <$> zipWithM (liftF y) fsTs fs
-               Nothing   -> err [ "Undefined structure type: " ++ showPP y ]
 
+    SStruct x fs ->
+      case cType ty of
+        NamedType y | x == nameOrigName y ->
+          do env <- getStructInfo
+             case Map.lookup x env of
+               -- assumes struct fields are in their declared order
+               Just fsTs -> SStruct x <$> zipWithM (liftF x) fsTs fs
+               Nothing   -> err [ "Undefined structure type: " ++ showPP y ]
         _ -> bad ("struct " ++ showPP x)
 
-    _ ->
-      case str of
-        SLeaf e -> pure (SLeaf (Const e ty))
-        _ -> bad "leaf"
+    STuple {} -> err ["Type error, unexpected tuple."]
+
+    SLeaf e -> pure (SLeaf (Const e ty))
 
   where
   liftF x (f,t) fi
