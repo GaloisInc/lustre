@@ -32,6 +32,8 @@ library
                        Language.Lustre.TypeCheck.Constraint,
                        Language.Lustre.TypeCheck.Arity,
                        Language.Lustre.TypeCheck.Monad,
+                       Language.Lustre.TypeCheck.Prims,
+                       Language.Lustre.TypeCheck.Utils,
 
                        Language.Lustre.Transform.OrderDecls,
                        Language.Lustre.Transform.NoStatic,
