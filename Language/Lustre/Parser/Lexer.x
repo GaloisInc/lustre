@@ -126,6 +126,7 @@ $white+         { return [] }
 ">="                { lexeme TokGeq }
 ">"                 { lexeme TokGt }
 "<>"                { lexeme TokNotEq }
+":="                { lexeme TokColonEq }
 
 
 "int"               { lexeme TokKwInt }
@@ -263,6 +264,7 @@ data Token =
   | TokSemi
   | TokDot
   | TokDotDot
+  | TokColonEq
 
   | TokOpenParen
   | TokCloseParen

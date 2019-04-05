@@ -59,6 +59,7 @@ import Language.Lustre.Panic
   '<'         { Lexeme { lexemeRange = $$, lexemeToken = TokLt } }
   '<='        { Lexeme { lexemeRange = $$, lexemeToken = TokLeq } }
   '='         { Lexeme { lexemeRange = $$, lexemeToken = TokEq } }
+  ':='        { Lexeme { lexemeRange = $$, lexemeToken = TokColonEq } }
   '>='        { Lexeme { lexemeRange = $$, lexemeToken = TokGeq } }
   '>'         { Lexeme { lexemeRange = $$, lexemeToken = TokGt } }
   '<>'        { Lexeme { lexemeRange = $$, lexemeToken = TokNotEq } }
@@ -174,7 +175,7 @@ import Language.Lustre.Panic
 %nonassoc 'int' 'real' 'floor'
 %nonassoc UMINUS 'pre' 'current'
 %left     '^' '.'
-%right    '['
+%right    '[' '{'
 %right    'fby'
 
 
@@ -544,15 +545,22 @@ expression :: { Expression }
                                       {% mkCondact $1 $6 $3 $5 Nothing }
   | 'condact' '(' BOOL',' expression ',' expression ')'
                                       { mkConstCondact $3 $5 $7 }
-  | name '{' '}'                      { at $1 $3 (Struct $1 []) }
-  | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 $3) }
-  | name '{' name 'with' SepEndBy1(';',field) '}'
-                                      { at $1 $6 (UpdateStruct (Just $1)
-                                                               (Var $3) $5) }
+  | record                            { $1 }
   | tuple                             { $1 }
+
 
 tuple :: { Expression }
   : '(' exprList ')'                 { at $1 $3 (tuple $2) }
+
+record :: { Expression }
+  : expression '{' '}'                      {% mkStruct $1 $3 [] }
+  | expression '{' SepEndBy1(';',field) '}' {% mkStruct $1 $4 $3 }
+  | expression '{' name 'with' SepEndBy1(';',field) '}'
+                                            {% mkStructU $1 $6 $3 $5 }
+  | expression '{' updFiled '}'       { at $1 $4 (UpdateStruct Nothing $1 [$3])}
+
+
+
 
 
 mergeCase :: { (SourceRange, MergeCase Expression) }
@@ -599,6 +607,9 @@ simpExpr :: { Expression }
 
 field :: { Field Expression }
   : ident '=' expression              { Field $1 $3 }
+
+updFiled :: { Field Expression }
+  : ident ':=' expression             { Field $1 $3 }
 
 clockExpr :: { ClockExpr }
   : name '(' ident ')'    { WhenClock ($1 <-> $4) (Var $1) $3 }
@@ -930,6 +941,33 @@ tuple xs =
   case xs of
     [x] -> x
     _   -> Tuple xs
+
+
+mkStruct :: Expression -> SourceRange -> [Field Expression] -> Parser Expression
+mkStruct e r2 fs =
+  do x <- toName e
+     pure $ at e r2 $ Struct x fs
+  where
+  toName e0 =
+    case e0 of
+      ERange _ e1 -> toName e1
+      Var x       -> pure x
+      _           -> happyErrorAt (sourceFrom (range e))
+
+mkStructU ::
+  Expression -> SourceRange -> Name -> [Field Expression] -> Parser Expression
+mkStructU e r2 y fs =
+  do x <- toName e
+     pure $ at e r2 $ UpdateStruct (Just x) (Var y) fs
+  where
+  toName e0 =
+    case e0 of
+      ERange _ e1 -> toName e1
+      Var x       -> pure x
+      _           -> happyErrorAt (sourceFrom (range e))
+
+
+
 
 --------------------------------------------------------------------------------
 

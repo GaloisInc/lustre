@@ -1,0 +1,29 @@
+PhaseToCore
+===========
+
+node (s.x : int, s.y : int, x : int)
+  returns (t.x, t.y)
+  assumes ()
+  shows ()
+let
+  t.x : int
+    = x
+   
+  t.y : int
+    = s.y
+tel
+
+--- Step 1 ---
+s.x : int  = 1
+s.y : int  = 2
+x : int  = 3
+t.x = 3
+t.y = 2
+--- Step 2 ---
+s.x : int  = 19
+s.y : int  = 20
+x : int  = 21
+t.x = 21
+t.y = 20
+--- Step 3 ---
+s.x : int  = (EOF)
