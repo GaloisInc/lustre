@@ -547,7 +547,8 @@ expression :: { Expression }
   | name '{' '}'                      { at $1 $3 (Struct $1 []) }
   | name '{' SepEndBy1(';',field) '}' { at $1 $4 (Struct $1 $3) }
   | name '{' name 'with' SepEndBy1(';',field) '}'
-                                      { at $1 $6 (UpdateStruct $1 (Var $3) $5) }
+                                      { at $1 $6 (UpdateStruct (Just $1)
+                                                               (Var $3) $5) }
   | tuple                             { $1 }
 
 tuple :: { Expression }

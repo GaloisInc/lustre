@@ -385,7 +385,7 @@ instantiateConst env expr
       Array es -> Array (map iConst es)
       Struct s fs -> Struct (iStructTy s) (map iField fs)
       UpdateStruct s e fs ->
-        UpdateStruct (iStructTy s) (iConst e) (map iField fs)
+        UpdateStruct (iStructTy <$> s) (iConst e) (map iField fs)
 
       WithThenElse e1 e2 e3 -> WithThenElse (iConst e1) (iConst e2) (iConst e3)
       Call (NodeInst n as) es Nothing ->
@@ -837,13 +837,26 @@ checkStruct s fs expected checkF =
 
 -- | Check a structure updatating expression.
 checkStructUpdate ::
-  Name -> Expression -> [Field Expression] -> Type ->
+  Maybe Name -> Expression -> [Field Expression] -> Type ->
   (Expression -> Type -> M Expression) ->
   M Expression
-checkStructUpdate s e fs expect checkF =
-  do (actualName, fieldTs) <- checkStructType s
-     e1 <- checkF e expect
+checkStructUpdate mbS e fs expect checkF =
+  do e1 <- checkF e expect
      distinctFields fs
+     (actualName, fieldTs) <-
+       case mbS of
+         Just s -> checkStructType s
+         Nothing ->
+           do t1 <- tidyType expect
+              case t1 of
+                NamedType name ->
+                  do fTs <- lookupStruct name
+                     pure (name,fTs)
+                TVar {} -> reportError "Failed to infer the type of struct."
+                _ -> reportError $ nestedError
+                       "Invalid struct update."
+                       [ "Expression is not a struct." ]
+
      fs1 <- for fs $ \f ->
               case find ((fName f ==) . fieldName) fieldTs of
                 Just ft ->
@@ -852,7 +865,7 @@ checkStructUpdate s e fs expect checkF =
                 Nothing -> reportError $
                   "Struct"                <+> backticks (pp actualName) <+>
                   "does not have a field" <+> backticks (pp (fName f))
-     pure (UpdateStruct actualName e1 fs1)
+     pure (UpdateStruct (Just actualName) e1 fs1)
 
 -- | Check that all of the fields are different.
 distinctFields :: [Field Expression] -> M ()

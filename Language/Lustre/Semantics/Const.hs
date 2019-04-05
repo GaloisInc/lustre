@@ -78,20 +78,21 @@ evalConst env expr =
              pure (VStruct name fs1)
       where name = nameOrigName s
 
-    UpdateStruct s y fes ->
+    UpdateStruct mbS y fes ->
       do uv <- evalConst env y
          fs <- Map.fromList <$> mapM (evalField env) fes
          case uv of
-           VStruct s' fs1
-              | s' == name ->
-                pure $ VStruct name
-                         [ Field i v1
-                         | Field i v <- fs1
-                         , let v1 = Map.findWithDefault v i fs
-                         ]
+           VStruct s fs1
+            | maybe True ((== s) . nameOrigName) mbS ->
+              pure $ VStruct s
+                       [ Field i v1
+                       | Field i v <- fs1
+                       , let v1 = Map.findWithDefault v i fs
+                       ]
+             | otherwise -> typeError "struct update"
+                                      ("a `" ++ showPP s ++ "`")
 
-           _ -> typeError "struct update" ("a `" ++ show s ++ "`.")
-        where name = nameOrigName s
+           _ -> typeError "struct update" "a struct"
 
     Select e sel ->
       do s <- evalSel env sel

@@ -978,7 +978,7 @@ evalDynExpr eloc env expr =
 
     -- INVARIANT: the fields in a struct value are in the same order is
     -- in the declaration.
-    UpdateStruct s e fs -> evalUpdExprStruct env s e fs
+    UpdateStruct ~(Just s) e fs -> evalUpdExprStruct env s e fs
 
     WithThenElse e1 e2 e3 ->
       case evalExprToVal env e1 of
@@ -1160,7 +1160,7 @@ evalUpdExprStruct ::
 evalUpdExprStruct env s e fs =
   do e1  <- evalDynExpr NestedExpr env e
      fs' <- mapM evalField fs
-     pure (UpdateStruct s e1 fs')
+     pure (UpdateStruct (Just s) e1 fs')
   where
   evalField (Field l e1) = Field l <$> evalDynExpr NestedExpr env e1
 

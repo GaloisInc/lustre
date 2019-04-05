@@ -243,7 +243,7 @@ Precedences:
 13   %nonassoc UMINUS 'pre' 'current'     PREF
 14   %left     '^' '.'
 15   %right     'fby'
-16   %right    '['
+16   %right    '[' '{'
 -}
 instance Pretty Expression where
   ppPrec n expr =
@@ -262,9 +262,13 @@ instance Pretty Expression where
       Array es      -> brackets (commaSep (map pp es))
       Select e s    -> ppPrec 13 e <> pp s
       Struct s fs   -> pp s <+> braces (vcat (punctuate semi (map pp fs)))
-      UpdateStruct s x fs ->
-          pp s <+> braces (pp x <+> "with" <+>
-                              vcat (punctuate semi (map pp fs)))
+      UpdateStruct mb x fs ->
+        case mb of
+          Just s -> pp s <+> braces (pp x <+> "with" <+>
+                             vcat (punctuate semi (map pp fs)))
+          Nothing -> ppPrec 16 x <+> hsep (map ppF fs)
+            where ppF f = braces (pp (fName f) <+> ":=" <+> pp (fValue f))
+
       WithThenElse e1 e2 e3 -> parenIf (n > 0) doc
         where doc = "with" <+> pp e1 $$ nest 2 ("then" <+> ppPrec 0 e2)
                                      $$ nest 2 ("else" <+> ppPrec 0 e3)

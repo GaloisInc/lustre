@@ -558,7 +558,7 @@ evalExpr expr =
     Array es -> SArray <$> traverse evalExpr es
 
     Struct s fs         -> SStruct (nameOrigName s) <$> traverse evalField fs
-    UpdateStruct s e es -> evalStructUpdate (nameOrigName s) e es
+    UpdateStruct ~(Just s) e es -> evalStructUpdate (nameOrigName s) e es
 
     Select e sel ->
       do e1 <- evalExpr e
