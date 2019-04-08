@@ -37,10 +37,11 @@ runTC m =
            }
 
 data Constraint = Subtype Type Type
-                | Arith1 Doc Type Type      -- ^ op, in, out
+                | Arith1 Op1 Type Type      -- ^ op, in, out
                 | Arith2 Doc Type Type Type -- ^ op, in1, in2, out
                 | CmpEq  Doc Type Type      -- ^ op, in1, in2
                 | CmpOrd Doc Type Type      -- ^ op, in1, in2
+
 
 
 newtype M a = M { unM ::
@@ -416,4 +417,16 @@ zonkEqn eqn =
     IVC {} -> pure eqn
     Define lhs e -> Define lhs <$> zonkExpr e
 
+
+instance Pretty Constraint where
+  ppPrec _ ctr =
+    case ctr of
+      Subtype t1 t2     -> ppGen "SubType" [t1,t2]
+      Arith1 _ t1 t2    -> ppGen "Arith1" [t1,t2]
+      Arith2 _ t1 t2 t3 -> ppGen "Arigh2" [t1,t2,t3]
+      CmpEq  _ t1 t2    -> ppGen "Eq" [t1,t2]
+      CmpOrd _ t1 t2    -> ppGen "Ord" [t1,t2]
+    where
+    ppHigh = ppPrec 16
+    ppGen c ts = c <+> hsep (map ppHigh ts)
 
