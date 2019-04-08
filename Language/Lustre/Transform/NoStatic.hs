@@ -380,13 +380,13 @@ evalExpr :: Env -> Expression -> Expression
 evalExpr env expr =
   case expr of
     ERange r e -> ERange r (evalExpr (inRange r env) e)
-    _          -> valToExpr env (evalExprToVal env expr)
+    _          -> valToExpr (evalExprToVal env expr)
 
 -- | Convert an evaluated expression back into an ordinary expression.
 -- Note that the resulting expression does not have meaninful position
 -- information.
-valToExpr :: Env -> Value -> Expression
-valToExpr env val =
+valToExpr :: Value -> Expression
+valToExpr val =
   case val of
     VInt i        -> Lit (Int i)
     VBool b       -> Lit (Bool b)
@@ -394,9 +394,9 @@ valToExpr env val =
 
     -- we keep enums as variables, leaving representation choice for later.
     VEnum _ x     -> Var (origNameToName x)
-    VStruct s fs  -> Struct (origNameToName s) (fmap (fmap (valToExpr env)) fs)
+    VStruct s fs  -> Struct (origNameToName s) (fmap (fmap valToExpr) fs)
 
-    VArray  vs    -> Array (map (valToExpr env) vs)
+    VArray  vs    -> Array (map valToExpr vs)
 
 
 -- | Evaluate a selector.  The indixes in a selector are constants.
@@ -986,7 +986,7 @@ evalDynExpr eloc env expr =
                         else evalDynExpr eloc env e3
         v       -> panic "evalDynExpr"
                       [ "Decision in `with-then-else` is not a `bool`"
-                      , "*** Value: " ++ showPP (valToExpr env v)
+                      , "*** Value: " ++ showPP (valToExpr v)
                       ]
 
     Merge i ms ->
@@ -1146,7 +1146,7 @@ evalMergeConst env v ms =
       | evalExprToVal env p == v -> evalDynExpr NestedExpr env e
       | otherwise                -> evalMergeConst env v more
     [] -> panic "evalMergeConst" [ "None of the branches of a merge matched:"
-                                 , "*** Value: " ++ showPP (valToExpr env v)
+                                 , "*** Value: " ++ showPP (valToExpr v)
                                  ]
 
 -- | Evaluate a case branch of a merge construct.
@@ -1198,7 +1198,7 @@ evalNewStructWithDefs env s fs def =
       Just e -> e
       Nothing ->
         case mbV of
-          Just v   -> valToExpr env v
+          Just v   -> valToExpr v
           Nothing  -> panic "evalNewStructWithDefs"
                             [ "Missing field in struct:"
                             , "*** Name: " ++ showPP f
