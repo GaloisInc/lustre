@@ -11,6 +11,7 @@ import qualified Language.Lustre.Semantics.Const as C
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 
+
 -- Quick and dirty "defaulting" for left-over typing constraints.
 -- To do this properly, we should keep lower and upper bounds on variables.
 solveConstraints :: M ()
@@ -52,7 +53,7 @@ solveConstraints =
                         [ "Type:" <+> pp a
                         , "Fits in:" <+> pp b]
 
-      Arith1 op a b   -> opError op [a] [b]
+      Arith1 op a b   -> opError (pp op) [a] [b]
       Arith2 op a b c -> opError op [a,b] [c]
       CmpEq op a b    -> opError op [a,b] []
       CmpOrd op a b   -> opError op [a,b] []
@@ -84,23 +85,38 @@ solveConstraint (r,ctr) =
        CmpOrd op a b    -> classOrd op a b
 
 
-classArith1 :: Doc -> Type -> Type -> M Bool
+classArith1 :: Op1 -> Type -> Type -> M Bool
 classArith1 op s0 t0 =
   do t <- tidyType t0
+     s <- tidyType s0
      case t of
-       IntType  -> subType s0 IntType >> pure True
-       RealType -> subType s0 RealType >> pure True
+       IntType  -> subType s IntType >> pure True
+       RealType -> subType s RealType >> pure True
+       IntSubrange e1 e2 ->
+         case s of
+           IntSubrange e1' e2' | Neg <- op ->
+              do leqConsts e1 (neg e2')
+                 leqConsts (neg e1') e2
+                 pure True
+           TVar {} -> subType s (IntSubrange (neg e2) (neg e1)) >> pure True
+           _ -> typeError
+
        TVar {} ->
-         do s <- tidyType s0
-            case s of
-              IntType         -> subType IntType t0 >> pure True
-              IntSubrange {}  -> subType IntType t0 >> pure True
-              RealType        -> subType RealType t0 >> pure True
-              TVar {}         -> addConstraint (Arith1 op s0 t) >> pure False
-              _               -> typeError
+         case s of
+           IntType         -> subType IntType t >> pure True
+           IntSubrange e1' e2' | Neg <- op ->
+             subType (IntSubrange (neg e2') (neg e1')) t >> pure True
+           RealType        -> subType RealType t >> pure True
+           TVar {}         -> addConstraint (Arith1 op s t) >> pure False
+           _               -> typeError
+
        _ -> typeError
   where
-  typeError = reportError (opError op [s0] [t0])
+  typeError = reportError (opError (pp op) [s0] [t0])
+  neg       = normConstExpr . eOp1 noLoc Neg
+  noLoc     = SourceRange { sourceFrom = noPos, sourceTo = noPos }
+  noPos     = SourcePos { sourceIndex = -1, sourceLine = -1
+                        , sourceColumn = -1, sourceFile = "" }
 
 
 -- | Can we do binary arithemtic on this type, and if so what's the
@@ -223,8 +239,8 @@ subType x y =
 
        ArrayType elT n ->
          do elT' <- newTVar
-            _    <- subType elT elT'
             _    <- sameType (ArrayType elT' n) y
+            _    <- subType elT elT'
             pure True
 
        TVar {} ->
@@ -237,8 +253,8 @@ subType x y =
               NamedType {} -> sameType s t >> pure True
               ArrayType elT sz ->
                 do elT' <- newTVar
-                   _    <- subType elT' elT
                    sameType s (ArrayType elT' sz)
+                   _    <- subType elT' elT
                    pure True
               IntType        -> addConstraint (Subtype s t) >> pure False
               IntSubrange {} -> addConstraint (Subtype s t) >> pure False
@@ -254,15 +270,21 @@ subType x y =
 -- checker to verify on each step.
 
 
-normConstExpr :: Expression -> Maybe C.Value
-normConstExpr expr =
+evConstExpr :: Expression -> Maybe C.Value
+evConstExpr expr =
   case C.evalConst C.emptyEnv expr of
     Left _ -> Nothing
     Right v -> Just v
 
+normConstExpr :: Expression -> Expression
+normConstExpr expr =
+  case evConstExpr expr of
+    Nothing -> expr
+    Just v -> C.valToExpr v
+
 intConst :: Expression -> M Integer
 intConst e =
-  case normConstExpr e of
+  case evConstExpr e of
     Just (C.VInt a) -> pure a
     _ -> reportError $ nestedError
            "Constant expression is not a concrete integer."
@@ -277,8 +299,8 @@ sameConsts e1 e2 =
     (Const x _, _)  -> sameConsts x e2
     (_, Const x _)  -> sameConsts e1 x
     (Var x, Var y) | x == y -> pure ()
-    _ | x <- normConstExpr e1
-      , y <- normConstExpr e2
+    _ | x <- evConstExpr e1
+      , y <- evConstExpr e2
       , x == y -> pure ()
 
     _ -> reportError $ nestedError

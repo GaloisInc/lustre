@@ -59,6 +59,7 @@ checkTypeDecl td m =
 
         IsStruct fs ->
           do fs1 <- mapM checkFieldType fs
+             solveConstraints
              mapM_ checkDup $ group $ sort $ map fieldName fs1
              let ty  = StructTy fs1
                  newTD = td { typeDef = Just (IsStruct fs1) }
@@ -490,6 +491,7 @@ checkLocalDecl ld m =
 checkConstDef :: ConstDef -> M a -> M (ConstDef, a)
 checkConstDef c m =
   do (c1,t) <- checkDef
+     solveConstraints
      addFst c1 (withConst (constName c) t m)
   where
   checkDef =
@@ -580,7 +582,7 @@ checkType ty =
          pure ty -- or the resolved type?
     ArrayType t n ->
       do n1 <- checkConstExpr n IntType
-         leqConsts (Lit (Int 0)) n
+         leqConsts (Lit (Int 0)) n1
          t1 <- checkType t
          pure (ArrayType t1 n1)
 
@@ -630,7 +632,7 @@ checkConstExpr expr ty =
   allowUnsafe   False $
   checkExpr expr [ CType { cType = ty, cClock = BaseClock } ]
   {- NOTE: the elaborated result will contain `Const` annotations,
-  which is a little bogus, but they will go away in the `NoStatic pass. -}
+     which is a little bogus, but they will go away in the `NoStatic pass. -}
 
 -- | Check that the expression has the given type.
 checkExpr1 :: Expression -> CType -> M Expression
@@ -728,8 +730,8 @@ checkExpr expr tys =
                do ty <- one tys
                   e2' <- checkConstExpr e2 IntType
                   elT <- newTVar
+                  ensure (Subtype (ArrayType elT e2') (cType ty))
                   e1' <- checkExpr e1 [ty { cType = elT }]
-                  ensure (Subtype (ArrayType elT e2) (cType ty))
                   pure (eOp2 r Replicate e1' e2')
              _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
 

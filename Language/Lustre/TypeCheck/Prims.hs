@@ -107,7 +107,7 @@ checkOp1 r op e tys =
         do ty <- one tys
            t  <- newTVar
            e1 <- checkExpr1 e ty { cType = t }
-           ensure (Arith1 "-" t (cType ty))
+           ensure (Arith1 Neg t (cType ty))
            pure e1
 
       IntCast ->
