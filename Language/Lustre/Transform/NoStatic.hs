@@ -57,6 +57,7 @@ import Text.PrettyPrint(punctuate,comma,hsep)
 import Language.Lustre.AST
 import Language.Lustre.Monad
 import qualified Language.Lustre.Semantics.Const as C
+import Language.Lustre.Semantics.Const (valToExpr)
 import Language.Lustre.Semantics.Value
 import Language.Lustre.Panic(panic)
 import Language.Lustre.Pretty
@@ -381,22 +382,6 @@ evalExpr env expr =
   case expr of
     ERange r e -> ERange r (evalExpr (inRange r env) e)
     _          -> valToExpr (evalExprToVal env expr)
-
--- | Convert an evaluated expression back into an ordinary expression.
--- Note that the resulting expression does not have meaninful position
--- information.
-valToExpr :: Value -> Expression
-valToExpr val =
-  case val of
-    VInt i        -> Lit (Int i)
-    VBool b       -> Lit (Bool b)
-    VReal r       -> Lit (Real r)
-
-    -- we keep enums as variables, leaving representation choice for later.
-    VEnum _ x     -> Var (origNameToName x)
-    VStruct s fs  -> Struct (origNameToName s) (fmap (fmap valToExpr) fs)
-
-    VArray  vs    -> Array (map valToExpr vs)
 
 
 -- | Evaluate a selector.  The indixes in a selector are constants.

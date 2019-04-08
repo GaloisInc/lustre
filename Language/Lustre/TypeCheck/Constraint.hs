@@ -7,6 +7,7 @@ import Data.Maybe(catMaybes)
 
 import Language.Lustre.AST
 import Language.Lustre.TypeCheck.Monad
+import qualified Language.Lustre.Semantics.Const as C
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 
@@ -247,15 +248,25 @@ subType x y =
 
 --------------------------------------------------------------------------------
 
+
+-- XXX: This is temporary.  Eventually, we should make proper constraints,
+-- and either try to solve them statically, or just generate them for the
+-- checker to verify on each step.
+
+
+normConstExpr :: Expression -> Maybe C.Value
+normConstExpr expr =
+  case C.evalConst C.emptyEnv expr of
+    Left _ -> Nothing
+    Right v -> Just v
+
 intConst :: Expression -> M Integer
-intConst x =
-  case x of
-    ERange _ y  -> intConst y
-    Const e _   -> intConst e
-    Lit (Int a) -> pure a
+intConst e =
+  case normConstExpr e of
+    Just (C.VInt a) -> pure a
     _ -> reportError $ nestedError
            "Constant expression is not a concrete integer."
-           [ "Expression:" <+> pp x ]
+           [ "Expression:" <+> pp e ]
 
 
 sameConsts :: Expression -> Expression -> M ()
@@ -266,7 +277,10 @@ sameConsts e1 e2 =
     (Const x _, _)  -> sameConsts x e2
     (_, Const x _)  -> sameConsts e1 x
     (Var x, Var y) | x == y -> pure ()
-    (Lit x, Lit y) | x == y -> pure ()
+    _ | x <- normConstExpr e1
+      , y <- normConstExpr e2
+      , x == y -> pure ()
+
     _ -> reportError $ nestedError
            "Constants do not match"
            [ "Constant 1:" <+> pp e1

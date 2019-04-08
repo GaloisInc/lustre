@@ -1,5 +1,7 @@
 module Language.Lustre.Semantics.Const
-  ( evalConst, evalSel, evalSelFun, Env(..), emptyEnv, evalIntConst)
+  ( evalConst, evalSel, evalSelFun, Env(..), emptyEnv, evalIntConst, valToExpr
+  , Value(..)
+  )
   where
 
 import Data.Map ( Map )
@@ -194,5 +196,24 @@ evalSelFun sel v =
     SelectField f   -> sSelectField f v
     SelectElement i -> sSelectIndex i v
     SelectSlice s   -> sSelectSlice s v
+
+
+-- | Convert an evaluated expression back into an ordinary expression.
+-- Note that the resulting expression does not have meaninful position
+-- information.
+valToExpr :: Value -> Expression
+valToExpr val =
+  case val of
+    VInt i        -> Lit (Int i)
+    VBool b       -> Lit (Bool b)
+    VReal r       -> Lit (Real r)
+
+    -- we keep enums as variables, leaving representation choice for later.
+    VEnum _ x     -> Var (origNameToName x)
+    VStruct s fs  -> Struct (origNameToName s) (fmap (fmap valToExpr) fs)
+
+    VArray  vs    -> Array (map valToExpr vs)
+
+
 
 

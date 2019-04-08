@@ -1,7 +1,5 @@
 module Language.Lustre.Semantics.BuiltIn
-  ( -- * Static
-
-    -- * Constants
+  ( -- * Constants
     sInt, sReal, sBool
 
     -- ** Coercions
