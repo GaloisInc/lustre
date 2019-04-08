@@ -1033,7 +1033,7 @@ evalDynExpr eloc env expr =
                          NestedExpr -> pure (nameCallSites env)
          if shouldName
             then nameCallSite env ni es' cl
-            else pure (Call ni es' cl0)
+            else pure (Call ni es' cl)
 
   where
   isTuple e =
