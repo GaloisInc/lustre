@@ -5,7 +5,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           Data.List (find)
-import Control.Monad(when,unless,zipWithM_,zipWithM,replicateM)
+import Control.Monad(when,unless,zipWithM_,zipWithM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 import Data.Traversable(for)
@@ -16,7 +16,6 @@ import Language.Lustre.Panic
 import Language.Lustre.Monad(LustreM)
 import Language.Lustre.TypeCheck.Monad
 import Language.Lustre.TypeCheck.Constraint
-import Language.Lustre.TypeCheck.Arity
 import Language.Lustre.TypeCheck.Prims
 import Language.Lustre.TypeCheck.Utils
 
@@ -625,52 +624,17 @@ checkLHS lhs =
 
 
 -- | Infer the type of a constant expression.
--- XXX: Perhaps we can eliminate this function by just using `checkExpr`
--- but disable temporal operators.... We'd have to do something about the
--- clock (perhaps use the base clock?), and also we'd have to treat local
--- variables (parameters or locals) as temporal constructs.
 checkConstExpr :: Expression -> Type -> M Expression
 checkConstExpr expr ty =
-  case expr of
-    ERange r e -> inRange r (checkConstExpr e ty)
-    Var x      -> checkConstVar x ty
-    Lit l      -> do ensure (Subtype (inferLit l) ty)
-                     pure (Lit l)
-    When {}    -> reportError "`when` is not a constant expression."
-    Tuple {}   -> reportError "tuples cannot be used in constant expressions."
-    Array es   ->
-      do elT <- newTVar
-         es1 <- mapM (`checkConstExpr` elT) es
-         let n = Lit $ Int $ fromIntegral $ length es
-         ensure (Subtype (ArrayType elT n) ty)
-         pure (Array es1)
-
-    Struct s fs -> checkStruct s fs ty checkConstExpr
-
-    UpdateStruct s e fs -> checkStructUpdate s e fs ty checkConstExpr
-
-    Select e s ->
-      do t <- newTVar
-         e1 <- checkConstExpr e t
-         (s1,t1) <- inferSelector s t
-         ensure (Subtype t1 ty)
-         pure (Select e1 s1)
-
-    WithThenElse e1 e2 e3 ->
-      WithThenElse <$> checkConstExpr e1 BoolType
-                   <*> checkConstExpr e2 ty
-                   <*> checkConstExpr e3 ty
-
-    Merge {}  -> reportError "`merge` is not a constant expression."
-    Call {}   -> reportError "constant expressions do not support calls."
-    Const {}  -> panic "checkConstExpr" [ "Unexpected `Const`" ]
+  allowTemporal False $
+  allowUnsafe   False $
+  checkExpr expr [ CType { cType = ty, cClock = BaseClock } ]
+  {- NOTE: the elaborated result will contain `Const` annotations,
+  which is a little bogus, but they will go away in the `NoStatic pass. -}
 
 -- | Check that the expression has the given type.
 checkExpr1 :: Expression -> CType -> M Expression
 checkExpr1 e t = checkExpr e [t]
-
-
-
 
 {- | Check if an expression has the given type.
 Tuples and function calls may return multiple results,
@@ -782,6 +746,9 @@ checkExpr expr tys =
     Const {} -> panic "checkExpr" [ "Unexpected `Const` expression." ]
 
 
+{- | Ensure that the given named type is a struct.  If so, get the real
+name of the struct (e.g., if the original was an alias for a struct),
+and alsot its fields, in declaration order. -}
 checkStructType :: Name -> M (Name, [FieldType])
 checkStructType s =
   do ty   <- checkType (NamedType s)

@@ -1,5 +1,5 @@
 {-# Language OverloadedStrings #-}
-module Language.Lustre.TypeCheck.Prims where
+module Language.Lustre.TypeCheck.Prims ( checkPrim ) where
 
 import Data.Traversable(for)
 import Text.PrettyPrint
@@ -14,9 +14,15 @@ import Language.Lustre.TypeCheck.Constraint
 import {-# SOURCE #-} Language.Lustre.TypeCheck
 import Language.Lustre.TypeCheck.Utils
 
+
 -- | Infer the type of a call to a primitive node.
-checkPrim :: SourceRange -> PrimNode -> [StaticArg] -> [Expression] ->
-              [CType] -> M Expression
+checkPrim ::
+  SourceRange   {- ^ Location of operator -} ->
+  PrimNode      {- ^ Operator -} ->
+  [StaticArg]   {- ^ Static arguments -} ->
+  [Expression]  {- ^ Normal argumetns -} ->
+  [CType]       {- ^ Expected result -} ->
+  M Expression
 checkPrim r prim as es tys =
   case prim of
 
@@ -57,6 +63,7 @@ checkPrim r prim as es tys =
 
 
 
+-- | Check the argument to a "current" expression.
 checkCurrent :: Expression -> [CType] -> M Expression
 checkCurrent e tys =
   do checkTemporalOk "current"
@@ -67,10 +74,11 @@ checkCurrent e tys =
 
      -- By now we should have figured out the missing clock,
      -- so check straight away
-     let checkClock ty newTy =
-            sameClock (cClock ty) =<< clockParent (cClock newTy)
      zipWithM_ checkClock tys tys1
      pure e1
+
+  where
+  checkClock ty newTy = sameClock (cClock ty) =<< clockParent (cClock newTy)
 
 
 

@@ -289,8 +289,14 @@ resolveConstExpr expr =
       WithThenElse <$> resolveConstExpr e1
                    <*> resolveConstExpr e2 <*> resolveConstExpr e3
 
+    Call ni as c
+      | Just _ <- c -> bad "call with a clock from a constant"
+      | otherwise ->
+        do ni1 <- resolve ni
+           as1 <- traverse resolveConstExpr as
+           pure (Call ni1 as1 Nothing)
+
     Merge {}  -> bad "merge"
-    Call {}   -> bad "call to a node"
     Const {}  -> panic "resolveConstExpr" [ "Unexpected `Const` expresssion." ]
 
   where

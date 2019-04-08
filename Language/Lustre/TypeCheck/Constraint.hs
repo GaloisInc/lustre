@@ -251,6 +251,7 @@ intConst :: Expression -> M Integer
 intConst x =
   case x of
     ERange _ y  -> intConst y
+    Const e _   -> intConst e
     Lit (Int a) -> pure a
     _ -> reportError $ nestedError
            "Constant expression is not a concrete integer."
@@ -262,6 +263,8 @@ sameConsts e1 e2 =
   case (e1,e2) of
     (ERange _ x,_)  -> sameConsts x e2
     (_, ERange _ x) -> sameConsts e1 x
+    (Const x _, _)  -> sameConsts x e2
+    (_, Const x _)  -> sameConsts e1 x
     (Var x, Var y) | x == y -> pure ()
     (Lit x, Lit y) | x == y -> pure ()
     _ -> reportError $ nestedError
