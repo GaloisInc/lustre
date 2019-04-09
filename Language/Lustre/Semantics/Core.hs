@@ -73,16 +73,18 @@ instance Pretty State where
 initNode :: Node ->
             Maybe (Map Ident Value) {- Optional inital values -} ->
             (State, State -> Map Ident Value -> State)
-initNode node mbStart = (s0, stepNode node1 env)
+initNode node mbStart = (s0, stepNode node env)
   where
   s0     = State { sInitialized = Set.empty
                  , sValues = fromMaybe Map.empty mbStart
                  }
   env    = nodeEnv node
+{-
   node1  = case orderedEqns (nEqns node) of
              Right ok -> node { nEqns = ok }
              Left err -> panic "initNode" [ "Failed to order equations"
                                           , "*** Recursive: " ++ show err ]
+-}
 
 
 stepNode :: Node              {- ^ Node, with equations properly ordered -} ->
@@ -90,7 +92,7 @@ stepNode :: Node              {- ^ Node, with equations properly ordered -} ->
             State             {- ^ Current state -} ->
             Map Ident Value   {- ^ Inputs -} ->
             State             {- ^ Next state -}
-stepNode node env old ins = foldl' (evalEqn env old) new (nEqns node)
+stepNode node env old ins = foldl' (evalEqnGrp env old) new (nEqns node)
   where
   new = State { sInitialized = sInitialized old
               , sValues      = ins
@@ -118,6 +120,27 @@ evalAtom s atom =
     Lit l _ -> evalLit l
     Var x -> evalVar s x
     Prim op as -> evalPrimOp op (map (evalAtom s) as)
+
+
+evalEqnGrp :: Map Ident CType ->
+              State ->
+              State ->
+              EqnGroup ->
+              State
+evalEqnGrp env old new grp =
+  case grp of
+    NonRec eqn -> evalEqn env old new eqn
+    Rec es ->
+      let evEq = evalEqn env old fin
+          sts  = map evEq es
+          getVal (x ::: _ := _) s = (x,Map.findWithDefault VNil x (sValues s))
+          newMap = Map.fromList (zipWith getVal es sts)
+          fin = State { sInitialized = Set.unions (map sInitialized sts)
+                      , sValues = Map.union newMap (sValues new)
+                      }
+      in fin
+
+
 
 
 evalEqn :: Map Ident CType {- ^ Types of identifier    -} ->
@@ -160,12 +183,12 @@ evalEqn env old new (x ::: _ `On` c := expr) =
 
   guarded = guardedOn c
 
-  guardedOn cl v =
+  guardedOn cl s =
     case cl of
-      BaseClock -> v
+      BaseClock -> s
       WhenTrue a ->
         case evalAtom new a of
-          VBool True -> guardedOn cl1 v
+          VBool True -> guardedOn cl1 s
             where Just cl1 = clockParent env cl
           _          -> hold
     where hold = new { sValues = Map.insert x (evalVar old x) (sValues new) }

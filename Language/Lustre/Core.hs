@@ -71,14 +71,27 @@ infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
                      , nOutputs     :: [Ident]
+
                      , nAssuming    :: [(PropName,Ident)]
                        -- ^ Assuming that these are true
+
                      , nShows       :: [(PropName,Ident)]
                        -- ^ Need to show that these are also true
-                     , nEqns        :: [Eqn]
+
+                     , nEqns        :: [EqnGroup]
+                       -- ^ Groups of recursive equations.
                      } deriving Show
 
+-- | One or more equations.
+data EqnGroup = NonRec Eqn    -- ^ A non-recursive equation
+              | Rec [Eqn]     -- ^ A group of recursive equations.
+                deriving Show
 
+grpEqns :: EqnGroup -> [Eqn]
+grpEqns g =
+  case g of
+    NonRec e -> [e]
+    Rec es   -> es
 
 
 --------------------------------------------------------------------------------
@@ -108,18 +121,14 @@ usesClock c =
     WhenTrue a -> usesAtom a
 
 -- | Order the equations.  Returns cycles on the left, if there are some.
-orderedEqns :: [Eqn] -> Either [ [Binder] ] [ Eqn ]
-orderedEqns eqns
-  | null bad  = Right good
-  | otherwise = Left bad
+orderedEqns :: [Eqn] -> [EqnGroup]
+orderedEqns eqns = map cvt (stronglyConnComp graph)
   where
   graph = [ (eqn, x, Set.toList (Set.union (usesClock c) (usesExpr e)))
               | eqn <- eqns, let (x ::: _ `On` c) := e = eqn ]
-
-  comps = stronglyConnComp graph
-
-  bad   = [ [ x | x := _ <- xs ] | CyclicSCC xs <- comps ]
-  good  = [ x | AcyclicSCC x <- comps ]
+  cvt x = case x of
+            AcyclicSCC e -> NonRec e
+            CyclicSCC es -> Rec es
 
 
 --------------------------------------------------------------------------------
@@ -186,6 +195,12 @@ ppEqn :: PPInfo -> Eqn -> Doc
 ppEqn env (b := e) =
   ppBinder env b $$ nest 2 ("=" <+> ppExpr env e)
 
+ppEqnGroup :: PPInfo -> EqnGroup -> Doc
+ppEqnGroup env grp =
+  case grp of
+    NonRec eqn -> ppEqn env eqn
+    Rec eqns   -> "rec" $$ nest 2 (vcatSep (map (ppEqn env) eqns))
+
 
 ppNode :: Node -> Doc
 ppNode node =
@@ -196,9 +211,11 @@ ppNode node =
             $$ text "shows" <+> ppTuple (map (ppIdent env .snd) (nShows node))
             )
   $$ text "let"
-  $$ nest 2 (vcatSep (map (ppEqn env) (nEqns node)))
+  $$ nest 2 (vcatSep (map (ppEqnGroup env) (nEqns node)))
   $$ text "tel"
-  where env = identVariants node
+  where
+  env = identVariants node
+
 
 
 -- | Pick a normalized number for the identifier in a node.
@@ -212,7 +229,7 @@ identVariants node = Map.fromList
                    $ fmap (`zip` [ 0 .. ])
                    $ Map.fromListWith (++)
                    $ map binderInfo
-                   $ nInputs node ++ [ b | b := _ <- nEqns node ]
+                   $ nInputs node ++ [ b | g <- nEqns node, b := _ <- grpEqns g]
 
   where
   binderInfo (x ::: _) = (identText x, [x])
@@ -251,7 +268,8 @@ instance Pretty Node where
 
 -- | Compute the typing environment for a node.
 nodeEnv :: Node -> Map Ident CType
-nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++ map fromE (nEqns nd)
+nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++
+                            map fromE (concatMap grpEqns (nEqns nd))
   where
   fromB (x ::: t) = (x,t)
   fromE (b := _)  = fromB b

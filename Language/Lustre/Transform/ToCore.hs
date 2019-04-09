@@ -66,15 +66,11 @@ evalNodeDecl enumCs nd
          eqnss <- mapM evalEqn (P.nodeEqns def)
          asts <- getAssertNames
          props <- getPropertyNames
-         eqs <- case C.orderedEqns (concat eqnss) of
-                 Left rs -> panic "evalNodeDecl" [ "recursive eqns"
-                                                 , "TODO: report properly" ]
-                 Right as -> pure as
          pure C.Node { C.nInputs   = ins
                      , C.nOutputs  = [ i | i C.::: _ <- outs ]
                      , C.nAssuming = asts
                      , C.nShows    = props
-                     , C.nEqns     = eqs
+                     , C.nEqns     = C.orderedEqns (concat eqnss)
                      }
 
   | otherwise = panic "evalNodeDecl"
