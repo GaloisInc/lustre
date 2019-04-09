@@ -286,6 +286,12 @@ checkStaticArgTypes actual expected =
 
   checkOut arg param = subCType (cTypeOf arg) (cTypeOf param)
 
+  subCType x y =
+    do ensure (Subtype (cType x) (cType y))
+       sameClock (cClock x) (cClock y)
+
+
+
 cTypeOf :: Binder -> CType
 cTypeOf b = CType { cType  = binderType b
                   , cClock = case binderClock b of
@@ -638,6 +644,16 @@ checkConstExpr expr ty =
 checkExpr1 :: Expression -> CType -> M Expression
 checkExpr1 e t = checkExpr e [t]
 
+matchTy :: Type -> Type -> M ()
+matchTy expect0 have0 =
+  do expect <- tidyType expect0
+     have   <- tidyType have0
+     case expect of
+        TVar a -> bindTVar a have
+        ArrayType el1 sz1
+          | ArrayType el2 sz2 <- have -> sameConsts sz1 sz2 >> matchTy el1 el2
+        _ -> ensure (Subtype have expect)
+
 {- | Check if an expression has the given type.
 Tuples and function calls may return multiple results,
 which is why we provide multiple clocked types. -}
@@ -654,7 +670,7 @@ checkExpr expr tys =
     Lit l ->
       do ty <- one tys
          let lt = inferLit l
-         ensure (Subtype lt (cType ty))
+         matchTy (cType ty) lt
          pure (Const (Lit l) ty)
 
     e `When` c ->
@@ -680,9 +696,9 @@ checkExpr expr tys =
       do ty  <- one tys
          elT <- newTVar
          let n = Lit $ Int $ fromIntegral $ length es
-         ensure (Subtype (ArrayType elT n) (cType ty))
          let elCT = ty { cType = elT }
          es1 <- mapM (`checkExpr1` elCT) es
+         matchTy (cType ty) (ArrayType elT n)
          pure (Array es1)
 
     Select e s ->
@@ -690,7 +706,7 @@ checkExpr expr tys =
          recT      <- newTVar
          e1        <- checkExpr1 e ty { cType = recT }
          (s1,t1)   <- inferSelector s recT
-         ensure (Subtype t1 (cType ty))
+         matchTy (cType ty) t1
          pure (Select e1 s1)
 
     Struct s fs ->
@@ -730,8 +746,8 @@ checkExpr expr tys =
                do ty <- one tys
                   e2' <- checkConstExpr e2 IntType
                   elT <- newTVar
-                  ensure (Subtype (ArrayType elT e2') (cType ty))
                   e1' <- checkExpr e1 [ty { cType = elT }]
+                  matchTy (cType ty) (ArrayType elT e2')
                   pure (eOp2 r Replicate e1' e2')
              _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
 
@@ -771,7 +787,7 @@ checkStruct :: Name -> [Field Expression] -> Type ->
                M Expression
 checkStruct s fs expected checkF =
   do (actualName, fieldTs) <- checkStructType s
-     ensure (Subtype (NamedType actualName) expected)
+     matchTy expected (NamedType actualName)
      distinctFields fs
 
      let fieldMap = Map.fromList [ (fName f, f) | f <- fs ]
@@ -935,7 +951,8 @@ checkCall f as es0 cl0 tys =
   checkOut cl mp b ty =
     do let t = binderType b
        c <- renBinderClock cl mp b
-       subCType CType { cClock = c, cType = t } ty
+       matchTy (cType ty) t
+       sameClock (cClock ty) c
 
 
 
@@ -954,14 +971,18 @@ checkMergeCase i (MergeCase p e) it ts =
 -- | Check the type of a variable.
 checkVar :: Name -> CType -> M Expression
 checkVar x ty =
+  inRange (range x) $
   case x of
     Unqual i ->
       case rnThing (nameOrigName x) of
         AVal   -> do (j,c) <- checkLocalVar i
-                     subCType c ty
+                     sameClock (cClock ty) (cClock c)
+                     matchTy   (cType ty) (cType c)
                      pure (Var (Unqual j))
-        AConst -> do y <- checkConstVar x (cType ty)
-                     pure (Const y ty)
+        AConst -> do t1 <- lookupConst x
+                     matchTy (cType ty) t1
+                     pure (Const (Var x) ty)
+
         t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
                               , "*** Name: " ++ showPP x
                               , "*** Thing: " ++ showPP t ]
@@ -970,13 +991,6 @@ checkVar x ty =
                                  , "*** Name: " ++ showPP x ]
 
 
-
--- | Check the type of a named constnat.
-checkConstVar :: Name -> Type -> M Expression
-checkConstVar x ty = inRange (range x) $
-                     do t1 <- lookupConst x
-                        ensure (Subtype t1 ty)
-                        pure (Var x)
 
 -- | Check a local variable. Returns the elaborated variable and its type.
 checkLocalVar :: Ident -> M (Ident, CType)
@@ -1061,14 +1075,6 @@ inferSelector sel ty0 =
 
 
 
-
---------------------------------------------------------------------------------
--- Comparsions of types
-
-subCType :: CType -> CType -> M ()
-subCType x y =
-  do ensure (Subtype (cType x) (cType y))
-     sameClock (cClock x) (cClock y)
 
 
 
