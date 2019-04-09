@@ -469,16 +469,19 @@ checkEnoughStaticArgs ni as =
 checkNodeBody :: NodeBody -> M NodeBody
 checkNodeBody nb = addLocals (nodeLocals nb)
   where
-  -- XXX: after checking that equations are OK individually,
-  -- we should check that the LHS define proper values
-  -- (e.g., no missing parts of structs/arrays etc, no repeated declarations)
-  -- (NOTE2: although, with partial specifications, some of that might be OK?)
-  -- XXX: we also need to check that all outputs were defined.
-  --      (although partial specs are also OK sometimes?)
-  -- XXX: also check that that all locals have definitions
-  --      (again, partial specs ok?)
-  -- XXX: also, we should check that equations don't use values
-  -- that are not yet defined (e.g., x = x, not OK, but x = pre x is OK)
+  {- NOTE: there are all kinds of things that one could check here, if
+  we intentd to run the Lustre program.  For example, all variables should
+  have definitions, and maybe we don't want recursive equations.
+  However, when using Lustre as a front-end to a model checker, it is sometimes
+  conveninet to relax such issues.  In that case we think of the equations
+  more in their math form: not so much LHS is defined by RHS, but rather
+  we'd just like them to be equal.  With that mind set it makes sense to
+  allow partial specifications, and even recursive ones:  the result may
+  be that we transition to multiple next states (i.e., we are no longer
+  deterministic), or perhaps we get stuck (e.g., if a recursive equation
+  has no fixed point).
+  -}
+
   addLocals ls =
     case ls of
       []       -> do es <- mapM checkEquation (nodeEqns nb)
