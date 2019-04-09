@@ -1,0 +1,4 @@
+node main(b : bool) returns (x : int)
+let
+  x = if b then x else 1;
+tel

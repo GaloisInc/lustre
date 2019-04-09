@@ -1,0 +1,21 @@
+PhaseToCore
+===========
+
+node (b : bool)
+  returns (x)
+  assumes ()
+  shows ()
+let
+  rec
+    x : int
+      = ITE(b, x, 1)
+tel
+
+--- Step 1 ---
+b : bool  = False
+x = 1
+--- Step 2 ---
+b : bool  = False
+x = 1
+--- Step 3 ---
+b : bool  = (EOF)
