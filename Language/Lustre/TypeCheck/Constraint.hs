@@ -9,7 +9,58 @@ import Language.Lustre.AST
 import Language.Lustre.TypeCheck.Monad
 import qualified Language.Lustre.Semantics.Const as C
 import Language.Lustre.Pretty
+import Language.Lustre.Semantics.BuiltIn(eucledean_div_mod)
 import Language.Lustre.Panic
+
+
+-- | Compute the least upper bound of two types.
+tLUB :: Type -> Type -> M Type
+tLUB t1 t2 =
+  do t1' <- tidyType t1
+     t2' <- tidyType t2
+     let err  = reportError
+                   (nestedError "Incompatible types:" [ pp t1', pp t2' ])
+         tvar = reportError "XXX: Type variable"
+     case t1' of
+
+       BoolType ->
+         do _ <- subType t2' t1'
+            pure t1'
+
+       RealType ->
+        do _ <- subType t2' t1'
+           pure t1'
+
+       IntType ->
+        do _ <- subType t2' t1'
+           pure t1'
+
+       NamedType _ ->
+        do _ <- subType t2' t1'
+           pure t1'
+
+       ArrayType elT1 sz1 ->
+         case t2' of
+           ArrayType elT2 sz2 ->
+             do sameConsts sz1 sz2
+                t <- tLUB elT1 elT2
+                pure (ArrayType t sz1)
+           TVar {} -> tvar
+           _ -> err
+
+       IntSubrange l1 h1 ->
+         case t2' of
+           IntType -> pure t2'
+           IntSubrange l2 h2 ->
+             do (l3,h3) <- intervalUnion (l1,h1) (l2,h2)
+                pure (IntSubrange l3 h3)
+           TVar {} -> tvar
+           _ -> err
+
+       TypeRange {} -> panic "tLUB" ["Unexpected type range"]
+
+       TVar {} -> tvar
+
 
 
 -- Quick and dirty "defaulting" for left-over typing constraints.
@@ -53,8 +104,6 @@ solveConstraints =
                         [ "Type:" <+> pp a
                         , "Fits in:" <+> pp b]
 
-      Arith1 op a b   -> opError (pp op) [a] [b]
-      Arith2 op a b c -> opError op [a,b] [c]
       CmpEq op a b    -> opError op [a,b] []
       CmpOrd op a b   -> opError op [a,b] []
 
@@ -79,84 +128,57 @@ solveConstraint (r,ctr) =
   do ctr1 <- tidyConstraint ctr
      case ctr1 of
        Subtype a b      -> subType a b
-       Arith1 op a b    -> classArith1 op a b
-       Arith2 op a b c  -> classArith2 op a b c
        CmpEq op a b     -> classEq op a b
        CmpOrd op a b    -> classOrd op a b
 
 
-classArith1 :: Op1 -> Type -> Type -> M Bool
-classArith1 op s0 t0 =
-  do t <- tidyType t0
-     s <- tidyType s0
-     case t of
-       IntType  -> subType s IntType >> pure True
-       RealType -> subType s RealType >> pure True
-       IntSubrange e1 e2 ->
-         case s of
-           IntSubrange e1' e2' | Neg <- op ->
-              do leqConsts e1 (neg e2')
-                 leqConsts (neg e1') e2
-                 pure True
-           TVar {} -> subType s (IntSubrange (neg e2) (neg e1)) >> pure True
-           _ -> typeError
+-- | Computes the type of the result of a unariy arithmetic operator.
+tArith1 :: SourceRange -> Op1 -> Type -> M Type
+tArith1 r op t =
+  do t' <- tidyType t
+     let err = reportError
+                ("Type" PP.<> pp t <+> "does not support unary" <+> pp op)
+         tvar = reportError "XXX: TVar"
+     case t' of
+       IntType  -> pure IntType
+       RealType -> pure RealType
+       IntSubrange l h ->
+         do (l1,h1) <- intervalFor1 r op (l,h)
+            pure (IntSubrange l1 h1)
+       TVar {} -> tvar
+       _ -> err
 
-       TVar {} ->
-         case s of
-           IntType         -> subType IntType t >> pure True
-           IntSubrange e1' e2' | Neg <- op ->
-             subType (IntSubrange (neg e2') (neg e1')) t >> pure True
-           RealType        -> subType RealType t >> pure True
-           TVar {}         -> addConstraint (Arith1 op s t) >> pure False
-           _               -> typeError
+-- | Computes the type of the result of a binary arithmetic operator.
+tArith2 :: SourceRange -> Op2 -> Type -> Type -> M Type
+tArith2 r op t1 t2 =
+  do t1' <- tidyType t1
+     t2' <- tidyType t2
+     let err = reportError $ nestedError
+               ("Operation" <+> pp op <+> "is not supported on types:")
+               [ pp t1', pp t2' ]
+         tvar = reportError "XXX: TVAR"
 
-       _ -> typeError
-  where
-  typeError = reportError (opError (pp op) [s0] [t0])
-  neg       = normConstExpr . eOp1 noLoc Neg
-  noLoc     = SourceRange { sourceFrom = noPos, sourceTo = noPos }
-  noPos     = SourcePos { sourceIndex = -1, sourceLine = -1
-                        , sourceColumn = -1, sourceFile = "" }
+     case t1' of
+       IntType  -> subType t2' IntType  >> pure t1'
+       RealType -> subType t2' RealType >> pure t1'
 
+       IntSubrange l1 h1 ->
+         case t2' of
+           IntType -> pure t2'
+           IntSubrange l2 h2 ->
+             do (l3,h3) <- intervalFor2 r op (l1,h1) (l2,h2)
+                pure (IntSubrange l3 h3)
+           TVar {} -> tvar
+           _ -> err
 
--- | Can we do binary arithemtic on this type, and if so what's the
--- type of the answer.
-classArith2 :: Doc -> Type -> Type -> Type -> M Bool
-classArith2 op s0 t0 r0 =
-  do r <- tidyType r0
-     case r of
-       IntType  -> subType s0 IntType  >> subType t0 IntType >> pure True
-       RealType -> subType s0 RealType >> subType t0 RealType >> pure True
-       TVar {}  ->
-         do s <- tidyType s0
-            case s of
-              IntType  -> subType t0 IntType  >> subType IntType r >> pure True
-              IntSubrange {} ->
-                subType t0 IntType >> subType IntType r >> pure True
-              RealType -> subType t0 RealType >> subType RealType r >> pure True
-              TVar {} ->
-                do t <- tidyType t0
-                   case t of
-                     IntType  ->
-                        subType s0 IntType  >> subType IntType r >> pure True
-                     IntSubrange {} ->
-                        subType t0 IntType >> subType IntType r >> pure True
-                     RealType ->
-                        subType s0 RealType >> subType RealType r >> pure True
-                     TVar {} -> addConstraint (Arith2 op s t r) >> pure False
-                     _ -> typeError
-              _ -> typeError
-       _ -> typeError
-
-  where
-  typeError = reportError (opError op [s0,t0] [r0])
+       TVar {} -> tvar
+       _       -> err
 
 
 
 
 
-
--- | Are these types comparable of equality
+-- | Checks that the given types can be compared for equality.
 classEq :: Doc -> Type -> Type -> M Bool
 classEq op s0 t0 =
   do s <- tidyType s0
@@ -290,6 +312,16 @@ intConst e =
            "Constant expression is not a concrete integer."
            [ "Expression:" <+> pp e ]
 
+intInterval :: (Expression,Expression) -> M (Integer,Integer)
+intInterval (l,h) =
+  do i <- intConst l
+     j <- intConst h
+     pure (i,j)
+
+fromIntInterval :: (Integer,Integer) -> M (Expression,Expression)
+fromIntInterval (l,h) = pure (Lit (Int l), Lit (Int h))
+
+
 
 sameConsts :: Expression -> Expression -> M ()
 sameConsts e1 e2 =
@@ -315,5 +347,47 @@ leqConsts e1 e2 =
      y <- intConst e2
      unless (x <= y) $ reportError
                      $ pp x <+> "is not less-than, or equal to" <+> pp y
+
+
+
+intervalFor1 :: SourceRange -> Op1 ->
+                (Expression,Expression) ->
+              M (Expression,Expression)
+intervalFor1 _ op i =
+  do (l,h) <- intInterval i
+     case op of
+       Neg -> fromIntInterval (negate h, negate l)
+       _ -> panic "intervalFor1" [ "Unexpected unary arithmetic operator"
+                                 , showPP op ]
+
+
+intervalFor2 :: SourceRange -> Op2 ->
+               (Expression,Expression) ->
+               (Expression,Expression) ->
+             M (Expression,Expression)
+intervalFor2 _ op i j =
+  do u@(l1,h1) <- intInterval i
+     v@(l2,h2) <- intInterval j
+     case op of
+       Add -> fromIntInterval (l1 + l2, h1 + h2)
+       Sub -> fromIntInterval (l1 - h2, h1 - l2)
+       Mul -> byCases u v $ \a b -> Just (a * b)
+       Div -> byCases u v $ \a b -> fst <$> eucledean_div_mod a b
+       Mod -> byCases u v $ \a b -> snd <$> eucledean_div_mod a b
+       _ -> panic "intervalFor2" [ "Unexpected binary arithmetic operator"
+                                 , showPP op ]
+  where
+  byCases (a,b) (x,y) f =
+    case catMaybes [f a x,f a y, f b x, f b y] of
+      [] -> reportError ("Invalid call to" <+> pp op)
+      ch -> fromIntInterval (minimum ch, maximum ch)
+
+intervalUnion :: (Expression,Expression) ->
+                 (Expression,Expression) ->
+               M (Expression,Expression)
+intervalUnion i j =
+  do (l1,h1) <- intInterval i
+     (l2,h2) <- intInterval j
+     fromIntInterval (min l1 l2, max h1 h2)
 
 

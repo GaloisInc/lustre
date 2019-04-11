@@ -33,9 +33,6 @@ arityMismatch x y =
     , "Actual arity:"   <+> int y
     ]
 
-tLUB :: Type -> Type -> M Type
-tLUB = undefined
-
 ctLUB :: CType -> CType -> M CType
 ctLUB ct1 ct2 =
   do sameClock (cClock ct1) (cClock ct2)

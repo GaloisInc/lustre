@@ -6,6 +6,7 @@ import qualified Data.Set as Set
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Maybe(listToMaybe)
+import Data.Foldable(for_)
 import Text.PrettyPrint as PP
 import MonadLib
 
@@ -19,6 +20,8 @@ import Language.Lustre.Panic
 runTC :: M a -> LustreM a
 runTC m =
   do (a,_finS) <- runStateT rw0 $ runReaderT ro0 $ unM m
+     -- L.logMessage "Clock subst:"
+     -- dumpClockSubstLustre (rwClockVarSubst _finS)
      pure a
   where
   ro0 = RO { roConstants  = Map.empty
@@ -37,8 +40,6 @@ runTC m =
            }
 
 data Constraint = Subtype Type Type
-                | Arith1 Op1 Type Type      -- ^ op, in, out
-                | Arith2 Doc Type Type Type -- ^ op, in1, in2, out
                 | CmpEq  Doc Type Type      -- ^ op, in1, in2
                 | CmpOrd Doc Type Type      -- ^ op, in1, in2
 
@@ -168,8 +169,6 @@ tidyConstraint :: Constraint -> M Constraint
 tidyConstraint ctr =
   case ctr of
     Subtype a b     -> Subtype  <$> tidyType a <*> tidyType b
-    Arith1 x a b    -> Arith1 x <$> tidyType a <*> tidyType b
-    Arith2 x a b c  -> Arith2 x <$> tidyType a <*> tidyType b <*> tidyType c
     CmpEq x a b     -> CmpEq x  <$> tidyType a <*> tidyType b
     CmpOrd x a b    -> CmpOrd x <$> tidyType a <*> tidyType b
 
@@ -296,10 +295,27 @@ bindClockVar :: CVar -> IClock -> M ()
 bindClockVar x c =
   case c of
     ClockVar y | x == y -> pure ()
-    _ -> M $ sets_ $ \rw -> rw { rwClockVarSubst = Map.insert x c
-                                                 $ rwClockVarSubst rw
-                               , rwClockVars = Set.delete x (rwClockVars rw)
-                               }
+    _ -> do let upd cl = case cl of
+                           ClockVar i | i == x -> c
+                           _ -> cl
+            M $ sets_ $ \rw -> rw { rwClockVarSubst = Map.insert x c
+                                                    $ fmap upd
+                                                    $ rwClockVarSubst rw
+                                  , rwClockVars = Set.delete x (rwClockVars rw)
+                                  }
+
+dumpClockSubst :: M ()
+dumpClockSubst = M $
+  do su <- rwClockVarSubst <$> get
+     lift $ lift $ dumpClockSubstLustre su
+
+dumpClockSubstLustre :: Map CVar IClock -> LustreM ()
+dumpClockSubstLustre su =
+  for_ (Map.toList su) $ \(x,v) ->
+    L.logMessage (show (pp x <+> ":=" <+> pp v))
+
+debugMessage :: String -> M ()
+debugMessage s = M $ lift $ lift $ L.logMessage s
 
 
 -- | Generate a new scope of clock variables.  Variables that are not defined
@@ -329,6 +345,7 @@ zonkClock c =
   where
   isId e = case e of
              ERange _ e1 -> isId e1
+             Const e' _ -> isId e'
              Var (Unqual x) -> Just x
              _ -> Nothing
 
@@ -347,6 +364,7 @@ bindTVar x t =
             M $ sets_ $ \rw ->
                          rw { rwTyVarSubst = Map.insert x t (rwTyVarSubst rw) }
 
+                         -- XXX: also replace `x` in existing types in the subst
   where
   occursCheck ty =
     do t1 <- tidyType ty
@@ -374,26 +392,41 @@ zonkExpr :: Expression -> M Expression
 zonkExpr expr =
   case expr of
     ERange r e -> ERange r <$> zonkExpr e
-    Const e ty -> Const e <$> zonkCType ty
+    Const e ty -> Const <$> zonkExpr e <*> zonkCType ty
     Var {}     -> pure expr
     Lit {}     -> pure expr
-    e `When` c -> When <$> zonkExpr e <*> pure c
+    e `When` c -> When <$> zonkExpr e <*> zonkClockExpr c
 
     Tuple es            -> Tuple <$> traverse zonkExpr es
     Array es            -> Array <$> traverse zonkExpr es
-    Select e s          -> Select <$> zonkExpr e <*> pure s
+    Select e s          -> Select <$> zonkExpr e <*> zonkSelector s
     Struct s fs         -> Struct s <$> traverse zonkField fs
     UpdateStruct s e fs -> UpdateStruct s
                             <$> zonkExpr e
                             <*> traverse zonkField fs
-    WithThenElse e1 e2 e3 -> WithThenElse e1 <$> zonkExpr e2 <*> zonkExpr e3
+    WithThenElse e1 e2 e3 -> WithThenElse <$> zonkExpr e1 <*>
+                                              zonkExpr e2 <*> zonkExpr e3
     Merge i as -> Merge i <$> traverse zonkMergeCase as
-    Call f es c -> Call f <$> traverse zonkExpr es <*> pure c
+    Call f es c -> Call f <$> traverse zonkExpr es <*> traverse zonkClockExpr c
 
 zonkCType :: CType -> M CType
 zonkCType ct =
-  do t <- tidyType (cType ct)
-     pure ct { cType = t }
+  do t <- zonkType (cType ct)
+     c <- zonkClock (cClock ct)
+     pure CType { cType = t, cClock = c }
+
+zonkType :: Type -> M Type
+zonkType t =
+  do t' <- tidyType t
+     case t' of
+       ArrayType elT sz -> ArrayType <$> zonkType elT <*> zonkExpr sz
+       IntSubrange e1 e2 -> IntSubrange <$> zonkExpr e1 <*> zonkExpr e2
+       NamedType {} -> pure t'
+       RealType -> pure t'
+       IntType -> pure t'
+       BoolType -> pure t'
+       TVar {} -> pure t'
+       TypeRange r t'' -> TypeRange r <$> zonkType t''
 
 zonkField :: Field Expression -> M (Field Expression)
 zonkField f =
@@ -401,7 +434,26 @@ zonkField f =
      pure f { fValue = e }
 
 zonkMergeCase :: MergeCase Expression -> M (MergeCase Expression)
-zonkMergeCase (MergeCase k e) = MergeCase k <$> zonkExpr e
+zonkMergeCase (MergeCase k e) = MergeCase <$> zonkExpr k <*> zonkExpr e
+
+zonkSelector :: Selector Expression -> M (Selector Expression)
+zonkSelector sel =
+  case sel of
+    SelectField {} -> pure sel
+    SelectElement e -> SelectElement <$> zonkExpr e
+    SelectSlice e   -> SelectSlice <$> zonkSlice e
+
+zonkSlice :: ArraySlice Expression -> M (ArraySlice Expression)
+zonkSlice a =
+  do s <- zonkExpr (arrayStart a)
+     e <- zonkExpr (arrayEnd a)
+     t <- traverse zonkExpr (arrayStep a)
+     pure ArraySlice { arrayStart = s, arrayEnd = e, arrayStep = t }
+
+zonkClockExpr :: ClockExpr -> M ClockExpr
+zonkClockExpr (WhenClock r e i) =
+  do e' <- zonkExpr e
+     pure (WhenClock r e' i)
 
 zonkBody :: NodeBody -> M NodeBody
 zonkBody b =
@@ -422,8 +474,6 @@ instance Pretty Constraint where
   ppPrec _ ctr =
     case ctr of
       Subtype t1 t2     -> ppGen "SubType" [t1,t2]
-      Arith1 _ t1 t2    -> ppGen "Arith1" [t1,t2]
-      Arith2 _ t1 t2 t3 -> ppGen "Arigh2" [t1,t2,t3]
       CmpEq  _ t1 t2    -> ppGen "Eq" [t1,t2]
       CmpOrd _ t1 t2    -> ppGen "Ord" [t1,t2]
     where

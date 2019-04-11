@@ -98,8 +98,7 @@ inferOp1 r op e =
 
       Neg ->
         do (e', ct0) <- inferExpr1 e
-           t <- newTVar  -- XXX: Compute directly
-           ensure (Arith1 Neg (cType ct0) t)
+           t <- tArith1 r op (cType ct0)
            let ct = CType { cClock = cClock ct0, cType = t }
            pure (e', [ct])
 
@@ -159,11 +158,11 @@ inferOp2 r op2 e1 e2 =
       Gt       -> ordRel ">"
       Geq      -> ordRel ">="
 
-      Add      -> arith "+"
-      Sub      -> arith "-"
-      Mul      -> arith "*"
-      Div      -> arith "/"
-      Mod      -> arith "mod"
+      Add      -> arith Add
+      Sub      -> arith Sub
+      Mul      -> arith Mul
+      Div      -> arith Div
+      Mod      -> arith Mod
 
       Power    -> notYetImplemented "Exponentiation"
       Concat   -> inferConcat
@@ -184,19 +183,18 @@ inferOp2 r op2 e1 e2 =
                  pure (cClock t1, cType t1, cType t2, a, b)
 
   bool2     = do (c,t1,t2,a,b) <- infer2
-                 ensure (Subtype t1 BoolType)
-                 ensure (Subtype t2 BoolType)
+                 _ <- subType t1 BoolType
+                 _ <- subType t2 BoolType
                  let ct = CType { cType = BoolType, cClock = c }
                  pure (a, b, [ct])
 
   ordRel op = do (c,t1,t2,a,b) <- infer2
-                 ensure (CmpOrd op t1 t2) -- Or just check
+                 _ <- classOrd op t1 t2
                  let ct = CType { cType = BoolType, cClock = c }
                  pure (a, b, [ct])
 
   arith x   = do (c,t1,t2,a,b) <- infer2
-                 ty <- newTVar
-                 ensure (Arith2 x t1 t2 ty) -- XXX: just compute
+                 ty <- tArith2 r x t1 t2
                  let ct = CType { cType = ty, cClock = c }
                  pure (a, b, [ct])
 
@@ -205,7 +203,7 @@ inferOp2 r op2 e1 e2 =
                  sameLen cts1 cts2
                  for_ (zip cts1 cts2) $ \(ct1,ct2) ->
                    do sameClock (cClock ct1) (cClock ct2)
-                      ensure (CmpEq op (cType ct1) (cType ct2))
+                      classEq op (cType ct1) (cType ct2)
                  i <- case cts1 of
                         [] -> newClockVar
                         ct : _ -> pure (cClock ct)
