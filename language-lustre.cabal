@@ -30,7 +30,6 @@ library
 
                        Language.Lustre.TypeCheck,
                        Language.Lustre.TypeCheck.Constraint,
-                       Language.Lustre.TypeCheck.Arity,
                        Language.Lustre.TypeCheck.Monad,
                        Language.Lustre.TypeCheck.Prims,
                        Language.Lustre.TypeCheck.Utils,

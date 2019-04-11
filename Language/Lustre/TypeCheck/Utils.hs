@@ -11,15 +11,36 @@ import Language.Lustre.TypeCheck.Constraint
 
 
 -- | Assert that a given expression has only one type (i.e., is not a tuple)
-one :: [CType] -> M CType
+one :: [a] -> M a
 one xs =
   case xs of
     [x] -> pure x
-    _   -> reportError $
-           nestedError "Arity mismatch."
-             [ "Expected arity:" <+> int (length xs)
-             , "Actual arity:" <+> "1"
-             ]
+    _   -> arityMismatch (length xs) 1
+
+sameLen :: [a] -> [b] -> M ()
+sameLen xs ys
+  | a == b    = pure ()
+  | otherwise = arityMismatch a b
+  where
+  a = length xs
+  b = length ys
+
+arityMismatch :: Int -> Int -> M a
+arityMismatch x y =
+  reportError $
+  nestedError "Arity mismatch."
+    [ "Expected arity:" <+> int x
+    , "Actual arity:"   <+> int y
+    ]
+
+tLUB :: Type -> Type -> M Type
+tLUB = undefined
+
+ctLUB :: CType -> CType -> M CType
+ctLUB ct1 ct2 =
+  do sameClock (cClock ct1) (cClock ct2)
+     ty <- tLUB (cType ct1 )(cType ct2)
+     pure CType { cClock = cClock ct1, cType = ty }
 
 
 

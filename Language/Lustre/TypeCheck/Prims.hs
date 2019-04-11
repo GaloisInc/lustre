@@ -1,162 +1,150 @@
 {-# Language OverloadedStrings #-}
-module Language.Lustre.TypeCheck.Prims ( checkPrim ) where
+module Language.Lustre.TypeCheck.Prims ( inferPrim ) where
 
 import Data.Traversable(for)
+import Data.Foldable(for_)
 import Text.PrettyPrint
-import Control.Monad(zipWithM_,replicateM,unless)
+import Control.Monad(unless,zipWithM)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
-import Language.Lustre.Panic(panic)
 import Language.Lustre.TypeCheck.Monad
-import Language.Lustre.TypeCheck.Arity
 import Language.Lustre.TypeCheck.Constraint
 import {-# SOURCE #-} Language.Lustre.TypeCheck
 import Language.Lustre.TypeCheck.Utils
 
 
 -- | Infer the type of a call to a primitive node.
-checkPrim ::
+inferPrim ::
   SourceRange   {- ^ Location of operator -} ->
   PrimNode      {- ^ Operator -} ->
   [StaticArg]   {- ^ Static arguments -} ->
   [Expression]  {- ^ Normal argumetns -} ->
-  [CType]       {- ^ Expected result -} ->
-  M Expression
-checkPrim r prim as es tys =
+  M (Expression,[CType])
+inferPrim r prim as es =
   case prim of
 
     Iter {} -> notYetImplemented "iterators."
 
     Op1 op ->
       case es of
-        [e] -> noStatic op >> checkOp1 r op e tys
+        [e] -> noStatic op >> inferOp1 r op e
         _   -> reportError (pp op <+> "expects 1 argument.")
 
     Op2 op ->
       case es of
-        [e1,e2] -> noStatic op >> checkOp2 r op e1 e2 tys
+        [e1,e2] -> noStatic op >> inferOp2 r op e1 e2
         _ -> reportError (pp op <+> "expects 2 arguments.")
 
     ITE ->
       case es of
-        [e1,e2,e3] ->
-          do noStatic ITE
-             c <- case tys of
-                    []     -> newClockVar -- XXX: or report error?
-                    t : ts -> do let c = cClock t
-                                 mapM_ (sameClock c . cClock) ts
-                                 pure c
-             e1' <- checkExpr1 e1 CType { cClock = c, cType = BoolType }
-             e2' <- checkExpr e2 tys
-             e3' <- checkExpr e3 tys
-             pure (eITE r e1' e2' e3')
-
+        [e1,e2,e3] -> noStatic ITE >> inferITE r e1 e2 e3
         _ -> reportError "`if-then-else` expects 3 arguments."
 
 
-    OpN op -> noStatic op >> checkOpN r op es tys
+    OpN op -> noStatic op >> inferOpN r op es
   where
   noStatic op =
     unless (null as) $
     reportError (backticks (pp op) <+> "does not take static arguments")
 
 
+-- | Check an if-then-else expression.
+inferITE :: SourceRange -> Expression -> Expression -> Expression ->
+                                                        M (Expression,[CType])
+inferITE r e1 e2 e3 =
+  do (e1',c) <- checkExpr1 e1 BoolType
+     (e2',ctTHEN) <- inferExpr e2
+     (e3',ctELSE) <- inferExpr e3
+     sameLen ctTHEN ctELSE
+     for_ ctTHEN (sameClock c . cClock)
+     for_ ctELSE (sameClock c . cClock)
+     ts <- zipWithM tLUB (map cType ctTHEN) (map cType ctELSE)
+     let cts = [ CType { cClock = c, cType = t } | t <- ts ]
+     pure (eITE r e1' e2' e3', cts)
 
--- | Check the argument to a "current" expression.
-checkCurrent :: Expression -> [CType] -> M Expression
-checkCurrent e tys =
+
+
+-- | Check a @current@ expression.
+inferCurrent :: Expression -> M (Expression,[CType])
+inferCurrent e =
   do checkTemporalOk "current"
-     tys1 <- for tys $ \ty ->
-                do c <- newClockVar
-                   pure ty { cClock = c }
-     e1 <- checkExpr e tys1
-
-     -- By now we should have figured out the missing clock,
-     -- so check straight away
-     zipWithM_ checkClock tys tys1
-     pure e1
-
-  where
-  checkClock ty newTy = sameClock (cClock ty) =<< clockParent (cClock newTy)
+     (e',ctsIn) <- inferExpr e
+     cts <- for ctsIn $ \ct -> do c <- clockParent (cClock ct)
+                                  pure ct { cClock = c }
+     pure (e',cts)
 
 
-
--- | Types of unary operators.
-checkOp1 :: SourceRange -> Op1 -> Expression -> [CType] -> M Expression
-checkOp1 r op e tys =
-  do a <- check
-     pure (eOp1 r op a)
+-- | Check a uniary operator.
+inferOp1 :: SourceRange -> Op1 -> Expression -> M (Expression,[CType])
+inferOp1 r op e =
+  do (a, ct) <- check
+     pure (eOp1 r op a, ct)
 
   where
   check =
     case op of
+
       Pre ->
         do checkTemporalOk "pre"
-           checkExpr e tys
+           inferExpr e
 
-      Current -> checkCurrent e tys
+      Current -> inferCurrent e
 
       Not ->
-        do ty <- one tys
-           e1 <- checkExpr1 e ty { cType = BoolType }
-           ensure (Subtype BoolType (cType ty))
-           pure e1
+        do (e', i) <- checkExpr1 e BoolType
+           let ct = CType { cType = BoolType, cClock = i }
+           pure (e', [ct])
 
       Neg ->
-        do ty <- one tys
-           t  <- newTVar
-           e1 <- checkExpr1 e ty { cType = t }
-           ensure (Arith1 Neg t (cType ty))
-           pure e1
+        do (e', ct0) <- inferExpr1 e
+           t <- newTVar  -- XXX: Compute directly
+           ensure (Arith1 Neg (cType ct0) t)
+           let ct = CType { cClock = cClock ct0, cType = t }
+           pure (e', [ct])
 
       IntCast ->
-        do ty <- one tys
-           e1 <- checkExpr1 e ty { cType = RealType }
-           ensure (Subtype IntType (cType ty))
-           pure e1
+        do (e', i) <- checkExpr1 e RealType
+           let ct = CType { cType = IntType, cClock = i }
+           pure (e', [ct])
 
       FloorCast ->
-        do ty <- one tys
-           e1 <- checkExpr1 e ty { cType = RealType }
-           ensure (Subtype IntType (cType ty))
-           pure e1
+        do (e', i) <- checkExpr1 e RealType
+           let ct = CType { cType = IntType, cClock = i }
+           pure (e', [ct])
 
       RealCast ->
-        do ty <- one tys
-           e1 <- checkExpr1 e ty { cType = IntType }
-           ensure (Subtype RealType (cType ty))
-           pure e1
-
+        do (e', i) <- checkExpr1 e IntType
+           let ct = CType { cType = RealType, cClock = i }
+           pure (e', [ct])
 
 
 -- | Types of binary operators.
-checkOp2 ::
-  SourceRange -> Op2 -> Expression -> Expression -> [CType] -> M Expression
-checkOp2 r op2 e1 e2 tys =
-  do (a,b) <- check
-     pure (eOp2 r op2 a b)
+inferOp2 ::
+  SourceRange -> Op2 -> Expression -> Expression -> M (Expression,[CType])
+inferOp2 r op2 e1 e2 =
+  do (a, b, cts) <- check
+     pure (eOp2 r op2 a b, cts)
 
   where
   check =
     case op2 of
-      FbyArr ->
-        do checkTemporalOk "->"
-           a <- checkExpr e1 tys
-           b <- checkExpr e2 tys
-           pure (a,b)
-
-      Fby ->
-       do checkTemporalOk "fby"
-          a <- checkExpr e1 tys
-          b <- checkExpr e2 tys
-          pure (a,b)
+      FbyArr -> inferFBY "->"
+      Fby    -> inferFBY "fby"
 
       CurrentWith ->
         do checkTemporalOk "currentWith"
-           a <- checkExpr    e1 tys
-           b <- checkCurrent e2 tys
-           pure (a,b)
+           (a,ctDEF) <- inferExpr e1
+           (b,ctEXP) <- inferCurrent e2
+           sameLen ctDEF ctEXP
+           cts <- zipWithM ctLUB ctDEF ctEXP
+           pure (a, b, cts)
+
+      Replicate ->
+        do (a,ctE) <- inferExpr1 e1
+           b       <- checkConstExpr e2 IntType
+           let ct = ctE { cType = ArrayType (cType ctE) b }
+           pure (a, b, [ct])
 
       And      -> bool2
       Or       -> bool2
@@ -178,96 +166,98 @@ checkOp2 r op2 e1 e2 tys =
       Mod      -> arith "mod"
 
       Power    -> notYetImplemented "Exponentiation"
+      Concat   -> inferConcat
 
-      Replicate -> panic "checkOp2" [ "`replicate` should have been checked."]
 
-      Concat -> checkConcat
+  inferFBY x =
+    do checkTemporalOk x
+       (a,cts1) <- inferExpr e1
+       (b,cts2) <- inferExpr e2
+       sameLen cts1 cts2
+       ct <- zipWithM ctLUB cts1 cts2
+       pure (a, b, ct)
 
-  bool2     = do ty <- one tys
-                 a <- checkExpr1 e1 ty { cType = BoolType }
-                 b <- checkExpr1 e2 ty { cType = BoolType }
-                 ensure (Subtype BoolType (cType ty))
-                 pure (a,b)
 
-  infer2    = do ty <- one tys
-                 t1 <- newTVar
-                 a <- checkExpr1 e1 ty { cType = t1 }
-                 t2 <- newTVar
-                 b <- checkExpr1 e2 ty { cType = t2 }
-                 pure (a,b,t1,t2,ty)
+  infer2    = do (a,t1) <- inferExpr1 e1
+                 (b,t2) <- inferExpr1 e2
+                 sameClock (cClock t1) (cClock t2)
+                 pure (cClock t1, cType t1, cType t2, a, b)
 
-  ordRel op = do (a,b,t1,t2,ty) <- infer2
-                 ensure (CmpOrd op t1 t2)
-                 ensure (Subtype BoolType (cType ty))
-                 pure (a,b)
+  bool2     = do (c,t1,t2,a,b) <- infer2
+                 ensure (Subtype t1 BoolType)
+                 ensure (Subtype t2 BoolType)
+                 let ct = CType { cType = BoolType, cClock = c }
+                 pure (a, b, [ct])
 
-  arith x   = do (a,b,t1,t2,ty) <- infer2
-                 ensure (Arith2 x t1 t2 (cType ty))
-                 pure (a,b)
+  ordRel op = do (c,t1,t2,a,b) <- infer2
+                 ensure (CmpOrd op t1 t2) -- Or just check
+                 let ct = CType { cType = BoolType, cClock = c }
+                 pure (a, b, [ct])
 
-  eqRel op  = do ty   <- one tys
-                 n    <- exprArity e1
-                 tv1s <- replicateM n newTVar
-                 tv2s <- replicateM n newTVar
-                 let toTy t = ty { cType = t }
-                 a <- checkExpr e1 (map toTy tv1s)
-                 b <- checkExpr e2 (map toTy tv2s)
-                 zipWithM_ (\t1 t2 -> ensure (CmpEq op t1 t2)) tv1s tv2s
-                 ensure (Subtype BoolType (cType ty))
-                 pure (a,b)
+  arith x   = do (c,t1,t2,a,b) <- infer2
+                 ty <- newTVar
+                 ensure (Arith2 x t1 t2 ty) -- XXX: just compute
+                 let ct = CType { cType = ty, cClock = c }
+                 pure (a, b, [ct])
 
-  checkConcat =
-    do ty <- one tys
-       a0 <- newTVar
-       e1' <- checkExpr1 e1 ty { cType = a0 }
-       b0 <- newTVar
-       e2' <- checkExpr1 e2 ty { cType = b0 }
-       a <- tidyType a0
-       b <- tidyType b0
-       case a of
+  eqRel op  = do (a,cts1) <- inferExpr e1
+                 (b,cts2) <- inferExpr e2
+                 sameLen cts1 cts2
+                 for_ (zip cts1 cts2) $ \(ct1,ct2) ->
+                   do sameClock (cClock ct1) (cClock ct2)
+                      ensure (CmpEq op (cType ct1) (cType ct2))
+                 i <- case cts1 of
+                        [] -> newClockVar
+                        ct : _ -> pure (cClock ct)
+                 let ct = CType { cType = BoolType, cClock = i }
+                 pure (a, b, [ct])
+
+  inferConcat =
+    do (a, ct1) <- inferExpr1 e1
+       (b, ct2) <- inferExpr1 e2
+       sameClock (cClock ct1) (cClock ct2)
+       t1 <- tidyType (cType ct1)
+       t2 <- tidyType (cType ct2)
+       case t1 of
          ArrayType elT1 sz1 ->
-           case b of
+           case t2 of
              ArrayType elT2 sz2 ->
-               do c <- newTVar
-                  ensure (Subtype elT1 c)
-                  ensure (Subtype elT2 c)
+               do t  <- tLUB elT1 elT2
                   sz <- addExprs sz1 sz2
-                  ensure (Subtype (ArrayType c sz) (cType ty))
-                  pure (e1',e2')
+                  let ct = CType { cType = ArrayType t sz, cClock = cClock ct1 }
+                  pure (a,b,[ct])
              TVar {} -> noInfer "right"
-             _       -> typeError "right" b
+             _       -> typeError "right" t2
          TVar {} ->
-           case b of
+           case t2 of
              ArrayType {} -> noInfer "left"
              TVar {}      -> noInfer "left"
-             _            -> typeError "left" a
-         _ -> typeError "left" a
-
+             _            -> typeError "left" t1
+         _ -> typeError "left" t1
     where
-    noInfer x = reportError ("Failed to infer the type of the" <+> x <+>
-                                                          "argument of `|`")
 
     typeError x t = reportError $ nestedError
                       ("Incorrect" <+> x <+> "argument to `|`")
                       [ "Expected:" <+> "array"
                       , "Actual type:" <+> pp t ]
 
+    noInfer x = reportError ("Failed to infer the type of the" <+> x <+>
+                                                          "argument of `|`")
+
 
 -- | Check a variable arity operator.
-checkOpN :: SourceRange -> OpN -> [Expression] -> [CType] -> M Expression
-checkOpN r op es tys =
+inferOpN :: SourceRange -> OpN -> [Expression] -> M (Expression,[CType])
+inferOpN r op es =
   case op of
     AtMostOne -> boolOp
     Nor       -> boolOp
   where
   boolOp =
-    do ty <- one tys
-       let bool = ty { cType = BoolType }
-       es1 <- for es $ \e -> checkExpr1 e bool
-       ensure (Subtype BoolType (cType ty))
-       pure (eOpN r op es1)
-
-
+    do (es',cts) <- unzip <$> for es inferExpr1
+       i <- newClockVar
+       for_ cts (sameClock i . cClock)
+       let ct = CType { cClock = i, cType = BoolType }
+       pure (eOpN r op es',[ct])
 
 
 

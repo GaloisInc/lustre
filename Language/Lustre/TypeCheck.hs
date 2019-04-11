@@ -4,11 +4,12 @@ module Language.Lustre.TypeCheck where
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import           Data.List (find)
-import Control.Monad(when,unless,zipWithM_,zipWithM)
+import           Data.List (find,transpose)
+import Control.Monad(when,unless,zipWithM_,zipWithM,foldM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 import Data.Traversable(for)
+import Data.Foldable(for_)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -91,7 +92,8 @@ checkFieldType f =
      t1 <- checkType t
      d1 <- case fieldDefault f of
              Nothing -> pure Nothing
-             Just e  -> Just <$> checkConstExpr e t
+             Just e  -> do e' <- checkConstExpr e t
+                           pure (Just e')
      pure f { fieldType = t1, fieldDefault = d1 }
 
 checkNodeDecl :: NodeDecl -> M a -> M (NodeDecl,a)
@@ -195,8 +197,8 @@ checkStaticArg arg para =
     ExprArg e ->
       case para of
         ConstParam x t ->
-          do e1 <- checkConstExpr e t
-             pure (ExprArg e1, sConst x e1)
+          do e' <- checkConstExpr e t
+             pure (ExprArg e', sConst x e')
         _ -> mismatch
 
     NodeArg notationTy ni ->
@@ -534,7 +536,7 @@ checkBinder b m =
   do (c1,c) <-
         case binderClock b of
           Nothing -> pure (Nothing,BaseClock)
-          Just e  -> do (e',_c) <- checkClockExpr e
+          Just e  -> do (e',_) <- inferClockExpr e
                         pure (Just e', KnownClock e')
      t <- checkType (binderType b)
      let ty   = CType { cType = t, cClock = c }
@@ -569,9 +571,10 @@ checkNested work things m =
       do (t1,(ts1,a)) <- work t (checkNested work ts m)
          pure (t1:ts1,a)
 
+--------------------------------------------------------------------------------
 
 
-
+-- | Validate a type.
 checkType :: Type -> M Type
 checkType ty =
   case ty of
@@ -596,24 +599,31 @@ checkType ty =
          pure (ArrayType t1 n1)
 
 
+-- | Validate an equation.
 checkEquation :: Equation -> M Equation
 checkEquation eqn =
   enterRange $
   case eqn of
     Assert l e ->
-        Assert l <$> checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
+      do (e',_clk) <- checkExpr1 e BoolType
+         pure (Assert l e')  -- XXX: Save clock?
 
     Property l e ->
-      Property l <$> checkExpr1 e CType { cType = BoolType, cClock = BaseClock }
+      do (e',_clk) <- checkExpr1 e BoolType
+         pure (Property l e') -- XXX: Save clock?
 
     IsMain _ -> pure eqn
 
     IVC _ -> pure eqn -- XXX: what should we check here?
 
     Define ls e ->
-      do (ls1,lts) <- unzip <$> mapM checkLHS ls
-         es1 <- checkExpr e lts
-         pure (Define ls1 es1)
+      do (ls',lts) <- unzip <$> mapM inferLHS ls
+         (e',cts) <- inferExpr e
+         sameLen lts cts
+         for_ (zip lts cts) $ \(lt,ct) ->
+           do sameClock (cClock lt) (cClock ct)
+              ensure (Subtype (cType ct) (cType lt))
+         pure (Define ls' e')
 
   where
   enterRange = case eqnRangeMaybe eqn of
@@ -621,150 +631,143 @@ checkEquation eqn =
                  Just r  -> inRange r
 
 
-checkLHS :: LHS Expression -> M (LHS Expression, CType)
-checkLHS lhs =
+-- | Infer the type of the left-hand-side of a declaration.
+inferLHS :: LHS Expression -> M (LHS Expression, CType)
+inferLHS lhs =
   case lhs of
-    LVar i -> do (j,t) <- checkLocalVar i
-                 pure (LVar j, t)
+    LVar i -> do t <- lookupLocal i
+                 pure (LVar i, t)
     LSelect l s ->
-      do (l1,t)  <- checkLHS l
+      do (l1,t)  <- inferLHS l
          (s1,t1) <- inferSelector s (cType t)
          pure (LSelect l1 s1, t { cType = t1 })
 
 
 
+{- | Infer the type of an expression.
+Tuples and function calls may return multiple results,
+which is why we provide multiple clocked types. -}
+inferExpr :: Expression -> M (Expression, [CType])
+inferExpr expr =
+  case expr of
+    ERange r e -> inRange r (inferExpr e)
+
+    Var x ->
+      inRange (range x) $
+        do (e1,ct) <- inferVar x
+           pure (e1,[ct])
+
+    Lit l ->
+      do let ty = inferLit l
+         c <- newClockVar
+         let ct = CType { cType = ty, cClock = c }
+         pure (Const (Lit l) ct, [ct])
+
+    e `When` c ->
+      do checkTemporalOk "when"
+         (c',ct1)  <- inferClockExpr c
+         (e',ct2s) <- inferExpr e
+         cts <- for ct2s $ \ct ->
+                  do sameClock (cClock ct) (cClock ct1)
+                     pure ct { cClock = KnownClock c' }
+         pure (e' `When` c', cts)
+
+    Tuple es ->
+      do (es',cts) <- unzip <$> mapM inferExpr1 es
+         pure (Tuple es',cts)
+
+    Array es ->
+      do (es',cts) <- unzip <$> mapM inferExpr1 es
+         let ne = Lit $ Int $ fromIntegral $ length es
+             done c t =
+               do let ct = CType { cClock = c, cType = ArrayType t ne }
+                  pure (Array es', [ct])
+         case cts of
+           [] ->
+            do t <- newTVar
+               c <- newClockVar
+               done c t
+           elT : more ->
+            do t <- foldM tLUB (cType elT)  (map cType more)
+               mapM_ (sameClock (cClock elT)) (map cClock more)
+               done (cClock elT) t
+
+    Select e s ->
+      do (e',recCT) <- inferExpr1 e
+         (s',ty)    <- inferSelector s (cType recCT)
+         let ct = recCT { cType = ty }
+         pure (Select e' s', [ct])
+
+    Struct s fs ->
+      do (e',ct) <- inferStruct s fs
+         pure (e',[ct])
+
+    UpdateStruct s e fs ->
+      do (e',ct) <- inferStructUpdate s e fs
+         pure (e',[ct])
+
+    WithThenElse e1 e2 e3 ->
+      do e1'       <- checkConstExpr e1 BoolType
+         (e2',ct1) <- inferExpr e2
+         (e3',ct2) <- inferExpr e3
+         sameLen ct1 ct2
+         ct        <- zipWithM ctLUB ct1 ct2
+         pure (WithThenElse e1' e2' e3', ct)
+
+    Merge i as ->
+      do ctI <- lookupLocal i
+         (as',ctss) <- unzip <$> for as (inferMergeCase i (cType ctI))
+         case ctss of
+           [] -> reportError "Empty merge case"
+           ctAlt : alts ->
+             do for_ alts (sameLen ctAlt)
+                let byCol = transpose (map (map cType) ctss)
+                cts <- for byCol $ \ ~(t:ts) ->
+                         do t1 <- foldM tLUB t ts
+                            pure CType { cClock = cClock ctI, cType = t1 }
+                pure (Merge i as',cts)
+
+    Call (NodeInst call as) es cl ->
+      case call of
+        CallUser f        -> inferCall f as es cl
+        CallPrim r prim
+          | Nothing <- cl -> inferPrim r prim as es 
+          | otherwise     -> reportError "Unexpected clock annotation in call"
+
+    Const {} -> panic "inferExpr" [ "Unexpected `Const` expression." ]
+
+
+-- | Infer the type of an expression that should not return multiple results.
+inferExpr1 :: Expression -> M (Expression,CType)
+inferExpr1 e =
+  do (e',cts) <- inferExpr e
+     ct       <- one cts
+     pure (e',ct)
+
+{- | Infer the type of a constant expression.
+NOTE: the elaborated result will contain `Const` annotations,
+which is a little bogus, but they will go away in the `NoStatic pass. -}
+inferConstExpr :: Expression -> M (Expression,Type)
+inferConstExpr expr =
+  allowTemporal False $
+  allowUnsafe   False $
+  do (e',ct) <- inferExpr1 expr
+     sameClock BaseClock (cClock ct)
+     pure (e',cType ct)
 
 -- | Infer the type of a constant expression.
 checkConstExpr :: Expression -> Type -> M Expression
 checkConstExpr expr ty =
-  allowTemporal False $
-  allowUnsafe   False $
-  checkExpr expr [ CType { cType = ty, cClock = BaseClock } ]
-  {- NOTE: the elaborated result will contain `Const` annotations,
-     which is a little bogus, but they will go away in the `NoStatic pass. -}
+  do (e',t) <- inferConstExpr expr
+     ensure (Subtype t ty)
+     pure e'
 
--- | Check that the expression has the given type.
-checkExpr1 :: Expression -> CType -> M Expression
-checkExpr1 e t = checkExpr e [t]
+checkExpr1 :: Expression -> Type -> M (Expression,IClock)
+checkExpr1 e t =
+  do (e',ct) <- inferExpr1 e
+     ensure (Subtype (cType ct) t)
+     pure (e', cClock ct)
 
-matchTy :: Type -> Type -> M ()
-matchTy expect0 have0 =
-  do expect <- tidyType expect0
-     have   <- tidyType have0
-     case expect of
-        TVar a -> bindTVar a have
-        ArrayType el1 sz1
-          | ArrayType el2 sz2 <- have -> sameConsts sz1 sz2 >> matchTy el1 el2
-        _ -> ensure (Subtype have expect)
-
-{- | Check if an expression has the given type.
-Tuples and function calls may return multiple results,
-which is why we provide multiple clocked types. -}
-checkExpr :: Expression -> [CType] -> M Expression
-checkExpr expr tys =
-  case expr of
-    ERange r e -> inRange r (checkExpr e tys)
-
-    Var x ->
-      inRange (range x) $
-        do ty <- one tys
-           checkVar x ty
-
-    Lit l ->
-      do ty <- one tys
-         let lt = inferLit l
-         matchTy (cType ty) lt
-         pure (Const (Lit l) ty)
-
-    e `When` c ->
-      do checkTemporalOk "when"
-         (c1,cl) <- checkClockExpr c -- `cl` is the clock of c
-
-         tys1 <- for tys $ \ty ->
-                   do sameClock (cClock ty) (KnownClock c)
-                      pure ty { cClock = cl }
-
-         e1 <- checkExpr e tys1
-         pure (e1 `When` c1)
-
-    Tuple es
-      | have == need -> Tuple <$> zipWithM checkExpr1 es tys
-      | otherwise    -> reportError $ nestedError "Arity mismatch in tuple"
-                          [ "Expected arity:" <+> text (show need)
-                          , "Actual arity:" <+> text (show have) ]
-      where have = length es
-            need = length tys
-
-    Array es ->
-      do ty  <- one tys
-         elT <- newTVar
-         let n = Lit $ Int $ fromIntegral $ length es
-         let elCT = ty { cType = elT }
-         es1 <- mapM (`checkExpr1` elCT) es
-         matchTy (cType ty) (ArrayType elT n)
-         pure (Array es1)
-
-    Select e s ->
-      do ty        <- one tys
-         recT      <- newTVar
-         e1        <- checkExpr1 e ty { cType = recT }
-         (s1,t1)   <- inferSelector s recT
-         matchTy (cType ty) t1
-         pure (Select e1 s1)
-
-    Struct s fs ->
-      do ty <- one tys
-         checkStruct s fs (cType ty) $ \e t ->
-           checkExpr1 e ty { cType = t }
-
-    UpdateStruct s e fs ->
-      do ty <- one tys
-         checkStructUpdate s e fs (cType ty) $ \ex t ->
-            checkExpr1 ex ty { cType = t }
-
-    WithThenElse e1 e2 e3 ->
-      WithThenElse <$> checkConstExpr e1 BoolType
-                   <*> checkExpr e2 tys
-                   <*> checkExpr e3 tys
-
-    Merge i as ->
-      do (j,t) <- checkLocalVar i
-         mapM_ (sameClock (cClock t) . cClock) tys
-         let it      = cType t
-             ts      = map cType tys
-             check c = checkMergeCase j c it ts
-         as1 <- mapM check as
-         pure (Merge j as1)
-
-    Call (NodeInst call as) es cl
-
-      -- Special case for @^@ because its second argument is a constant
-      -- expression, not an ordinary one.
-      | CallPrim r (Op2 Replicate) <- call ->
-        inRange r $
-        do notClocked
-           unless (null as) $ reportError "`^` does not take static arguments."
-           case es of
-             [e1,e2] ->
-               do ty <- one tys
-                  e2' <- checkConstExpr e2 IntType
-                  elT <- newTVar
-                  e1' <- checkExpr e1 [ty { cType = elT }]
-                  matchTy (cType ty) (ArrayType elT e2')
-                  pure (eOp2 r Replicate e1' e2')
-             _ -> reportError $ text (showPP call ++ " expexts 2 arguments.")
-
-      | otherwise ->
-        case call of
-          CallUser f      -> checkCall f as es cl tys
-          CallPrim r prim -> notClocked >> checkPrim r prim as es tys
-
-      where notClocked =
-              case cl of
-                Nothing -> pure ()
-                Just _  -> reportError "Unexpected clock annotation in call"
-
-    Const {} -> panic "checkExpr" [ "Unexpected `Const` expression." ]
 
 
 {- | Ensure that the given named type is a struct.  If so, get the real
@@ -784,49 +787,48 @@ checkStructType s =
      pure (name,fs)
 
 
--- | Check an struct expression. Also fills in defaults for missing fields.
-checkStruct :: Name -> [Field Expression] -> Type ->
-               (Expression -> Type -> M Expression) ->
-               M Expression
-checkStruct s fs expected checkF =
-  do (actualName, fieldTs) <- checkStructType s
-     matchTy expected (NamedType actualName)
-     distinctFields fs
-
+-- | Infer the type of a struct formaing expression.
+inferStruct :: Name -> [Field Expression] -> M (Expression,CType)
+inferStruct s fs =
+  do distinctFields fs
+     (s',fExpect) <- checkStructType s
      let fieldMap = Map.fromList [ (fName f, f) | f <- fs ]
-
-     fs1 <- for fieldTs $ \ft ->
+     i   <- newClockVar
+     fs' <- for fExpect $ \ft ->
               case Map.lookup (fieldName ft) fieldMap of
 
                 Nothing -> -- Field not initialized
                   case fieldDefault ft of
                     Nothing -> reportError $
                       "Field" <+> backticks (pp (fieldName ft)) <+>
-                      "of"    <+> backticks (pp actualName)     <+>
+                      "of"    <+> backticks (pp s')             <+>
                       "is not initialized."
-                    Just e1 -> pure Field { fName  = fieldName ft
-                                          , fValue = e1
-                                          }
+                    Just e1 ->
+                      let ct = CType { cType = fieldType ft, cClock = i }
+                      in pure Field { fName  = fieldName ft
+                                    , fValue = Const e1 ct
+                                    }
 
                 Just f -> -- Field initialized
-                  do e1 <- checkF (fValue f) (fieldType ft)
-                     pure f { fValue = e1 }
+                  do (e,clk) <- checkExpr1 (fValue f) (fieldType ft)
+                     sameClock i clk
+                     pure f { fValue = e }
 
-     pure (Struct actualName fs1)
+     let ct = CType { cClock = i, cType = NamedType s' }
+     pure (Struct s' fs', ct)
 
--- | Check a structure updatating expression.
-checkStructUpdate ::
-  Maybe Name -> Expression -> [Field Expression] -> Type ->
-  (Expression -> Type -> M Expression) ->
-  M Expression
-checkStructUpdate mbS e fs expect checkF =
-  do e1 <- checkF e expect
-     distinctFields fs
+
+-- | Infer a structure updatating expression.
+inferStructUpdate ::
+  Maybe Name -> Expression -> [Field Expression] -> M (Expression,CType)
+inferStructUpdate mbS e fs =
+  do distinctFields fs
+     (e',ct) <- inferExpr1 e
      (actualName, fieldTs) <-
        case mbS of
          Just s -> checkStructType s
          Nothing ->
-           do t1 <- tidyType expect
+           do t1 <- tidyType (cType ct)
               case t1 of
                 NamedType name ->
                   do fTs <- lookupStruct name
@@ -836,15 +838,21 @@ checkStructUpdate mbS e fs expect checkF =
                        "Invalid struct update."
                        [ "Expression is not a struct." ]
 
-     fs1 <- for fs $ \f ->
+     fs' <- for fs $ \f ->
               case find ((fName f ==) . fieldName) fieldTs of
+
                 Just ft ->
-                  do fe <- checkF (fValue f) (fieldType ft)
-                     pure f { fValue = fe }
+                  do (fv,fclk) <- checkExpr1 (fValue f) (fieldType ft)
+                     sameClock fclk (cClock ct)
+                     pure f { fValue = fv }
+
                 Nothing -> reportError $
                   "Struct"                <+> backticks (pp actualName) <+>
                   "does not have a field" <+> backticks (pp (fName f))
-     pure (UpdateStruct (Just actualName) e1 fs1)
+
+     pure (UpdateStruct (Just actualName) e' fs', ct)
+
+
 
 -- | Check that all of the fields are different.
 distinctFields :: [Field Expression] -> M ()
@@ -860,20 +868,20 @@ distinctFields = mapM_ check . group . sort . map fName
 
 
 
--- | Check the type of a call to a user-defined node.
-checkCall :: Name ->
+
+-- | Infer the type of a call to a user node.
+inferCall :: Name ->
              [StaticArg] ->
              [Expression] ->
              Maybe ClockExpr ->
-             [CType] ->
-             M Expression
-checkCall f as es0 cl0 tys =
-  do reqSafety <- getUnsafeLevel
+             M (Expression, [CType])
+inferCall f as es0 cl0 =
+  do reqSafety   <- getUnsafeLevel
      reqTemporal <- getTemporalLevel
      cl <- case cl0 of
              Nothing -> pure Nothing
              Just c  -> case reqTemporal of
-                          Node -> Just . fst <$> checkClockExpr c
+                          Node -> Just . fst <$> inferClockExpr c
                           Function ->
                             reportError $ nestedError
                                "Invalid clocked call"
@@ -882,9 +890,9 @@ checkCall f as es0 cl0 tys =
                                ]
 
      (ni,prof) <- prepUserNodeInst f as reqSafety reqTemporal
-     (es1,mp) <- checkInputs cl [] Map.empty (nodeInputs prof) es0
-     checkOuts cl mp (nodeOutputs prof)
-     pure (Call ni es1 cl)
+     (es1,mp)  <- checkInputs cl [] Map.empty (nodeInputs prof) es0
+     cts <- checkOuts cl mp (nodeOutputs prof)
+     pure (Call ni es1 cl, cts)
   where
   renBinderClock cl mp b =
     case binderClock b of
@@ -923,84 +931,55 @@ checkCall f as es0 cl0 tys =
     case ib of
       InputBinder b ->
         do c  <- renBinderClock cl mp b
-           e1 <- checkExpr1 e CType { cClock = c, cType = binderType b }
-           pure ( e1
-                , case isClock e of
+           (e',clk) <- checkExpr1 e (binderType b)
+           sameClock c clk
+           pure ( e'
+                , case isClock e' of
                     Just k  -> Map.insert (binderDefines b) k mp
                     Nothing -> mp
                 )
       InputConst _ t ->
-        do e1 <- checkConstExpr e t
-           pure (e1,mp)
+        do e' <- checkConstExpr e t
+           pure (e',mp)
 
   isClock e =
     case e of
-      ERange _ e1    -> isClock e1
-      Var (Unqual i) -> Just (Right i)
-      Lit l          -> Just (Left l)
-      _              -> Nothing
+      ERange _ e1     -> isClock e1
+      Var (Unqual i)  -> Just (Right i)
+      Const (Lit l) _ -> Just (Left l)
+      _               -> Nothing
 
-  checkOuts cl mp bs
-    | have == need = zipWithM_ (checkOut cl mp) bs tys
-    | otherwise = reportError $ nestedError
-                  "Arity mistmatch in function call."
-                  [ "Function:" <+> pp f
-                  , "Returns:" <+> text (show have) <+> "restuls"
-                  , "Expected:" <+> text (show need) <+> "restuls" ]
-      where have = length bs
-            need = length tys
+  checkOuts cl mp bs = mapM (checkOut cl mp) bs
 
-
-  checkOut cl mp b ty =
+  checkOut cl mp b =
     do let t = binderType b
        c <- renBinderClock cl mp b
-       matchTy (cType ty) t
-       sameClock (cClock ty) c
+       pure CType { cType = t, cClock = c }
 
 
 
--- | Infer the type for a branch of a merge.
-checkMergeCase ::
-  Ident -> MergeCase Expression -> Type -> [Type] -> M (MergeCase Expression)
-checkMergeCase i (MergeCase p e) it ts =
-  do p1 <- checkConstExpr p it
-     let clk       = KnownClock (WhenClock (range p1) p1 i)
-         toCType t = CType { cClock = clk, cType = t }
-     e1 <- checkExpr e (map toCType ts)
-     pure (MergeCase p1 e1)
 
 
-
--- | Check the type of a variable.
-checkVar :: Name -> CType -> M Expression
-checkVar x ty =
+-- | Infer the type of a variable.
+inferVar :: Name -> M (Expression,CType)
+inferVar x =
   inRange (range x) $
   case x of
     Unqual i ->
       case rnThing (nameOrigName x) of
-        AVal   -> do (j,c) <- checkLocalVar i
-                     sameClock (cClock ty) (cClock c)
-                     matchTy   (cType ty) (cType c)
-                     pure (Var (Unqual j))
+        AVal   -> do ct <- lookupLocal i
+                     pure (Var (Unqual i), ct)
         AConst -> do t1 <- lookupConst x
-                     matchTy (cType ty) t1
-                     pure (Const (Var x) ty)
+                     c  <- newClockVar
+                     let ct = CType { cType = t1, cClock = c }
+                     pure (Const (Var x) ct, ct)
 
-        t -> panic "checkVar" [ "Identifier is not a value or a constnat:"
+        t -> panic "inferVar" [ "Identifier is not a value or a constnat:"
                               , "*** Name: " ++ showPP x
                               , "*** Thing: " ++ showPP t ]
 
-    Qual {}  -> panic "checkVar" [ "Unexpected qualified name"
+    Qual {}  -> panic "inferVar" [ "Unexpected qualified name"
                                  , "*** Name: " ++ showPP x ]
-
-
-
--- | Check a local variable. Returns the elaborated variable and its type.
-checkLocalVar :: Ident -> M (Ident, CType)
-checkLocalVar i =
-  do ct <- lookupLocal i
-     pure (i,ct) -- XXX: elaborate
-
 
 
 -- | Infer the type of a literal.
@@ -1011,17 +990,32 @@ inferLit lit =
        Real _  -> RealType
        Bool _  -> BoolType
 
--- | Check a clock expression.
--- Returns the elaborated clock expression, and its clock.
-checkClockExpr :: ClockExpr -> M (ClockExpr,IClock)
-checkClockExpr (WhenClock r v i) =
+
+-- | Validate a clock expression, and return the type of the clock.
+inferClockExpr :: ClockExpr -> M (ClockExpr, CType)
+inferClockExpr (WhenClock r v i) =
   inRange r $
-    do (j,ct) <- checkLocalVar i
-       w      <- checkConstExpr v (cType ct)
-       pure (WhenClock r w j, cClock ct)
+  do ct <- lookupLocal i
+     v' <- checkConstExpr v (cType ct)
+     pure (WhenClock r v' i, ct)
 
---------------------------------------------------------------------------------
 
+-- | Infer the type of a branch in a @merge@.
+inferMergeCase ::
+  Ident                 {- ^ The clock to merge on -} ->
+  Type                  {- ^ The type of the clock -} ->
+  MergeCase Expression  {- ^ The branch to check -}   ->
+  M (MergeCase Expression, [CType])
+inferMergeCase i it (MergeCase p e) =
+  do p' <- checkConstExpr p it
+     let clk = KnownClock (WhenClock (range p') p' i)
+     (e', cts) <- inferExpr e
+     for_ cts (sameClock clk . cClock)
+     pure (MergeCase p' e', cts)
+
+
+
+-- | Infer the type of a selector.
 inferSelector :: Selector Expression -> Type -> M (Selector Expression, Type)
 inferSelector sel ty0 =
   do ty <- tidyType ty0
@@ -1074,15 +1068,6 @@ inferSelector sel ty0 =
                [ "Selector:" <+> pp sel
                , "Input:" <+> pp ty0
                ]
-
-
-
-
-
-
-
-
-
 
 
 
