@@ -3,13 +3,11 @@ module Language.Lustre.TypeCheck.Constraint where
 
 import Text.PrettyPrint as PP
 import Control.Monad(unless)
-import Data.Maybe(catMaybes)
 
 import Language.Lustre.AST
 import Language.Lustre.TypeCheck.Monad
 import qualified Language.Lustre.Semantics.Const as C
 import Language.Lustre.Pretty
-import Language.Lustre.Semantics.BuiltIn(eucledean_div_mod)
 import Language.Lustre.Panic
 
 
@@ -86,9 +84,7 @@ tArith2 r op t1 t2 =
     IntSubrange l1 h1 ->
       case t2 of
         IntType -> pure t2
-        IntSubrange l2 h2 ->
-          do (l3,h3) <- intervalFor2 r op (l1,h1) (l2,h2)
-             pure (IntSubrange l3 h3)
+        IntSubrange l2 h2 -> intervalFor2 r op (l1,h1) (l2,h2)
         _ -> err
 
     _ -> err
@@ -222,23 +218,24 @@ intervalFor1 _ op i =
 intervalFor2 :: SourceRange -> Op2 ->
                (Expression,Expression) ->
                (Expression,Expression) ->
-             M (Expression,Expression)
+             M Type
 intervalFor2 _ op i j =
   do u@(l1,h1) <- intInterval i
      v@(l2,h2) <- intInterval j
      case op of
-       Add -> fromIntInterval (l1 + l2, h1 + h2)
-       Sub -> fromIntInterval (l1 - h2, h1 - l2)
-       Mul -> byCases u v $ \a b -> Just (a * b)
-       Div -> byCases u v $ \a b -> fst <$> eucledean_div_mod a b
-       Mod -> byCases u v $ \a b -> snd <$> eucledean_div_mod a b
+       Add -> rng (l1 + l2, h1 + h2)
+       Sub -> rng (l1 - h2, h1 - l2)
+       Mul -> byCases u v (*)
+       Div -> pure IntType -- XXX: more precise?
+       Mod -> pure IntType -- XXX: more precise
        _ -> panic "intervalFor2" [ "Unexpected binary arithmetic operator"
                                  , showPP op ]
   where
-  byCases (a,b) (x,y) f =
-    case catMaybes [f a x,f a y, f b x, f b y] of
-      [] -> reportError ("Invalid call to" <+> pp op)
-      ch -> fromIntInterval (minimum ch, maximum ch)
+  rng u = do (a,b) <- fromIntInterval u
+             pure (IntSubrange a b)
+
+  byCases (a,b) (x,y) f = rng (minimum ch, maximum ch)
+    where ch = [ f u v | u <- [a, b], v <- [x, y] ]
 
 intervalUnion :: (Expression,Expression) ->
                  (Expression,Expression) ->
