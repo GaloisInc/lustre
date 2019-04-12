@@ -224,13 +224,7 @@ inferOp2 r op2 e1 e2 =
                   sz <- addExprs sz1 sz2
                   let ct = CType { cType = ArrayType t sz, cClock = cClock ct1 }
                   pure (a,b,[ct])
-             TVar {} -> noInfer "right"
              _       -> typeError "right" t2
-         TVar {} ->
-           case t2 of
-             ArrayType {} -> noInfer "left"
-             TVar {}      -> noInfer "left"
-             _            -> typeError "left" t1
          _ -> typeError "left" t1
     where
 
@@ -238,9 +232,6 @@ inferOp2 r op2 e1 e2 =
                       ("Incorrect" <+> x <+> "argument to `|`")
                       [ "Expected:" <+> "array"
                       , "Actual type:" <+> pp t ]
-
-    noInfer x = reportError ("Failed to infer the type of the" <+> x <+>
-                                                          "argument of `|`")
 
 
 -- | Check a variable arity operator.

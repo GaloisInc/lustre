@@ -60,7 +60,6 @@ checkTypeDecl td m =
 
         IsStruct fs ->
           do fs1 <- mapM checkFieldType fs
-             solveConstraints
              mapM_ checkDup $ group $ sort $ map fieldName fs1
              let ty  = StructTy fs1
                  newTD = td { typeDef = Just (IsStruct fs1) }
@@ -142,8 +141,6 @@ checkNodeDecl nd k =
              let newProf = NodeProfile { nodeInputs = ins
                                        , nodeOutputs = outs
                                        }
-             solveConstraints  -- XXX: we can store constraints on constants
-                               -- and abstact types in the node.
 
              bod1 <- traverse zonkBody bod
 
@@ -279,7 +276,7 @@ checkStaticArgTypes actual expected =
 
   checkIn arg param =
     case (arg,param) of
-      (InputConst _ t, InputConst _ t1) -> ensure (Subtype t1 t)
+      (InputConst _ t, InputConst _ t1) -> subType t1 t
       (InputBinder b, InputBinder b1) -> subCType (cTypeOf b1) (cTypeOf b)
       (InputBinder {}, InputConst {}) ->
         reportError "Expected a constant input."
@@ -289,7 +286,7 @@ checkStaticArgTypes actual expected =
   checkOut arg param = subCType (cTypeOf arg) (cTypeOf param)
 
   subCType x y =
-    do ensure (Subtype (cType x) (cType y))
+    do subType (cType x) (cType y)
        sameClock (cClock x) (cClock y)
 
 
@@ -371,7 +368,6 @@ instantiateType env ty
       IntType           -> ty
       RealType          -> ty
       BoolType          -> ty
-      TVar {}           -> ty
   where
   iType  = instantiateType env
   iConst = instantiateConst env
@@ -502,7 +498,6 @@ checkLocalDecl ld m =
 checkConstDef :: ConstDef -> M a -> M (ConstDef, a)
 checkConstDef c m =
   do (c1,t) <- checkDef
-     solveConstraints
      addFst c1 (withConst (constName c) t m)
   where
   checkDef =
@@ -517,11 +512,12 @@ checkConstDef c m =
                        pure (c { constType = Just t }, t1)
 
       Just e ->
-        do t <- case constType c of
-                  Nothing -> newTVar
-                  Just t  -> checkType t
-           e1 <- checkConstExpr e t
-           pure (c { constType = Just t, constDef = Just e1 }, t)
+        do (e',t) <- case constType c of
+                       Nothing -> inferConstExpr e
+                       Just t  -> do t' <- checkType t
+                                     e' <- checkConstExpr e t'
+                                     pure (e',t')
+           pure (c { constType = Just t, constDef = Just e' }, t)
 
 checkInputBinder :: InputBinder -> M a -> M (InputBinder, a)
 checkInputBinder ib m =
@@ -582,8 +578,6 @@ checkType ty =
     IntType       -> pure IntType
     BoolType      -> pure BoolType
     RealType      -> pure RealType
-    TVar x        -> panic "checkType" [ "Unexpected type variable:"
-                                       , "*** Tvar: " ++ showPP x ]
     IntSubrange x y ->
       do a <- checkConstExpr x IntType
          b <- checkConstExpr y IntType
@@ -622,7 +616,7 @@ checkEquation eqn =
          sameLen lts cts
          for_ (zip lts cts) $ \(lt,ct) ->
            do sameClock (cClock lt) (cClock ct)
-              ensure (Subtype (cType ct) (cType lt))
+              subType (cType ct) (cType lt)
          pure (Define ls' e')
 
   where
@@ -683,10 +677,7 @@ inferExpr expr =
                do let ct = CType { cClock = c, cType = ArrayType t ne }
                   pure (Array es', [ct])
          case cts of
-           [] ->
-            do t <- newTVar
-               c <- newClockVar
-               done c t
+           [] -> notYetImplemented "Empty arrays"
            elT : more ->
             do t <- foldM tLUB (cType elT)  (map cType more)
                mapM_ (sameClock (cClock elT)) (map cClock more)
@@ -759,13 +750,13 @@ inferConstExpr expr =
 checkConstExpr :: Expression -> Type -> M Expression
 checkConstExpr expr ty =
   do (e',t) <- inferConstExpr expr
-     ensure (Subtype t ty)
+     subType t ty
      pure e'
 
 checkExpr1 :: Expression -> Type -> M (Expression,IClock)
 checkExpr1 e t =
   do (e',ct) <- inferExpr1 e
-     ensure (Subtype (cType ct) t)
+     subType (cType ct) t
      pure (e', cClock ct)
 
 
@@ -833,7 +824,6 @@ inferStructUpdate mbS e fs =
                 NamedType name ->
                   do fTs <- lookupStruct name
                      pure (name,fTs)
-                TVar {} -> reportError "Failed to infer the type of struct."
                 _ -> reportError $ nestedError
                        "Invalid struct update."
                        [ "Expression is not a struct." ]
@@ -1033,8 +1023,6 @@ inferSelector sel ty0 =
                       [ "Struct:" <+> pp a
                       , "Field:" <+> pp f ]
 
-           TVar {} -> notYetImplemented "Record selection from unknown type"
-
            _ -> reportError $
                 nestedError
                   "Argument to struct selector is not a struct:"
@@ -1049,8 +1037,6 @@ inferSelector sel ty0 =
                 -- XXX: check that 0 <= && n < sz ?
                 pure (SelectElement n1, t)
 
-           TVar {} -> notYetImplemented "Array selection from unknown type"
-
            _ -> reportError $
                 nestedError
                "Argument to array selector is not an array:"
@@ -1061,7 +1047,6 @@ inferSelector sel ty0 =
        SelectSlice _s ->
         case ty of
           ArrayType _t _sz -> notYetImplemented "array slices"
-          TVar {} -> notYetImplemented "array slice on unknown type."
           _ -> reportError $
                nestedError
                "Arrgument to array slice is not an array:"

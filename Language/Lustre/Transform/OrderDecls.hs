@@ -178,8 +178,6 @@ instance Resolve Type where
       RealType          -> pure ty
       BoolType          -> pure ty
 
-      TVar x            -> panic "resolve@Type" [ "Unexpected type variable"
-                                             , "*** Tvar: " ++ showPP x ]
 
 instance Resolve ConstDef where
   resolveDef ds cd =

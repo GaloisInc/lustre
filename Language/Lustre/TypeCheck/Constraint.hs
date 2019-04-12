@@ -13,276 +13,134 @@ import Language.Lustre.Semantics.BuiltIn(eucledean_div_mod)
 import Language.Lustre.Panic
 
 
--- | Compute the least upper bound of two types.
-tLUB :: Type -> Type -> M Type
-tLUB t1 t2 =
-  do t1' <- tidyType t1
-     t2' <- tidyType t2
-     let err  = reportError
-                   (nestedError "Incompatible types:" [ pp t1', pp t2' ])
-         tvar = reportError "XXX: Type variable"
-     case t1' of
-
-       BoolType ->
-         do _ <- subType t2' t1'
-            pure t1'
-
-       RealType ->
-        do _ <- subType t2' t1'
-           pure t1'
-
-       IntType ->
-        do _ <- subType t2' t1'
-           pure t1'
-
-       NamedType _ ->
-        do _ <- subType t2' t1'
-           pure t1'
-
-       ArrayType elT1 sz1 ->
-         case t2' of
-           ArrayType elT2 sz2 ->
-             do sameConsts sz1 sz2
-                t <- tLUB elT1 elT2
-                pure (ArrayType t sz1)
-           TVar {} -> tvar
-           _ -> err
-
-       IntSubrange l1 h1 ->
-         case t2' of
-           IntType -> pure t2'
-           IntSubrange l2 h2 ->
-             do (l3,h3) <- intervalUnion (l1,h1) (l2,h2)
-                pure (IntSubrange l3 h3)
-           TVar {} -> tvar
-           _ -> err
-
-       TypeRange {} -> panic "tLUB" ["Unexpected type range"]
-
-       TVar {} -> tvar
-
-
-
--- Quick and dirty "defaulting" for left-over typing constraints.
--- To do this properly, we should keep lower and upper bounds on variables.
-solveConstraints :: M ()
-solveConstraints =
-  do cs1 <- resetConstraints
-     cs2 <- repeated upToInt cs1
-     cs3 <- repeated atMostInt cs2
-     progress <- mapM solveConstraint cs3
-     if or progress
-       then solveConstraints
-       else do unsolved <- resetConstraints
-               mapM_ typeError unsolved
-  where
-  repeated p xs =
-    do res <- mapM p xs
-       case sequence res of
-         Nothing -> repeated p (catMaybes res)
-         Just ys -> pure ys
-
-  upToInt (r,c) =
-    inRangeSetMaybe r $
-    do c1 <- tidyConstraint c
-       case c1 of
-         Subtype (IntSubrange {}) (TVar x) -> bindTVar x IntType >> pure Nothing
-         _ -> pure (Just (r,c1))
-
-  atMostInt (r,c) =
-    inRangeSetMaybe r $
-    do c1 <- tidyConstraint c
-       case c1 of
-         Subtype (TVar x) IntType -> bindTVar x IntType >> pure Nothing
-         _ -> pure (Just (r,c1))
-
-  typeError (r,ctr) =
-    inRangeSetMaybe r $ reportError $
-     case ctr of
-      Subtype a b -> nestedError
-                        "Failed to show that"
-                        [ "Type:" <+> pp a
-                        , "Fits in:" <+> pp b]
-
-      CmpEq op a b    -> opError op [a,b] []
-      CmpOrd op a b   -> opError op [a,b] []
-
-
-opError :: Doc -> [Type] -> [Type] -> Doc
-opError op ins outs =
+opError :: Doc -> [Type] -> Doc
+opError op ins =
   nestedError "Failed to check that that the types support operation."
-    (("Operation:" <+> op) : (tys "Input" ins ++ tys "Output" outs))
+              (("Operation:" <+> op) : tys "Input" ins)
   where
   tys lab ts = [ lab <+> integer n PP.<> ":" <+> pp t
                       | (n,t) <- [ 1 .. ] `zip` ts ]
 
+-- | Compute the least upper bound of two types.
+tLUB :: Type -> Type -> M Type
+tLUB t1 t2 =
+ case t1 of
 
-ensure :: Constraint -> M ()
-ensure c =
-  do _ <- solveConstraint (Nothing, c)
-     pure ()
+   BoolType ->
+     do subType t2 t1
+        pure t1
 
-solveConstraint :: (Maybe SourceRange,Constraint) -> M Bool
-solveConstraint (r,ctr) =
-  inRangeSetMaybe r $
-  do ctr1 <- tidyConstraint ctr
-     case ctr1 of
-       Subtype a b      -> subType a b
-       CmpEq op a b     -> classEq op a b
-       CmpOrd op a b    -> classOrd op a b
+   RealType ->
+    do subType t2 t1
+       pure t1
+
+   IntType ->
+    do subType t2 t1
+       pure t1
+
+   NamedType _ ->
+    do subType t2 t1
+       pure t1
+
+   ArrayType elT1 sz1 ->
+     case t2 of
+       ArrayType elT2 sz2 ->
+         do sameConsts sz1 sz2
+            t <- tLUB elT1 elT2
+            pure (ArrayType t sz1)
+       _ -> err
+
+   IntSubrange l1 h1 ->
+     case t2 of
+       IntType -> pure t2
+       IntSubrange l2 h2 ->
+         do (l3,h3) <- intervalUnion (l1,h1) (l2,h2)
+            pure (IntSubrange l3 h3)
+       _ -> err
+
+   TypeRange {} -> panic "tLUB" [ "Unexpected `TypeRange`." ]
+
+  where
+  err = reportError (opError "find common type" [ t1, t2 ])
 
 
 -- | Computes the type of the result of a unariy arithmetic operator.
 tArith1 :: SourceRange -> Op1 -> Type -> M Type
 tArith1 r op t =
-  do t' <- tidyType t
-     let err = reportError
-                ("Type" PP.<> pp t <+> "does not support unary" <+> pp op)
-         tvar = reportError "XXX: TVar"
-     case t' of
-       IntType  -> pure IntType
-       RealType -> pure RealType
-       IntSubrange l h ->
-         do (l1,h1) <- intervalFor1 r op (l,h)
-            pure (IntSubrange l1 h1)
-       TVar {} -> tvar
-       _ -> err
+  case t of
+    IntType  -> pure IntType
+    RealType -> pure RealType
+    IntSubrange l h ->
+      do (l1,h1) <- intervalFor1 r op (l,h)
+         pure (IntSubrange l1 h1)
+    _ -> reportError (opError (pp op) [t])
+
 
 -- | Computes the type of the result of a binary arithmetic operator.
 tArith2 :: SourceRange -> Op2 -> Type -> Type -> M Type
 tArith2 r op t1 t2 =
-  do t1' <- tidyType t1
-     t2' <- tidyType t2
-     let err = reportError $ nestedError
-               ("Operation" <+> pp op <+> "is not supported on types:")
-               [ pp t1', pp t2' ]
-         tvar = reportError "XXX: TVAR"
+  case t1 of
+    IntType  -> subType t2 t1       >> pure t1
+    RealType -> subType t2 RealType >> pure t1
 
-     case t1' of
-       IntType  -> subType t2' IntType  >> pure t1'
-       RealType -> subType t2' RealType >> pure t1'
+    IntSubrange l1 h1 ->
+      case t2 of
+        IntType -> pure t2
+        IntSubrange l2 h2 ->
+          do (l3,h3) <- intervalFor2 r op (l1,h1) (l2,h2)
+             pure (IntSubrange l3 h3)
+        _ -> err
 
-       IntSubrange l1 h1 ->
-         case t2' of
-           IntType -> pure t2'
-           IntSubrange l2 h2 ->
-             do (l3,h3) <- intervalFor2 r op (l1,h1) (l2,h2)
-                pure (IntSubrange l3 h3)
-           TVar {} -> tvar
-           _ -> err
+    _ -> err
 
-       TVar {} -> tvar
-       _       -> err
-
-
+  where
+  err = reportError (opError (pp op) [t1,t2])
 
 
 
 -- | Checks that the given types can be compared for equality.
-classEq :: Doc -> Type -> Type -> M Bool
-classEq op s0 t0 =
-  do s <- tidyType s0
-     case s of
-       IntSubrange {} -> subType t0 IntType >> pure True
-       ArrayType elT sz ->
-         do elT' <- newTVar
-            _    <- subType t0 (ArrayType elT' sz)
-            _    <- classEq op elT elT'
-            pure True
-
-       TVar {} ->
-         do t <- tidyType t0
-            case t of
-              IntSubrange {} -> subType s IntType >> pure True
-              _              -> subType s t >> pure True
-       _ -> subType t0 s >> pure True
-
+classEq :: Doc -> Type -> Type -> M ()
+classEq _op s t =
+  do _ <- tLUB s t   -- we can compare values of any comparable type.
+                     -- XXX: Perhaps it is useful to save the common type?
+     pure ()
 
 
 -- | Are these types comparable for ordering
-classOrd :: Doc -> Type -> Type -> M Bool
-classOrd op s' t' =
-  do s <- tidyType s'
-     case s of
-       IntType        -> subType t' IntType >> pure True
-       IntSubrange {} -> subType t' IntType >> pure True
-       RealType       -> subType t' RealType >> pure True
-       TVar {} ->
-         do t <- tidyType t'
-            case t of
-              IntType        -> subType s IntType >> pure True
-              IntSubrange {} -> subType s IntType >> pure True
-              RealType       -> subType s RealType >> pure True
-              TVar {}        -> addConstraint (CmpOrd op s t) >> pure False
-              _ -> typeError
-       _ -> typeError
-  where
-  typeError = reportError (opError op [s',t'] [])
+classOrd :: Doc -> Type -> Type -> M ()
+classOrd op s t =
+  do r <- tLUB s t
+     case r of
+       IntType        -> pure ()
+       IntSubrange {} -> pure ()
+       RealType       -> pure ()
+       _ -> reportError (opError op [s,t])
 
 
-sameType :: Type -> Type -> M ()
-sameType x y =
-  do s <- tidyType x
-     t <- tidyType y
-     case (s,t) of
-      (TVar v, _) -> bindTVar v t
-      (_,TVar v)  -> bindTVar v s
-      (NamedType a,   NamedType b)   | a == b -> pure ()
-      (ArrayType a m, ArrayType b n) -> sameConsts m n >> sameType a b
+-- | Subtype is like "subset" (i.e., we want to make sure that all values
+-- of the first type are also good values for the second type).
+subType :: Type -> Type -> M ()
+subType s t =
+  case (s,t) of
+    (IntSubrange {},  IntType) -> pure ()
+    (IntSubrange a b, IntSubrange c d) -> leqConsts c a >> leqConsts b d
 
-      (IntType,IntType)   -> pure ()
-      (RealType,RealType) -> pure ()
-      (BoolType,BoolType) -> pure ()
-      (IntSubrange a b, IntSubrange c d) ->
-        sameConsts a c >> sameConsts b d
-      _ -> reportError $ nestedError
-            "Type mismatch:"
-            [ "Values of type:" <+> pp s
-            , "Do not fit into type:" <+> pp t
-            ]
+    (ArrayType elT1 sz1, ArrayType elT2 sz2) ->
+      do sameConsts sz1 sz2
+         subType elT1 elT2
+
+    (IntType,IntType)   -> pure ()
+    (RealType,RealType) -> pure ()
+    (BoolType,BoolType) -> pure ()
+    (NamedType x, NamedType y) | x == y -> pure ()
+    _ -> reportError $ nestedError
+          "Type mismatch:"
+          [ "Values of type:" <+> pp s
+          , "Do not fit into type:" <+> pp t
+          ]
 
 
 
--- | Subtype is like "subset".
--- Returns 'True' if the constraint was solved (possibly generating
--- new sub-constraints).  `False` means that we failed to solved the
--- constraint and instead it was stored to be solved later.
-subType :: Type -> Type -> M Bool
-subType x y =
-  do s <- tidyType x
-     case s of
-       IntSubrange a b ->
-         do t <- tidyType y
-            case t of
-              IntType         -> pure True
-              IntSubrange c d -> leqConsts c a >> leqConsts b d >> pure True
-              TVar {}         -> addConstraint (Subtype s t) >> pure False
-              _               -> sameType s t >> pure True
-
-       ArrayType elT n ->
-         do elT' <- newTVar
-            _    <- sameType (ArrayType elT' n) y
-            _    <- subType elT elT'
-            pure True
-
-       TVar {} ->
-         do t <- tidyType y
-            case t of
-              TypeRange {} -> panic "subType"
-                                      ["`tidyType` returned `TypeRange`"]
-              RealType     -> sameType s t >> pure True
-              BoolType     -> sameType s t >> pure True
-              NamedType {} -> sameType s t >> pure True
-              ArrayType elT sz ->
-                do elT' <- newTVar
-                   sameType s (ArrayType elT' sz)
-                   _    <- subType elT' elT
-                   pure True
-              IntType        -> addConstraint (Subtype s t) >> pure False
-              IntSubrange {} -> addConstraint (Subtype s t) >> pure False
-              TVar {}        -> addConstraint (Subtype s t) >> pure False
-
-       _ -> sameType s y >> pure True
 
 --------------------------------------------------------------------------------
 

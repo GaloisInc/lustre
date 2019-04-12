@@ -5,7 +5,6 @@ import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Map(Map)
 import qualified Data.Map as Map
-import Data.Maybe(listToMaybe)
 import Data.Foldable(for_)
 import Text.PrettyPrint as PP
 import MonadLib
@@ -35,13 +34,8 @@ runTC m =
 
   rw0 = RW { rwClockVarSubst = Map.empty
            , rwClockVars = Set.empty
-           , rwTyVarSubst = Map.empty
-           , rwCtrs = []
            }
 
-data Constraint = Subtype Type Type
-                | CmpEq  Doc Type Type      -- ^ op, in1, in2
-                | CmpOrd Doc Type Type      -- ^ op, in1, in2
 
 
 
@@ -91,10 +85,6 @@ data RW = RW
   , rwClockVars       :: Set CVar
     -- ^ Clock variables in the current node.
     -- Ones that don't get bound are defaulted to the base clocks.
-
-  , rwTyVarSubst     :: Map TVar Type   -- ^ tv equals
-  , rwCtrs           :: [(Maybe SourceRange, Constraint)]
-                        -- ^ delayed constraints
   }
 
 data NamedType = StructTy [FieldType]
@@ -156,21 +146,15 @@ lookupConst c =
        Just (_,t) -> pure t
 
 
--- | Remove outermost 'TypeRange', type-aliases, lookup binding for type vars.
+-- | Remove 'TypeRange' and type-aliases.
 tidyType :: Type -> M Type
 tidyType t =
   case t of
-    TypeRange _ t1 -> tidyType t1
-    NamedType x    -> resolveNamed x
-    TVar x         -> resolveTVar x
-    _              -> pure t
-
-tidyConstraint :: Constraint -> M Constraint
-tidyConstraint ctr =
-  case ctr of
-    Subtype a b     -> Subtype  <$> tidyType a <*> tidyType b
-    CmpEq x a b     -> CmpEq x  <$> tidyType a <*> tidyType b
-    CmpOrd x a b    -> CmpOrd x <$> tidyType a <*> tidyType b
+    TypeRange _ t1  -> tidyType t1
+    NamedType x     -> resolveNamed x
+    ArrayType et sz -> do t' <- tidyType et
+                          pure (ArrayType t' sz)
+    _               -> pure t
 
 resolveNamed :: Name -> M Type
 resolveNamed x =
@@ -180,11 +164,6 @@ resolveNamed x =
        Just (_,nt) -> pure $ case nt of
                                AliasTy t -> t
                                _         -> NamedType x
-
-resolveTVar :: TVar -> M Type
-resolveTVar tv =
-  do su <- M (rwTyVarSubst <$> get)
-     pure (Map.findWithDefault (TVar tv) tv su)
 
 lookupStruct :: Name -> M [FieldType]
 lookupStruct s =
@@ -350,41 +329,6 @@ zonkClock c =
              _ -> Nothing
 
 
-newTVar :: M Type
-newTVar = M $ do n <- inBase L.newInt
-                 pure (TVar (TV n))
-
--- | Assumes that the type is tidied.  Note that tidying is shallow,
--- so we need to keep tidying in the occurs check
-bindTVar :: TVar -> Type -> M ()
-bindTVar x t =
-  case t of
-    TVar y | x == y -> pure ()
-    _ -> do occursCheck t
-            M $ sets_ $ \rw ->
-                         rw { rwTyVarSubst = Map.insert x t (rwTyVarSubst rw) }
-
-                         -- XXX: also replace `x` in existing types in the subst
-  where
-  occursCheck ty =
-    do t1 <- tidyType ty
-       case t1 of
-         TVar y | x == y -> reportError $ nestedError
-                            "Recursive type"
-                            [ "Variable:" <+> pp x
-                            , "Occurs in:" <+> pp t ]
-         ArrayType elT _ -> occursCheck elT
-         _ -> pure ()
-
-addConstraint :: Constraint -> M ()
-addConstraint c =
-  do r <- listToMaybe . roCurRange <$> M ask
-     M $ sets_ $ \rw -> rw { rwCtrs = (r, c) : rwCtrs rw }
-
-
-resetConstraints :: M [(Maybe SourceRange, Constraint)]
-resetConstraints = M $ sets $ \rw -> (rwCtrs rw, rw { rwCtrs = [] })
-
 
 -- | Apply the substitution to types in the AST.
 -- Currently, only the 'Const' construct contains a type.
@@ -425,7 +369,6 @@ zonkType t =
        RealType -> pure t'
        IntType -> pure t'
        BoolType -> pure t'
-       TVar {} -> pure t'
        TypeRange r t'' -> TypeRange r <$> zonkType t''
 
 zonkField :: Field Expression -> M (Field Expression)
@@ -469,14 +412,4 @@ zonkEqn eqn =
     IVC {} -> pure eqn
     Define lhs e -> Define lhs <$> zonkExpr e
 
-
-instance Pretty Constraint where
-  ppPrec _ ctr =
-    case ctr of
-      Subtype t1 t2     -> ppGen "SubType" [t1,t2]
-      CmpEq  _ t1 t2    -> ppGen "Eq" [t1,t2]
-      CmpOrd _ t1 t2    -> ppGen "Ord" [t1,t2]
-    where
-    ppHigh = ppPrec 16
-    ppGen c ts = c <+> hsep (map ppHigh ts)
 

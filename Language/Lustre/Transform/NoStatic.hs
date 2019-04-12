@@ -303,9 +303,6 @@ evalType env ty =
     IntType       -> IntType
     RealType      -> RealType
     BoolType      -> BoolType
-    TVar x        -> panic "evalType" [ "Unexpected type variable"
-                                      , "*** Tvar: " ++ showPP x ]
-
 
 
 -- | Add a new name for the given type.  If the named type is a struct,
