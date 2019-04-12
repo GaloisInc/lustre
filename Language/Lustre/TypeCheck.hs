@@ -596,12 +596,14 @@ checkEquation eqn =
   enterRange $
   case eqn of
     Assert l e ->
-      do (e',_clk) <- checkExpr1 e BoolType
-         pure (Assert l e')  -- XXX: Save clock?
+      do (e',clk) <- checkExpr1 e BoolType
+         sameClock BaseClock clk    -- do we want to support others?
+         pure (Assert l e')
 
     Property l e ->
-      do (e',_clk) <- checkExpr1 e BoolType
-         pure (Property l e') -- XXX: Save clock?
+      do (e',clk) <- checkExpr1 e BoolType
+         sameClock BaseClock clk -- do we want to support others?
+         pure (Property l e')
 
     IsMain _ -> pure eqn
 
