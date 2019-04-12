@@ -146,16 +146,6 @@ lookupConst c =
        Just (_,t) -> pure t
 
 
--- | Remove 'TypeRange' and type-aliases.
-tidyType :: Type -> M Type
-tidyType t =
-  case t of
-    TypeRange _ t1  -> tidyType t1
-    NamedType x     -> resolveNamed x
-    ArrayType et sz -> do t' <- tidyType et
-                          pure (ArrayType t' sz)
-    _               -> pure t
-
 resolveNamed :: Name -> M Type
 resolveNamed x =
   do ro <- M ask
@@ -361,15 +351,14 @@ zonkCType ct =
 
 zonkType :: Type -> M Type
 zonkType t =
-  do t' <- tidyType t
-     case t' of
-       ArrayType elT sz -> ArrayType <$> zonkType elT <*> zonkExpr sz
-       IntSubrange e1 e2 -> IntSubrange <$> zonkExpr e1 <*> zonkExpr e2
-       NamedType {} -> pure t'
-       RealType -> pure t'
-       IntType -> pure t'
-       BoolType -> pure t'
-       TypeRange r t'' -> TypeRange r <$> zonkType t''
+  case t of
+    ArrayType elT sz -> ArrayType <$> zonkType elT <*> zonkExpr sz
+    IntSubrange e1 e2 -> IntSubrange <$> zonkExpr e1 <*> zonkExpr e2
+    NamedType {} -> pure t
+    RealType -> pure t
+    IntType -> pure t
+    BoolType -> pure t
+    TypeRange r t' -> TypeRange r <$> zonkType t'
 
 zonkField :: Field Expression -> M (Field Expression)
 zonkField f =

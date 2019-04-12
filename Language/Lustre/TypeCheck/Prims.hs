@@ -214,8 +214,8 @@ inferOp2 r op2 e1 e2 =
     do (a, ct1) <- inferExpr1 e1
        (b, ct2) <- inferExpr1 e2
        sameClock (cClock ct1) (cClock ct2)
-       t1 <- tidyType (cType ct1)
-       t2 <- tidyType (cType ct2)
+       let t1 = cType ct1
+           t2 = cType ct2
        case t1 of
          ArrayType elT1 sz1 ->
            case t2 of

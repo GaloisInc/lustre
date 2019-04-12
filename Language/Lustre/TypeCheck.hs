@@ -66,10 +66,9 @@ checkTypeDecl td m =
              addFst newTD (withNamedType ti ty m)
 
         IsType t ->
-           do t1 <- checkType t
-              t2 <- tidyType t1
-              let newTD = td { typeDef = Just (IsType t1) }
-              addFst newTD (withNamedType ti (AliasTy t2) m)
+           do t' <- checkType t
+              let newTD = td { typeDef = Just (IsType t') }
+              addFst newTD (withNamedType ti (AliasTy t') m)
   where
   ti = typeName td
 
@@ -574,7 +573,7 @@ checkNested work things m =
 checkType :: Type -> M Type
 checkType ty =
   case ty of
-    TypeRange r t -> inRange r (checkType t)
+    TypeRange _ t -> checkType t
     IntType       -> pure IntType
     BoolType      -> pure BoolType
     RealType      -> pure RealType
@@ -583,9 +582,7 @@ checkType ty =
          b <- checkConstExpr y IntType
          leqConsts x y
          pure (IntSubrange a b)
-    NamedType x ->
-      do _t <- resolveNamed x
-         pure ty -- or the resolved type?
+    NamedType x -> resolveNamed x
     ArrayType t n ->
       do n1 <- checkConstExpr n IntType
          leqConsts (Lit (Int 0)) n1
@@ -819,14 +816,13 @@ inferStructUpdate mbS e fs =
        case mbS of
          Just s -> checkStructType s
          Nothing ->
-           do t1 <- tidyType (cType ct)
-              case t1 of
-                NamedType name ->
-                  do fTs <- lookupStruct name
-                     pure (name,fTs)
-                _ -> reportError $ nestedError
-                       "Invalid struct update."
-                       [ "Expression is not a struct." ]
+           case cType ct of
+             NamedType name ->
+               do fTs <- lookupStruct name
+                  pure (name,fTs)
+             _ -> reportError $ nestedError
+                    "Invalid struct update."
+                    [ "Expression is not a struct." ]
 
      fs' <- for fs $ \f ->
               case find ((fName f ==) . fieldName) fieldTs of
@@ -1007,52 +1003,51 @@ inferMergeCase i it (MergeCase p e) =
 
 -- | Infer the type of a selector.
 inferSelector :: Selector Expression -> Type -> M (Selector Expression, Type)
-inferSelector sel ty0 =
-  do ty <- tidyType ty0
-     case sel of
-       SelectField f ->
-         case ty of
-           NamedType a ->
-             do fs <- lookupStruct a
-                case find ((f ==) . fieldName) fs of
-                  Just fi  -> pure (sel,fieldType fi)
-                  Nothing ->
-                    reportError $
-                    nestedError
-                    "Struct has no such field:"
-                      [ "Struct:" <+> pp a
-                      , "Field:" <+> pp f ]
+inferSelector sel ty =
+  case sel of
+    SelectField f ->
+      case ty of
+        NamedType a ->
+          do fs <- lookupStruct a
+             case find ((f ==) . fieldName) fs of
+               Just fi  -> pure (sel,fieldType fi)
+               Nothing ->
+                 reportError $
+                 nestedError
+                 "Struct has no such field:"
+                   [ "Struct:" <+> pp a
+                   , "Field:" <+> pp f ]
 
-           _ -> reportError $
-                nestedError
-                  "Argument to struct selector is not a struct:"
-                  [ "Selector:" <+> pp sel
-                  , "Input:" <+> pp ty0
-                  ]
-
-       SelectElement n ->
-         case ty of
-           ArrayType t _sz ->
-             do n1 <- checkConstExpr n IntType
-                -- XXX: check that 0 <= && n < sz ?
-                pure (SelectElement n1, t)
-
-           _ -> reportError $
-                nestedError
-               "Argument to array selector is not an array:"
-                [ "Selector:" <+> pp sel
-                , "Input:" <+> pp ty0
-                ]
-
-       SelectSlice _s ->
-        case ty of
-          ArrayType _t _sz -> notYetImplemented "array slices"
-          _ -> reportError $
-               nestedError
-               "Arrgument to array slice is not an array:"
+        _ -> reportError $
+             nestedError
+               "Argument to struct selector is not a struct:"
                [ "Selector:" <+> pp sel
-               , "Input:" <+> pp ty0
+               , "Input:" <+> pp ty
                ]
+
+    SelectElement n ->
+      case ty of
+        ArrayType t _sz ->
+          do n1 <- checkConstExpr n IntType
+             -- XXX: check that 0 <= && n < sz ?
+             pure (SelectElement n1, t)
+
+        _ -> reportError $
+             nestedError
+            "Argument to array selector is not an array:"
+             [ "Selector:" <+> pp sel
+             , "Input:" <+> pp ty
+             ]
+
+    SelectSlice _s ->
+     case ty of
+       ArrayType _t _sz -> notYetImplemented "array slices"
+       _ -> reportError $
+            nestedError
+            "Arrgument to array slice is not an array:"
+            [ "Selector:" <+> pp sel
+            , "Input:" <+> pp ty
+            ]
 
 
 

@@ -674,7 +674,7 @@ evalField (Field l e) = Field l <$> evalExpr e
 
 {- | Lift a type annotation through a structured expression.
 Assumes that there are no 'TypeRange' in the types and names refer
-directly to their types (see 'tidyType' in "Language.Lustre.TypeCheck.Monad") -}
+directly to their types (see 'checkType' in "Language.Lustre.TypeCheck") -}
 liftConst :: CType -> StructData Expression -> NosM (StructData Expression)
 liftConst ty str =
 
