@@ -558,6 +558,7 @@ evalEqn env eqn =
                      in Define lhs <$> evalDynExpr (TopExpr lhs) env e
     IsMain r      -> pure (IsMain r)
     IVC is        -> pure (IVC is)
+    Realizable is -> pure (Realizable is)
 
 -- | Evaluate a left-hand-side of an equation.
 evalLHS :: Env -> LHS Expression -> LHS Expression

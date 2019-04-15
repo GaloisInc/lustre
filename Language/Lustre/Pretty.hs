@@ -176,9 +176,10 @@ instance Pretty Equation where
       Define ls e -> lhs <+> "=" <+> pp e
         where lhs = case ls of
                       [] -> "()"
-                      _  -> hsep (punctuate comma (map pp ls))
+                      _  -> hsep (map pp ls)
       IsMain _ -> "--%MAIN"
-      IVC is   -> "--%IVC" <+> hsep (punctuate comma (map pp is))
+      IVC is   -> "--%IVC" <+> commaSep (map pp is)
+      Realizable is -> "--%REALIZABLE" <+> commaSep (map pp is)
       Property _ e -> "--%PROPERTY" <+> pp e
 
 instance Pretty e => Pretty (LHS e) where

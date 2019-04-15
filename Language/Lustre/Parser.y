@@ -87,6 +87,8 @@ import Language.Lustre.Panic
   '--%PROPERTY' { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaProperty } }
   '--%MAIN'     { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaMain } }
   '--%IVC'      { Lexeme { lexemeRange = $$, lexemeToken = TokPragmaIVC } }
+  '--%REALIZABLE' { Lexeme { lexemeRange = $$,
+                             lexemeToken = TokPragmaRealizable } }
 
   'when'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwWhen } }
   'current'   { Lexeme { lexemeRange = $$, lexemeToken = TokKwCurrent } }
@@ -438,6 +440,7 @@ equation :: { Equation }
   | '--%PROPERTY' expression ';'                { Property (propName $1 $2) $2 }
   | '--%MAIN' opt_semi                          { IsMain $1 }
   | '--%IVC' SepBy1(',',ident) ';'              { IVC $2 }
+  | '--%REALIZABLE' SepBy1(',',ident) ';'       { Realizable $2 }
   | SepBy1(',',LHS) '=' expression ';'          { Define $1 $3 }
   | '(' SepBy1(',',LHS) ')' '=' expression ';'  { Define $2 $5 }
   | '(' ')' '=' expression ';'                  { Define [] $4 }

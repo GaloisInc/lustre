@@ -283,6 +283,7 @@ evalEqn eqn =
   case eqn of
     P.IsMain _ -> pure []
     P.IVC _    -> pure [] -- XXX: we should do something with these
+    P.Realizable _ -> pure [] -- XXX: we should do something with these
 
     P.Property t e -> evalForm "--%PROPERTY" (addPropertyName t) e
     P.Assert t e -> evalForm "assert" (addAssertName t) e

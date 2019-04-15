@@ -14,6 +14,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import Data.Maybe(fromMaybe)
 import Data.List(genericDrop,genericReplicate)
+import Data.Traversable(for)
 import Text.PrettyPrint((<+>), braces, brackets, parens)
 import MonadLib
 
@@ -341,7 +342,8 @@ evalEqn eqn =
 
     IsMain r -> pure [ IsMain r ]
 
-    IVC is -> pure [ IVC is ]
+    IVC is -> pure . IVC . concat <$> for is expandIdent
+    Realizable is -> pure . Realizable . concat <$> for is expandIdent
 
     Define lhs e ->
       do es <- flatStructData <$> evalExpr e
@@ -356,6 +358,13 @@ evalEqn eqn =
                     ERange _ ex1 -> isCall ex1
                     Call {}      -> True
                     _            -> False
+
+  where
+  expandIdent :: Ident -> NosM [Ident]
+  expandIdent i = do mb <- lkpStrName (Unqual i)
+                     case mb of
+                       Nothing -> pure [i]
+                       Just sd -> pure (map origNameToIdent (flatStructData sd))
 
 expandLHS :: LHS Expression -> NosM [ LHS a ]
 expandLHS lhs = map (LVar . origNameToIdent) <$> expandLHS' lhs

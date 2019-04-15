@@ -264,6 +264,7 @@ instance Rename Equation where
       IsMain r      -> IsMain r
       Define ls e   -> Define (rename su ls) (rename su e)
       IVC is        -> IVC (rename su is)
+      Realizable is -> Realizable (rename su is)
 
 --------------------------------------------------------------------------------
 

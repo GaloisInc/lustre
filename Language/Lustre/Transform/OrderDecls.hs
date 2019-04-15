@@ -389,6 +389,7 @@ instance Resolve Equation where
       Define lhs e -> Define     <$> traverse resolve lhs <*> resolveExpr e
       IsMain _     -> pure eqn
       IVC is       -> IVC <$> traverse inferIdent is
+      Realizable is -> Realizable <$> traverse inferIdent is
 
 instance (e ~ Expression) => Resolve (LHS e) where
   resolveDef _ lhs =

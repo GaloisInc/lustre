@@ -173,6 +173,7 @@ data Equation   = Assert PropName Expression    -- ^ Assuming this
                 | IsMain SourceRange            -- ^ This is the main node,
                                                 -- use it if nothing specified
                 | IVC [Ident]
+                | Realizable [Ident]
                 | Define [LHS Expression] Expression
                   deriving Show
 
@@ -429,6 +430,12 @@ eqnRangeMaybe eqn =
       case is of
         [] -> Nothing
         _  -> Just (range (head is) <-> range (last is))
+    Realizable is ->
+      case is of
+        [] -> Nothing
+        _  -> Just (range (head is) <-> range (last is))
+
+
 
     Define ls e ->
       case ls of
