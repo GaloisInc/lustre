@@ -47,10 +47,7 @@ quickDeclsSimp ds =
   do ds1 <- quickOrderTopDecl ds
      let enums = getEnumInfo ds1
      dumpPhase PhaseRename $ vcatSep $ map pp ds1
-
-     tcOn <- lustreTCEnabled
-     ds2 <- if tcOn then quickCheckDecls ds1
-                    else pure ds1
+     ds2 <- quickCheckDecls ds1
      dumpPhase PhaseTypecheck $ vcatSep $ map pp ds2
 
      (csMap,ds3) <- noConst ds2

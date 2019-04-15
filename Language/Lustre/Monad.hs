@@ -30,8 +30,6 @@ module Language.Lustre.Monad
   , invalidNameSeed
   , isValidNameSeed
 
-    -- * Configuration
-  , lustreTCEnabled
   ) where
 
 
@@ -61,7 +59,6 @@ instance BaseM LustreM LustreM where
 
 data GlobalLustreEnv = GlobalLustreEnv
   { luLogHandle :: !Handle
-  , luTCEnabled :: !Bool
   , luDumpAfter :: !(Set LustrePhase)
   }
 
@@ -109,7 +106,6 @@ data LustreConf = LustreConf
 runLustre :: LustreConf -> LustreM a -> IO a
 runLustre conf m =
   do let env = GlobalLustreEnv { luLogHandle = lustreLogHandle conf
-                               , luTCEnabled = not (lustreNoTC conf)
                                , luDumpAfter = lustreDumpAfter conf
                                }
          st  = GlobalLustreState
@@ -179,9 +175,6 @@ newInt =
      setNameSeed (nextNameSeed seed)
      pure (nameSeedToInt seed)
 
-
-lustreTCEnabled :: LustreM Bool
-lustreTCEnabled = LustreM (luTCEnabled <$> ask)
 
 -- | Execute the given action---presumably for printing---only if
 -- dumping after the given phase is enables.
