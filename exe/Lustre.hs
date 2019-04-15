@@ -33,7 +33,6 @@ computeConf opts =
                Just f  -> openFile f WriteMode
      pure LustreConf { lustreInitialNameSeed = Nothing
                      , lustreLogHandle = logH
-                     , lustreNoTC = False
                      , lustreDumpAfter = dumpAfter opts
                      }
 

@@ -97,7 +97,6 @@ isValidNameSeed (NameSeed x) = x >= 0
 data LustreConf = LustreConf
   { lustreInitialNameSeed :: Maybe NameSeed
   , lustreLogHandle       :: !Handle
-  , lustreNoTC            :: Bool
   , lustreDumpAfter       :: !(Set LustrePhase)
   }
 
