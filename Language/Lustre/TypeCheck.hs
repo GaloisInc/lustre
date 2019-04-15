@@ -609,6 +609,8 @@ checkEquation eqn =
 
     IVC _ -> pure eqn -- XXX: what should we check here?
 
+    Realizable _ -> pure eqn -- XXX: what should we check here?
+
     Define ls e ->
       do (ls',lts) <- unzip <$> mapM inferLHS ls
          (e',cts) <- inferExpr e

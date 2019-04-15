@@ -399,6 +399,7 @@ zonkEqn eqn =
     Property p e -> Property p <$> zonkExpr e
     IsMain {} -> pure eqn
     IVC {} -> pure eqn
+    Realizable {} -> pure eqn
     Define lhs e -> Define lhs <$> zonkExpr e
 
 
