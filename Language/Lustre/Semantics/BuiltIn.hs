@@ -199,7 +199,7 @@ sSelectField :: Ident -> Value -> EvalM Value
 sSelectField f v =
   case v of
     VStruct _ fs ->
-      case [ v | Field f1 fv <- fs, f1 == f ] of
+      case [ fv | Field f1 fv <- fs, f1 == f ] of
         fv : _ -> pure fv
         []     -> crash "select-field" "Missing struct field"
     _ -> typeError "select-field" "a struct type."
