@@ -508,6 +508,9 @@ instance Pretty Thing where
 instance Pretty ModName where
   ppPrec _ (Module t) = pp t
 
+instance Pretty Label where
+  ppPrec _ = pp . labText
+
 
 instance Pretty OrigName where
   ppPrec _ x = pp (rnIdent x) -- XXX: more?

@@ -14,10 +14,11 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Graph.SCC(stronglyConnComp)
 import Data.Graph(SCC(..))
-import MonadLib
+import MonadLib hiding (Label)
 import AlexTools(SourceRange(..),SourcePos(..))
 
-import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..), identUID)
+import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..), identUID
+                           , Label(..))
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Monad
@@ -145,10 +146,10 @@ data St = St
     -- Since we process things in depth-first fashion, this should be
     -- reverse to get proper definition order.
 
-  , stAssertNames :: [(P.PropName,Ident)]
+  , stAssertNames :: [(Label,Ident)]
     -- ^ The names of the equations corresponding to asserts.
 
-  , stPropertyNames :: [(P.PropName,Ident)]
+  , stPropertyNames :: [(Label,Ident)]
     -- ^ The names of the equatiosn corresponding to properties.
 
 
@@ -158,11 +159,11 @@ data St = St
   }
 
 -- | Get the collected assert names.
-getAssertNames :: M [(P.PropName,Ident)]
+getAssertNames :: M [(Label,Ident)]
 getAssertNames = stAssertNames <$> get
 
 -- | Get the collected property names.
-getPropertyNames :: M [(P.PropName,Ident)]
+getPropertyNames :: M [(Label,Ident)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
@@ -184,8 +185,7 @@ addBinder (i C.::: t) = addLocal i t
 newIdentFrom :: Text -> M Ident
 newIdentFrom stem =
   do x <- inBase newInt
-     let i = Ident { identText     = stem
-                   , identRange    = noLoc
+     let i = Ident { identLabel    = Label { labText = stem, labRange = noLoc }
                    , identPragmas  = []
                    , identResolved = Nothing
                    }
@@ -237,15 +237,15 @@ nameExpr expr =
            C.Merge a _ _ -> namedStem "merge" a
 
   namedStem t a = case a of
-                    C.Var i -> t <> "_" <> identText i
+                    C.Var i -> t <> "_" <> P.identText i
                     _       -> "$" <> t
 
 -- | Remember that the given identifier was used for an assert.
-addAssertName :: P.PropName -> Ident -> M ()
+addAssertName :: Label -> Ident -> M ()
 addAssertName t i = sets_ $ \s -> s { stAssertNames = (t,i) : stAssertNames s }
 
 -- | Remember that the given identifier was used for a property.
-addPropertyName :: P.PropName -> Ident -> M ()
+addPropertyName :: Label -> Ident -> M ()
 addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 

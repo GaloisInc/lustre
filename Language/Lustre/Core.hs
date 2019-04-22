@@ -12,7 +12,7 @@ import Text.PrettyPrint( Doc, text, (<+>)
                        , hsep, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
 
-import Language.Lustre.AST (Literal(..),PropName(..))
+import Language.Lustre.AST (Literal(..))
 import Language.Lustre.Name
 import Language.Lustre.Pretty
 import Language.Lustre.Panic(panic)
@@ -72,10 +72,10 @@ infix 3 `On`
 data Node     = Node { nInputs      :: [Binder]
                      , nOutputs     :: [Ident]
 
-                     , nAssuming    :: [(PropName,Ident)]
+                     , nAssuming    :: [(Label,Ident)]
                        -- ^ Assuming that these are true
 
-                     , nShows       :: [(PropName,Ident)]
+                     , nShows       :: [(Label,Ident)]
                        -- ^ Need to show that these are also true
 
                      , nEqns        :: [EqnGroup]

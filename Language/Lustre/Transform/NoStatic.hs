@@ -49,7 +49,7 @@ import Data.Foldable(foldl')
 import qualified Data.Map as Map
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import MonadLib
+import MonadLib hiding (Label)
 import Text.PrettyPrint(punctuate,comma,hsep)
 
 import Language.Lustre.AST
@@ -1164,7 +1164,7 @@ in the struct, and the 'Maybe' value is an optional default--if it is
 'Nothing', then the filed must be defined, otherwise the default is used
 in case the filed ismissing. -}
 evalNewStructWithDefs ::
-  Env -> Name -> [Field Expression] -> [(Ident, Maybe Value)] -> M Expression
+  Env -> Name -> [Field Expression] -> [(Label, Maybe Value)] -> M Expression
 evalNewStructWithDefs env s fs def =
   do fld <- Map.fromList <$> mapM evalField fs
      pure (Struct s (map (setField fld) def))
@@ -1279,8 +1279,8 @@ addNameInstDecl c as =
 newIdent :: SourceRange -> Maybe ModName -> Text -> Thing -> M OrigName
 newIdent r md txt th = sets $ \s ->
   let uid     = nameSeed s
-      origI   = Ident { identRange    = r
-                      , identText     = txt
+      lab     = Label { labText = txt, labRange = r }
+      origI   = Ident { identLabel = lab
                       , identPragmas  = []
                       , identResolved = Nothing
                       }

@@ -16,7 +16,7 @@ import Language.Lustre.Semantics.BuiltIn
 
 data Env = Env
   { envConsts   :: Map OrigName Value
-  , envStructs  :: Map OrigName [ (Ident, Maybe Value) ]
+  , envStructs  :: Map OrigName [ (Label, Maybe Value) ]
   }
 
 emptyEnv :: Env
@@ -163,7 +163,7 @@ evalConst env expr =
   bad = crash "evalConst"
 
 
-evalField :: Env -> Field Expression -> EvalM (Ident, Value)
+evalField :: Env -> Field Expression -> EvalM (Label, Value)
 evalField env (Field f v) = do v1 <- evalConst env v
                                pure (f,v1)
 

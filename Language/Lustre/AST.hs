@@ -8,7 +8,6 @@ module Language.Lustre.AST
   , SourcePos(..)
   ) where
 
-import Data.Text(Text)
 import Data.Maybe(fromMaybe)
 
 import AlexTools(SourceRange(..), SourcePos(..), HasRange(..), (<->))
@@ -69,7 +68,7 @@ data Type =
     deriving Show
 
 data FieldType  = FieldType
-  { fieldName     :: Ident
+  { fieldName     :: Label
   , fieldType     :: Type
   , fieldDefault  :: Maybe Expression
   } deriving Show
@@ -163,15 +162,10 @@ data LocalDecl  = LocalVar Binder
                 | LocalConst ConstDef
                   deriving Show
 
-data PropName = PropName
-  { pName  :: Text
-  , pRange :: SourceRange
-  } deriving Show
-
-data Equation   = Assert PropName Expression    -- ^ Assuming this
-                | Property PropName Expression  -- ^ Prove this
-                | IsMain SourceRange            -- ^ This is the main node,
-                                                -- use it if nothing specified
+data Equation   = Assert Label Expression     -- ^ Assuming this
+                | Property Label Expression   -- ^ Prove this
+                | IsMain SourceRange          -- ^ This is the main node,
+                                              -- use it if nothing specified
                 | IVC [Ident]
                 | Realizable [Ident]
                 | Define [LHS Expression] Expression
@@ -181,7 +175,7 @@ data LHS e      = LVar Ident
                 | LSelect (LHS e) (Selector e)
                   deriving (Show,Eq,Ord)
 
-data Selector e = SelectField Ident
+data Selector e = SelectField Label
                 | SelectElement e
                 | SelectSlice (ArraySlice e)
                   deriving (Show, Eq, Ord)
@@ -307,7 +301,7 @@ data StaticArg  = TypeArg Type
 data Literal    = Int Integer | Real Rational | Bool Bool
                   deriving (Show,Eq)
 
-data Field e    = Field { fName :: Ident, fValue :: e }
+data Field e    = Field { fName :: Label, fValue :: e }
                   deriving Show
 
 instance Functor Field where

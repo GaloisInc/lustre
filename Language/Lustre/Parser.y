@@ -293,9 +293,9 @@ typeDef :: { TypeDef }
 
 
 fieldType :: { [FieldType] }
-  : ident ':' type '=' expression             { toFieldType ($1,$3,$5) }
-  | ident ':' type                            { toFieldType ($1,$3) }
-  | ident ',' SepBy1(',',ident) ':' type      { toFieldType ($1, $3, $5) }
+  : label ':' type '=' expression             { toFieldType ($1,$3,$5) }
+  | label ':' type                            { toFieldType ($1,$3) }
+  | label ',' SepBy1(',',label) ':' type      { toFieldType ($1, $3, $5) }
 
 
 -- Types -----------------------------------------------------------------------
@@ -451,7 +451,7 @@ opt_semi :: { () }
 
 LHS :: { LHS Expression }
   : ident                                   { LVar $1 }
-  | LHS '.' ident                           { LSelect $1 (SelectField $3) }
+  | LHS '.' label                           { LSelect $1 (SelectField $3) }
   | LHS '[' arraySel ']'                    { LSelect $1 $3 }
 
 
@@ -532,7 +532,7 @@ expression :: { Expression }
   | '[' exprList ']'                  { at $1 $3 (Array $2) }
 
   | expression '[' arraySel ']'       { at $1 $4 (Select $1 $3) }
-  | expression '.' ident              { at $1 $3 (Select $1 (SelectField $3))}
+  | expression '.' label              { at $1 $3 (Select $1 (SelectField $3))}
 
 
   | 'currentWith' '(' expression ',' expression ')'
@@ -609,10 +609,10 @@ simpExpr :: { Expression }
 
 
 field :: { Field Expression }
-  : ident '=' expression              { Field $1 $3 }
+  : label '=' expression              { Field $1 $3 }
 
 updFiled :: { Field Expression }
-  : ident ':=' expression             { Field $1 $3 }
+  : label ':=' expression             { Field $1 $3 }
 
 clockExpr :: { ClockExpr }
   : name '(' ident ')'    { WhenClock ($1 <-> $4) (Var $1) $3 }
@@ -697,9 +697,13 @@ name :: { Name }
   : ident                 { Unqual $1 }
   | QIDENT                { toQIdent $1 }
 
+
+label :: { Label }
+  : IDENT                { toLabel $1 }
+
 ident :: { Ident }
-  : IDENT                 { toIdent $1 [] }
-  | IDENT ListOf1(pragma) { toIdent $1 $2 }
+  : label                 { toIdent $1 [] }
+  | label ListOf1(pragma) { toIdent $1 $2 }
 
 pragma :: { Pragma }
   : '%' IDENT ':' IDENT '%' { Pragma { pragmaTextA = lexemeText $2
@@ -804,9 +808,13 @@ toITE r e1 e2 e3 = ERange (r <-> e3) (callPrim r ITE [e1,e2,e3])
 
 --------------------------------------------------------------------------------
 
-toIdent :: Lexeme Token -> [Pragma] -> Ident
-toIdent l ps = Ident { identText    = lexemeText l
-                     , identRange   = lexemeRange l
+toLabel :: Lexeme Token -> Label
+toLabel l = Label { labText  = lexemeText l
+                  , labRange = lexemeRange l
+                  }
+
+toIdent :: Label -> [Pragma] -> Ident
+toIdent l ps = Ident { identLabel = l
                      , identPragmas = ps
                      , identResolved = Nothing
                      }
@@ -815,8 +823,9 @@ toQIdent :: Lexeme Token -> Name
 toQIdent l =
   case lexemeToken l of
     TokQualIdent p n -> Qual (Module p)
-                          Ident { identText     = n
-                                , identRange    = lexemeRange l
+                          Ident { identLabel = Label { labText = n
+                                                     , labRange = lexemeRange l
+                                                     }
                                 , identPragmas  = []
                                 , identResolved = Nothing
                                  }
@@ -847,15 +856,15 @@ toTypeDecl i d = TypeDecl { typeName = i, typeDef = d }
 class ToFieldType t where
   toFieldType :: t -> [FieldType]
 
-instance ToFieldType (Ident, Type, Expression) where
+instance ToFieldType (Label, Type, Expression) where
   toFieldType (x,t,e) = [ FieldType { fieldName = x, fieldType = t
                                     , fieldDefault = Just e } ]
 
-instance ToFieldType (Ident, Type) where
+instance ToFieldType (Label, Type) where
   toFieldType (x,t) = [ FieldType { fieldName = x, fieldType = t
                                   , fieldDefault = Nothing } ]
 
-instance ToFieldType (Ident, [Ident], Type) where
+instance ToFieldType (Label, [Label], Type) where
   toFieldType (i,is,t) = [ d | x <- i : is, d <- toFieldType (x,t) ]
 
 --------------------------------------------------------------------------------
@@ -1016,16 +1025,16 @@ mkCallWhen r1 r2 c e = at r1 r2 <$> checkCall r1 e
 
 --------------------------------------------------------------------------------
 
-propName :: SourceRange -> Expression -> PropName
+propName :: SourceRange -> Expression -> Label
 propName rng e = case e of
                    ERange _ e1 -> propName rng e1
-                   Var x -> PropName
-                              { pName = Text.pack (showPP x)
-                              , pRange = rng
+                   Var x -> Label
+                              { labText  = Text.pack (showPP x)
+                              , labRange = rng
                               }
-                   _     -> PropName
-                              { pName = synthName
-                              , pRange = rng
+                   _     -> Label
+                              { labText  = synthName
+                              , labRange = rng
                               }
   where
   synthName = "Prop on line " <> Text.pack (show (sourceLine (sourceFrom rng)))

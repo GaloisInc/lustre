@@ -5,12 +5,22 @@ import AlexTools(SourceRange(..), HasRange(..))
 
 import Language.Lustre.Panic(panic)
 
-data Ident = Ident
-  { identText       :: !Text
-  , identRange      :: !SourceRange
-  , identPragmas    :: [Pragma]
-  , identResolved   :: !(Maybe OrigName)
+data Label = Label
+  { labText   :: !Text
+  , labRange  :: !SourceRange
   } deriving Show
+
+data Ident = Ident
+  { identLabel    :: !Label
+  , identPragmas  :: [Pragma]
+  , identResolved :: !(Maybe OrigName)
+  } deriving Show
+
+identText :: Ident -> Text
+identText = labText . identLabel
+
+identRange :: Ident -> SourceRange
+identRange = labRange . identLabel
 
 withResolved :: (OrigName -> a) -> Ident -> a
 withResolved k i = case identResolved i of
@@ -66,17 +76,27 @@ nameOrigName nm =
                   , "*** Name: " ++ show nm
                   ]
 
+labelFromText :: SourceRange -> Text -> Label
+labelFromText r t = Label { labText = t, labRange = r }
 
 -- | Make an ident with no known location.
 -- This can be useful when looking up things in maps---only the 'Text'
 -- matters.
 identFromText :: SourceRange -> Text -> Ident
-identFromText rng txt = Ident { identText = txt
-                              , identRange = rng
+identFromText rng txt = Ident { identLabel = labelFromText rng txt
                               , identPragmas = []
                               , identResolved = Nothing
                               }
 --------------------------------------------------------------------------------
+
+
+instance Eq Label where
+  x == y = labText x == labText y
+
+instance Ord Label where
+  compare x y = compare (labText x) (labText y)
+
+
 
 instance Eq Ident where
   x == y = case (identResolved x, identResolved y) of
@@ -114,6 +134,8 @@ instance Ord Name where
 --------------------------------------------------------------------------------
 
 
+instance HasRange Label where
+  range = labRange
 
 instance HasRange Ident where
   range = identRange

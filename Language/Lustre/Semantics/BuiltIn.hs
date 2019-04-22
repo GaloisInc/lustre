@@ -195,7 +195,7 @@ sConcat = sOp2 $ \u v ->
     _ -> typeError "concat" "(array,array)"
 
 
-sSelectField :: Ident -> Value -> EvalM Value
+sSelectField :: Label -> Value -> EvalM Value
 sSelectField f v =
   case v of
     VStruct _ fs ->

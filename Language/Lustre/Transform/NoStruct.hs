@@ -16,7 +16,7 @@ import Data.Maybe(fromMaybe)
 import Data.List(genericDrop,genericReplicate)
 import Data.Traversable(for)
 import Text.PrettyPrint((<+>), braces, brackets, parens)
-import MonadLib
+import MonadLib hiding (Label)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty
@@ -27,7 +27,7 @@ import Language.Lustre.Panic
 
 -- | Information needed to perform the no-structure pass.
 data NosIn = NosIn
-  { nosiStructs   :: Map OrigName [(Ident,Type)]
+  { nosiStructs   :: Map OrigName [(Label,Type)]
     -- ^ Structs from other modules
 
   , nosiCallSites :: CallSiteMap
@@ -215,7 +215,7 @@ evalNodeBody csTodo body =
 
 -- | Compute the list of atomic types in a type.
 -- Also returns a boolean to indicate if this was a structured type.
-expandType :: Map OrigName [(Ident,Type)] -> Type -> (Bool, [([SubName],Type)])
+expandType :: Map OrigName [(Label,Type)] -> Type -> (Bool, [([SubName],Type)])
 expandType env ty =
   case ty of
     TypeRange r t -> (b, [ (n,TypeRange r u) | (n,u) <- ts ])
@@ -239,7 +239,7 @@ expandType env ty =
 
     _ -> (False, [([],ty)])
 
-data SubName = ArrEl Integer | StructEl Ident
+data SubName = ArrEl Integer | StructEl Label
 
 
 -- | Given a type and epxressions for the leaves of a structured value,
@@ -247,7 +247,7 @@ data SubName = ArrEl Integer | StructEl Ident
 -- For example: if @S = { x : int; y : int^3 }@
 -- And we are given the leaves: @[e1,e2,e3,e4]@
 -- then, the result will be: @{ x = e1, y = [e2,e3,e4] }@
-toNormE :: Map OrigName [ (Ident, Type) ] -> Type -> [a] -> StructData a
+toNormE :: Map OrigName [ (Label, Type) ] -> Type -> [a] -> StructData a
 toNormE env t0 es0 =
   case go es0 t0 of
     ([], e) -> e
@@ -736,7 +736,7 @@ liftConst ty str =
 
 --------------------------------------------------------------------------------
 
-data Shape = ArrayShape Int | StructShape OrigName [Ident] | TupleShape Int
+data Shape = ArrayShape Int | StructShape OrigName [Label] | TupleShape Int
               deriving Eq
 
 instance Pretty Shape where
@@ -846,7 +846,7 @@ newtype NosM a = NosM { unNosM :: WithBase LustreM
   deriving (Functor,Applicative,Monad)
 
 data RO = RO
-  { roStructs      :: !(Map OrigName [(Ident,Type)])
+  { roStructs      :: !(Map OrigName [(Label,Type)])
     -- ^ Information about struct type defs in scope.
 
   , roCallSiteTodo :: !CallSiteMap
@@ -882,10 +882,11 @@ newSubName b (p,t) = NosM $
   do n <- inBase newInt
      let oldName = binderDefines b
          newText = newSubText (identText oldName) p
+         newLab  = (identLabel oldName) { labText = newText }
          newName = OrigName
                      { rnUID     = n
                      , rnModule  = Nothing
-                     , rnIdent   = oldName { identText     = newText
+                     , rnIdent   = oldName { identLabel = newLab
                                            , identResolved = Nothing }
                      , rnThing   = AVal
                      }
@@ -898,11 +899,11 @@ newSubName b (p,t) = NosM $
   newSubText u ps = Text.concat (u : map toText ps)
   toText q = case q of
                ArrEl n    -> Text.pack ("[" ++ show n ++ "]")
-               StructEl f -> "." `Text.append` identText f
+               StructEl f -> "." `Text.append` labText f
 
 
 -- | Get information about the struct types that are in scope.
-getStructInfo :: NosM (Map OrigName [ (Ident,Type)])
+getStructInfo :: NosM (Map OrigName [ (Label,Type)])
 getStructInfo = NosM (roStructs <$> ask)
 
 -- | Get what call sites we need to process.
