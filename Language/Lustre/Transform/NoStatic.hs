@@ -820,25 +820,6 @@ getNodeInstProfile env (NodeInst c as) =
             IterBoolRed ->
               panic "getNodeInstProfile"
                 [ "Not yet implemented, IterBoolRed" ]
-{-
-              case as of
-                [ _, _, ExprArg k ] ->
-                  let ident x = Ident { identText = x
-                                      , identRange = range c
-                                      , identPragmas = []
-                                      , identResolved = undefined
-                                      }
-                      paramI x t = InputBinder (param x t)
-                      param x t = Binder { binderDefines = ident x
-                                         , binderType = t
-                                         , binderClock = Nothing
-                                         }
-                  in Just NodeProfile
-                            { nodeInputs = [ paramI "a" (ArrayType BoolType k) ]
-                            , nodeOutputs = [ param "b" BoolType ]
-                            }
-                _ -> bad
--}
 
             where
             toArr n x  = x { binderType = ArrayType (binderType x) n }
@@ -1281,7 +1262,6 @@ newIdent r md txt th = sets $ \s ->
   let uid     = nameSeed s
       lab     = Label { labText = txt, labRange = r }
       origI   = Ident { identLabel = lab
-                      , identPragmas  = []
                       , identResolved = Nothing
                       }
       origN   = OrigName { rnUID    = nameSeedToInt uid

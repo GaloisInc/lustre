@@ -12,7 +12,6 @@ data Label = Label
 
 data Ident = Ident
   { identLabel    :: !Label
-  , identPragmas  :: [Pragma]
   , identResolved :: !(Maybe OrigName)
   } deriving Show
 
@@ -49,12 +48,6 @@ identThing :: Ident -> Thing
 identThing = withResolved rnThing
 
 
-data Pragma = Pragma
-  { pragmaTextA     :: !Text
-  , pragmaTextB     :: !Text
-  , pragmaRange     :: !SourceRange
-  } deriving Show
-
 data Name =
     Unqual Ident
     -- ^ After name resolution, the 'identResolved' field of the
@@ -83,8 +76,7 @@ labelFromText r t = Label { labText = t, labRange = r }
 -- This can be useful when looking up things in maps---only the 'Text'
 -- matters.
 identFromText :: SourceRange -> Text -> Ident
-identFromText rng txt = Ident { identLabel = labelFromText rng txt
-                              , identPragmas = []
+identFromText rng txt = Ident { identLabel    = labelFromText rng txt
                               , identResolved = Nothing
                               }
 --------------------------------------------------------------------------------
@@ -139,9 +131,6 @@ instance HasRange Label where
 
 instance HasRange Ident where
   range = identRange
-
-instance HasRange Pragma where
-  range = pragmaRange
 
 instance HasRange Name where
   range nm =

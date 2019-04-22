@@ -702,13 +702,8 @@ label :: { Label }
   : IDENT                { toLabel $1 }
 
 ident :: { Ident }
-  : label                 { toIdent $1 [] }
-  | label ListOf1(pragma) { toIdent $1 $2 }
+  : label                 { toIdent $1 }
 
-pragma :: { Pragma }
-  : '%' IDENT ':' IDENT '%' { Pragma { pragmaTextA = lexemeText $2
-                                     , pragmaTextB = lexemeText $4
-                                     , pragmaRange = $1 <-> $5 } }
 
 -- Combinators -----------------------------------------------------------------
 
@@ -813,11 +808,10 @@ toLabel l = Label { labText  = lexemeText l
                   , labRange = lexemeRange l
                   }
 
-toIdent :: Label -> [Pragma] -> Ident
-toIdent l ps = Ident { identLabel = l
-                     , identPragmas = ps
-                     , identResolved = Nothing
-                     }
+toIdent :: Label -> Ident
+toIdent l = Ident { identLabel = l
+                  , identResolved = Nothing
+                  }
 
 toQIdent :: Lexeme Token -> Name
 toQIdent l =
@@ -826,7 +820,6 @@ toQIdent l =
                           Ident { identLabel = Label { labText = n
                                                      , labRange = lexemeRange l
                                                      }
-                                , identPragmas  = []
                                 , identResolved = Nothing
                                  }
     _ -> panic "toQIdent" [ "Not a qualified identifier", show l ]

@@ -186,7 +186,6 @@ newIdentFrom :: Text -> M Ident
 newIdentFrom stem =
   do x <- inBase newInt
      let i = Ident { identLabel    = Label { labText = stem, labRange = noLoc }
-                   , identPragmas  = []
                    , identResolved = Nothing
                    }
          o = OrigName { rnUID     = x
