@@ -723,7 +723,7 @@ inferExpr expr =
       case call of
         CallUser f        -> inferCall f as es cl
         CallPrim r prim
-          | Nothing <- cl -> inferPrim r prim as es 
+          | Nothing <- cl -> inferPrim r prim as es
           | otherwise     -> reportError "Unexpected clock annotation in call"
 
     Const {} -> panic "inferExpr" [ "Unexpected `Const` expression." ]

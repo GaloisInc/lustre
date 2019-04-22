@@ -2,15 +2,13 @@
 {-| NOTE: At the moment the transformation in this pass are not really
 optional, as the following passes expect them.
 
-XXX: This is quite comples, and it should probably be split into
+XXX: This is quite complex, and it should probably be split into
 the code that names call sites, and the code that actually instantiates
 static parameters.
 
 This module removes static arguments and constants.
 Calls to functions with static arguments are lifted to the top-level
 and given an explicit name.
-
-Also, in this pass we desugar calls to `condact`
 
 Optionally (flag 'expandNodeInstDecl'), we can also expand functions
 applied to static arguments to functions using a specialized definition instead.
