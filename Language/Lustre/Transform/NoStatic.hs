@@ -493,7 +493,7 @@ evalNode env nd args =
 -- | Evaluate a binder.have been evaluated already.
 evalBinder :: Env -> Binder -> Binder
 evalBinder env b = b { binderType = evalType env (binderType b)
-                     , binderClock = evalClockExpr env <$> binderClock b
+                     , binderClock = evalIClock env (binderClock b)
                      }
 
 
@@ -957,7 +957,7 @@ evalDynExpr eloc env expr =
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
     Call f es cl0 ->
-      do let cl = evalClockExpr env <$> cl0
+      do let cl = evalIClock env cl0
          (cs,es0) <-
             case f of
               NodeInst (CallUser c) _ ->
@@ -1033,7 +1033,7 @@ inputBindersToArgs ins es =
 -- and replacing the call with a tuple containing the results.
 -- We leave primitives with a single result as calls though.
 nameCallSite ::
-  Env -> NodeInst -> [Expression] -> Maybe ClockExpr -> M Expression
+  Env -> NodeInst -> [Expression] -> IClock -> M Expression
 nameCallSite env ni es cl =
   do mb <- findInstProf env ni
      case mb of
@@ -1072,8 +1072,11 @@ nameCallSite env ni es cl =
                                , binderType    = binderType b
                                , binderClock =
                                   case binderClock b of
-                                    Nothing -> cl
-                                    Just curCl -> Just (renClock curCl)
+                                    BaseClock -> cl
+                                    KnownClock curCl ->
+                                      KnownClock (renClock curCl)
+                                    ClockVar i -> panic "nameCallSite.toBind"
+                                      [ "Unexpected clock variable", showPP i ]
                                }
                 binds = zipWith toBind ns outs
             let lhs = map LVar ns

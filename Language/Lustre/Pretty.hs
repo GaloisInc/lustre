@@ -132,8 +132,9 @@ instance Pretty InputBinder where
 instance Pretty Binder where
   ppPrec _ b = pp (binderDefines b) <+> ":" <+> pp (binderType b) <+> clockDoc
     where clockDoc = case binderClock b of
-                       Nothing -> empty
-                       Just c  -> "when" <+> pp c
+                       BaseClock     -> empty
+                       KnownClock c  -> "when" <+> pp c
+                       ClockVar i    -> "when" <+> pp i
 
 instance Pretty StaticParam where
   ppPrec _ sp =
@@ -275,7 +276,7 @@ instance Pretty Expression where
 
       Call f es cl ->
         case (f,cl) of
-          (NodeInst (CallPrim _ prim) [], Nothing) ->
+          (NodeInst (CallPrim _ prim) [], BaseClock) ->
             case (prim, es) of
 
               (Op1 op, [e]) -> parenIf (n >= p) doc
@@ -330,9 +331,10 @@ instance Pretty Expression where
         where
         argTuple = parens (commaSep (map pp es))
         dflt     = case cl of
-                     Nothing -> pp f <+> argTuple
-                     Just c  -> "callWhen" <+>
+                     BaseClock -> pp f <+> argTuple
+                     KnownClock c -> "callWhen" <+>
                                     parens (commaSep [ pp c, pp f <+> argTuple])
+                     ClockVar c -> "callWhen" <+> pp c
 
 parenIf :: Bool -> Doc -> Doc
 parenIf p d = if p then parens d else d

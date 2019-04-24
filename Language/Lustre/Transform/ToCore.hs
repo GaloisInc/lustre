@@ -9,7 +9,6 @@ module Language.Lustre.Transform.ToCore
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Semigroup ( (<>) )
-import Data.Maybe(isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Graph.SCC(stronglyConnComp)
@@ -90,8 +89,10 @@ orderBinders = map fromSCC . stronglyConnComp . map depNode
                                   )
   depNode b = (b, identUID (P.binderDefines b),
                   case P.binderClock b of
-                    Nothing -> []
-                    Just (P.WhenClock _ _ i) -> [identUID i])
+                    P.BaseClock -> []
+                    P.KnownClock (P.WhenClock _ _ i) -> [identUID i]
+                    P.ClockVar i -> panic "ToCore.orderBinders"
+                                    [ "Unexpected clock variable", showPP i ])
 
 
 -- | Rewrite a type, replacing named enumeration types with @int@.
@@ -266,8 +267,10 @@ evalInputBinder inp =
 evalBinder :: P.Binder -> M C.Binder
 evalBinder b =
   do c <- case P.binderClock b of
-            Nothing -> pure C.BaseClock
-            Just c  -> C.WhenTrue <$> evalClockExpr c
+            P.BaseClock     -> pure C.BaseClock
+            P.KnownClock c  -> C.WhenTrue <$> evalClockExpr c
+            P.ClockVar i -> panic "evalBinder"
+                              [ "Unexpected clock variable", showPP i ]
      let t = evalType (P.binderType b) `C.On` c
      let xi = P.binderDefines b
      addLocal xi t
@@ -457,7 +460,11 @@ evalExpr xt expr =
     P.WithThenElse {} -> bad "with-then-else"
 
     P.Call ni es cl ->
-      do unless (isNothing cl) (bad "call with a clock")
+      do _clv <- evalIClock cl
+         {- NOTE: we don't really store the clock of the call anywhere,
+         because for primitives (which is all that should be left)
+         it can be computed from the clocks of the arguments. -}
+
          as <- mapM evalExprAtom es
          let prim x = pure (C.Atom (C.Prim x as))
          case ni of

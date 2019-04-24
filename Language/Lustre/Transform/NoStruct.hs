@@ -594,9 +594,9 @@ evalExpr expr =
 
          let bin r op x y =
                case cl of
-                 Nothing -> eOp2 r op x y
-                 Just _  -> panic "notClocked"
-                              [ "Unexpected clock on primitive call." ]
+                 BaseClock -> eOp2 r op x y
+                 _         -> panic "notClocked"
+                                 [ "Unexpected clock on primitive call." ]
          pure $
            case (f, es') of
 

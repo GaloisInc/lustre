@@ -540,10 +540,10 @@ expression :: { Expression }
   | 'callWhen' '(' clockExpr ',' expression ')'
                                       {% mkCallWhen $1 $6 $3 $5 }
 
-  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3 Nothing) }
+  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3 BaseClock) }
 
   | 'condact' '(' clockExpr ',' expression ',' expression ')'
-                                      {%  mkCondact $1 $8 $3 $5 (Just $7) }
+                                      {%  mkCondact $1 $8 $3 $5 (Just $7)}
   | 'condact' '(' clockExpr ',' expression ')'
                                       {% mkCondact $1 $6 $3 $5 Nothing }
   | 'condact' '(' BOOL',' expression ',' expression ')'
@@ -891,7 +891,7 @@ instance ToConstDef (Ident,Type,Expression) where
 simpBinder :: Ident -> Type -> Binder
 simpBinder i t = Binder { binderDefines = i
                         , binderType = t
-                        , binderClock = Nothing }
+                        , binderClock = BaseClock }
 
 toVarDeclBase :: ([Ident], Type) -> [ Binder ]
 toVarDeclBase (xs,t) = [ simpBinder x t | x <- xs ]
@@ -899,7 +899,7 @@ toVarDeclBase (xs,t) = [ simpBinder x t | x <- xs ]
 toVarDecl :: ([Ident], Type) -> ClockExpr -> [ Binder ]
 toVarDecl (xs,t) c = [ Binder { binderDefines = x
                               , binderType    = t
-                              , binderClock   = Just c
+                              , binderClock   = KnownClock c
                               } | x <- xs ]
 
 isUnsafe :: Maybe SourceRange -> Safety
@@ -936,7 +936,7 @@ opIf r     = primArg r ITE
 
 -- | Call a primitive with no static parameters
 callPrim :: SourceRange -> PrimNode -> [Expression] -> Expression
-callPrim r p es = Call (NodeInst (CallPrim r p) []) es Nothing
+callPrim r p es = Call (NodeInst (CallPrim r p) []) es BaseClock
 
 
 --------------------------------------------------------------------------------
@@ -1002,7 +1002,8 @@ mkCondact r1 r2 c e mb =
   checkCall l e =
     case e of
       ERange r e1 -> ERange r <$> checkCall r e1
-      Call f es Nothing -> pure (Call f [ e `When` c | e <- es ] (Just c))
+      Call f es BaseClock ->
+        pure (Call f [ e `When` c | e <- es ] (KnownClock c))
       _ -> happyErrorAt (sourceFrom l)
 
 mkCallWhen ::
@@ -1012,7 +1013,7 @@ mkCallWhen r1 r2 c e = at r1 r2 <$> checkCall r1 e
   checkCall l e =
     case e of
       ERange r e1 -> ERange r <$> checkCall r e1
-      Call f es Nothing -> pure (Call f es (Just c))
+      Call f es BaseClock -> pure (Call f es (KnownClock c))
       _ -> happyErrorAt (sourceFrom l)
 
 

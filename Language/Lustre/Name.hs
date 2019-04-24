@@ -5,22 +5,36 @@ import AlexTools(SourceRange(..), HasRange(..))
 
 import Language.Lustre.Panic(panic)
 
+{- | Just a textual name.  Used to remember the user specified names of
+things, as well as for things that are not quite names (e.g., field
+labels)  -}
 data Label = Label
   { labText   :: !Text
+    -- ^ The label's text.
+
   , labRange  :: !SourceRange
+    -- ^ The location of the lable in the source program.
   } deriving Show
 
+
+{- | The type of unqualified names
+Used when we define things and at some use sites that can only refer to
+locally defined things. -}
 data Ident = Ident
   { identLabel    :: !Label
   , identResolved :: !(Maybe OrigName)
   } deriving Show
 
+-- | The text associates with an identifier.
 identText :: Ident -> Text
 identText = labText . identLabel
 
+-- | The location of the idnetifier in the source program.
 identRange :: Ident -> SourceRange
 identRange = labRange . identLabel
 
+-- | Do something with a resolve idnetifier.
+-- Panics if the identifier is not resolved.
 withResolved :: (OrigName -> a) -> Ident -> a
 withResolved k i = case identResolved i of
                     Just info -> k info
@@ -48,14 +62,17 @@ identThing :: Ident -> Thing
 identThing = withResolved rnThing
 
 
+-- | A possibly qualified name.  Used at use sites where qualifier might be
+-- OK. Mostly used to refer to types and constants in other modules.
 data Name =
     Unqual Ident
     -- ^ After name resolution, the 'identResolved' field of the
     -- identifier should always be filled in.
 
   | Qual ModName Ident
-    -- ^ Qualified name a produced in the parser, but should not
-    -- be used after resolving names.
+    -- ^ Qualified name. Produced in the parser. Should not appear
+    -- after name resolution, where all names should be unqualified resolved
+    -- identifiers.
     deriving Show
 
 
@@ -69,33 +86,28 @@ nameOrigName nm =
                   , "*** Name: " ++ show nm
                   ]
 
-labelFromText :: SourceRange -> Text -> Label
-labelFromText r t = Label { labText = t, labRange = r }
-
--- | Make an ident with no known location.
--- This can be useful when looking up things in maps---only the 'Text'
--- matters.
-identFromText :: SourceRange -> Text -> Ident
-identFromText rng txt = Ident { identLabel    = labelFromText rng txt
-                              , identResolved = Nothing
-                              }
 --------------------------------------------------------------------------------
 
 
+-- | Comapred by text.
 instance Eq Label where
   x == y = labText x == labText y
 
+-- | Comapred by text.
 instance Ord Label where
   compare x y = compare (labText x) (labText y)
 
 
 
+-- | Comapred by original name, if available, or by text otherwise.
+-- Resolved and unresolved names are different.
 instance Eq Ident where
   x == y = case (identResolved x, identResolved y) of
              (Just a, Just b)  -> a == b
              (Nothing,Nothing) -> identText x == identText y
              _                 -> False
 
+-- | Same as 'Eq'
 instance Ord Ident where
   compare i j =
     case (identResolved i, identResolved j) of

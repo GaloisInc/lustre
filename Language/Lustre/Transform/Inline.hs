@@ -100,7 +100,7 @@ data Renaming = Renaming
   { renVarMap :: Map OrigName OrigName
     -- ^ Mapping of names.
 
-  , renClock  :: Maybe ClockExpr
+  , renClock  :: IClock
     -- ^ Clock at the call site, if any.
     -- If this is set, then we have to replace base clocks with this clock
     -- in the inlined code.
@@ -109,7 +109,7 @@ data Renaming = Renaming
 
 -- | Compute the renaming to be used when instantiating the given node.
 computeRenaming ::
-  Maybe ClockExpr       {- ^ Clock at the call site -} ->
+  IClock                {- ^ Clock at the call site -} ->
   [LHS Expression]      {- ^ LHS of call site -} ->
   NodeDecl              {- ^ Function being called -} ->
   InM (Renaming, [LocalDecl], [OrigName])
@@ -121,11 +121,16 @@ computeRenaming cl lhs nd =
        for oldBinders $ \b ->
          do n <- freshBinder b
             pure $ case cl of
-                     Nothing -> n -- still need to apply subst to clocks
-                     Just c ->
+                     BaseClock -> n -- still need to apply subst to clocks
+                     KnownClock c ->
                        case binderClock n of
-                         Nothing -> n { binderClock = Just c }
-                         Just _ -> n -- still need to apply su
+                         BaseClock -> n { binderClock = KnownClock c }
+                         KnownClock _ -> n -- still need to apply su
+                         ClockVar i -> panic "computeRenaming"
+                                      [ "Unexpected clock variable", showPP i ]
+
+                     ClockVar i -> panic "computeRenaming"
+                                      [ "Unexpected clock variable", showPP i ]
 
      let renaming = Renaming
                       { renVarMap = Map.fromList $
@@ -133,7 +138,7 @@ computeRenaming cl lhs nd =
                                     zipExact renBind oldBinders newBinders
                       , renClock = cl
                       }
-         renB b = b { binderClock = rename renaming <$> binderClock b }
+         renB b = b { binderClock = rename renaming (binderClock b) }
      pure (renaming, map (LocalVar . renB) newBinders, map lhsIdent lhs)
   where
   prof = nodeProfile nd
@@ -216,7 +221,7 @@ instance Rename Expression where
       e `When` ce     -> rename su e `When` rename su ce
 
       Merge i ms      -> Merge (rename su i) (rename su ms)
-      Call ni es c     -> Call ni (rename su es) (rename su <$> c)
+      Call ni es c    -> Call ni (rename su es) (rename su c)
 
       Tuple {}        -> bad "tuple"
       Array {}        -> bad "array"
@@ -239,10 +244,7 @@ instance Rename CType where
 instance Rename IClock where
   rename su clk =
     case clk of
-      BaseClock ->
-        case renClock su of
-          Nothing -> BaseClock
-          Just c   -> KnownClock c
+      BaseClock -> renClock su
       KnownClock c -> KnownClock (rename su c)
       ClockVar {}  -> panic "Inline.rename" [ "Unexpected clock variable." ]
 

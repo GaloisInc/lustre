@@ -291,11 +291,7 @@ checkStaticArgTypes actual expected =
 
 
 cTypeOf :: Binder -> CType
-cTypeOf b = CType { cType  = binderType b
-                  , cClock = case binderClock b of
-                               Nothing -> BaseClock
-                               Just c  -> KnownClock c }
-
+cTypeOf b = CType { cType  = binderType b, cClock = binderClock b }
 
 
 
@@ -347,7 +343,10 @@ instantiateInputBinder env inp =
 instantiateBinder :: StaticEnv -> Binder -> Binder
 instantiateBinder env b =
   b { binderType  = iType (binderType b)
-    , binderClock = iClock <$> binderClock b }
+    , binderClock = case binderClock b of
+                      BaseClock -> BaseClock
+                      KnownClock c -> KnownClock (iClock c)
+                      ClockVar i -> ClockVar i }
   where
   iClock (WhenClock r e i) = WhenClock r (iConst e) i
   iConst = instantiateConst env
@@ -393,8 +392,8 @@ instantiateConst env expr
         UpdateStruct (iStructTy <$> s) (iConst e) (map iField fs)
 
       WithThenElse e1 e2 e3 -> WithThenElse (iConst e1) (iConst e2) (iConst e3)
-      Call (NodeInst n as) es Nothing ->
-        Call (NodeInst n (map iArg as)) (map iConst es) Nothing
+      Call (NodeInst n as) es BaseClock ->
+        Call (NodeInst n (map iArg as)) (map iConst es) BaseClock
       Call {}       -> bad "call with a clock"
 
       When {}       -> bad "WhenClock"
@@ -528,14 +527,15 @@ checkInputBinder ib m =
 
 checkBinder :: Binder -> M a -> M (Binder,a)
 checkBinder b m =
-  do (c1,c) <-
-        case binderClock b of
-          Nothing -> pure (Nothing,BaseClock)
-          Just e  -> do (e',_) <- inferClockExpr e
-                        pure (Just e', KnownClock e')
+  do c <- case binderClock b of
+            BaseClock -> pure BaseClock
+            KnownClock e  -> do (e',_) <- inferClockExpr e
+                                pure (KnownClock e')
+            ClockVar i -> panic "checkBinder"
+                            [ "Unexpected clock variable: " ++ showPP i ]
      t <- checkType (binderType b)
      let ty   = CType { cType = t, cClock = c }
-         newB = b { binderType = t, binderClock = c1 }
+         newB = b { binderType = t, binderClock = c }
      addFst newB $ withLocal (binderDefines b) ty m
 
 checkInputBinders :: [InputBinder] -> M a -> M ([InputBinder],a)
@@ -723,8 +723,8 @@ inferExpr expr =
       case call of
         CallUser f        -> inferCall f as es cl
         CallPrim r prim
-          | Nothing <- cl -> inferPrim r prim as es
-          | otherwise     -> reportError "Unexpected clock annotation in call"
+          | BaseClock <- cl -> inferPrim r prim as es
+          | otherwise       -> reportError "Unexpected clock annotation in call"
 
     Const {} -> panic "inferExpr" [ "Unexpected `Const` expression." ]
 
@@ -863,21 +863,23 @@ distinctFields = mapM_ check . group . sort . map fName
 inferCall :: Name ->
              [StaticArg] ->
              [Expression] ->
-             Maybe ClockExpr ->
+             IClock ->
              M (Expression, [CType])
 inferCall f as es0 cl0 =
   do reqSafety   <- getUnsafeLevel
      reqTemporal <- getTemporalLevel
      cl <- case cl0 of
-             Nothing -> pure Nothing
-             Just c  -> case reqTemporal of
-                          Node -> Just . fst <$> inferClockExpr c
-                          Function ->
-                            reportError $ nestedError
+             BaseClock -> pure BaseClock
+             KnownClock c ->
+               case reqTemporal of
+                 Node     -> KnownClock . fst <$> inferClockExpr c
+                 Function -> reportError $ nestedError
                                "Invalid clocked call"
                                [ "Expected to be inside a node."
                                , "We are inside a function."
                                ]
+             ClockVar i -> panic "inferCall" [ "Unexpected clock variable:"
+                                             , showPP i ]
 
      (ni,prof) <- prepUserNodeInst f as reqSafety reqTemporal
      (es1,mp)  <- checkInputs cl [] Map.empty (nodeInputs prof) es0
@@ -886,10 +888,9 @@ inferCall f as es0 cl0 =
   where
   renBinderClock cl mp b =
     case binderClock b of
-      Nothing -> pure $ case cl of
-                          Nothing -> BaseClock
-                          Just c  -> KnownClock c
-      Just (WhenClock r p i) ->
+      BaseClock -> pure cl
+
+      KnownClock (WhenClock r p i) ->
         -- We don't consider `cl` for binder that have an explicit clock,
         -- as it only affects the "base" clock.  Of course, the clocks will
         -- probably be inderectly affected anyway as the clock of the clock
@@ -905,6 +906,8 @@ inferCall f as es0 cl0 =
             text ("Parameter for clock " ++ show (backticks (pp i)) ++
              " is not an identifier.")
 
+      ClockVar i -> panic "inferCall.renBinderClock"
+                      [ "Unexpected clock variable", showPP i ]
 
   checkInputs cl done mp is es =
     case (is,es) of

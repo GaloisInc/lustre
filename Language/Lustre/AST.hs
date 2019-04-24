@@ -149,7 +149,7 @@ data InputBinder = InputBinder Binder
 data Binder = Binder
   { binderDefines :: Ident
   , binderType    :: Type
-  , binderClock   :: Maybe ClockExpr  -- ^ 'Nothing' means use base clock
+  , binderClock   :: IClock
   } deriving Show
 
 
@@ -222,9 +222,9 @@ data Expression = ERange !SourceRange !Expression
                   {- ^ Merge different clocked values.  The branches are
                        clocked on different values for the ident. -}
 
-                | Call NodeInst [Expression] (Maybe ClockExpr)
+                | Call NodeInst [Expression] IClock
                   {- ^ Call a function.
-                      The optional clock expression allows for the node to
+                      The clock expression allows for the node to
                       be called only when the clock is active. -}
                   deriving Show
 
@@ -246,16 +246,16 @@ data NodeInst   = NodeInst Callable [StaticArg]
                   deriving Show
 
 eOp1 :: SourceRange -> Op1 -> Expression -> Expression
-eOp1 r op e = Call (NodeInst (CallPrim r (Op1 op)) []) [e] Nothing
+eOp1 r op e = Call (NodeInst (CallPrim r (Op1 op)) []) [e] BaseClock
 
 eOp2 :: SourceRange -> Op2 -> Expression -> Expression -> Expression
-eOp2 r op e1 e2 = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2] Nothing
+eOp2 r op e1 e2 = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2] BaseClock
 
 eITE :: SourceRange -> Expression -> Expression -> Expression -> Expression
-eITE r e1 e2 e3 = Call (NodeInst (CallPrim r ITE) []) [e1,e2,e3] Nothing
+eITE r e1 e2 e3 = Call (NodeInst (CallPrim r ITE) []) [e1,e2,e3] BaseClock
 
 eOpN :: SourceRange -> OpN -> [Expression] -> Expression
-eOpN r op es = Call (NodeInst (CallPrim r (OpN op)) []) es Nothing
+eOpN r op es = Call (NodeInst (CallPrim r (OpN op)) []) es BaseClock
 
 -- | Things that may be called
 data Callable   = CallUser Name                   -- ^ A user-defined node

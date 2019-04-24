@@ -126,7 +126,7 @@ someRec x =
 
 class Resolve t where
 
-  -- | Rsolve something that may define things.
+  -- | Resolve something that may define things.
   -- The first argument specified how to rewrite the defining sites.
   resolveDef :: Set OrigName -> t -> ResolveM t
 
@@ -206,12 +206,19 @@ instance Resolve InputBinder where
 instance Resolve Binder where
   resolveDef ds b =
     do t <- resolve (binderType b)
-       c <- traverse resolve (binderClock b)
+       c <- resolve (binderClock b)
        pure Binder { binderDefines = lkpDef ds AVal (binderDefines b)
                    , binderType    = t
                    , binderClock   = c }
 
 
+instance Resolve IClock where
+  resolveDef _ cl =
+    case cl of
+      BaseClock    -> pure cl
+      KnownClock c -> KnownClock <$> resolve c
+      ClockVar i   -> panic "Resolve@IClock" [ "Unexpected clock variable"
+                                             , showPP i ]
 
 
 instance Resolve StaticArg where
@@ -288,11 +295,11 @@ resolveConstExpr expr =
                    <*> resolveConstExpr e2 <*> resolveConstExpr e3
 
     Call ni as c
-      | Just _ <- c -> bad "call with a clock from a constant"
-      | otherwise ->
+      | BaseClock <- c ->
         do ni1 <- resolve ni
            as1 <- traverse resolveConstExpr as
-           pure (Call ni1 as1 Nothing)
+           pure (Call ni1 as1 BaseClock)
+      | otherwise -> bad "call with a clock from a constant"
 
     Merge {}  -> bad "merge"
     Const {}  -> panic "resolveConstExpr" [ "Unexpected `Const` expresssion." ]
@@ -330,7 +337,7 @@ resolveExpr expr =
 
     Merge x es  -> Merge <$> inferIdent x <*> traverse resolve es
     Call f es c -> Call <$> resolve f <*> traverse resolveExpr es
-                                      <*> traverse resolve c
+                                      <*> resolve c
 
     Const {}  -> panic "resolveConstExpr" [ "Unexpected `Const` expresssion." ]
 

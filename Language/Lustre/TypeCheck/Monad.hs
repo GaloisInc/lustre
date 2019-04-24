@@ -344,7 +344,7 @@ zonkExpr expr =
     WithThenElse e1 e2 e3 -> WithThenElse <$> zonkExpr e1 <*>
                                               zonkExpr e2 <*> zonkExpr e3
     Merge i as -> Merge i <$> traverse zonkMergeCase as
-    Call f es c -> Call f <$> traverse zonkExpr es <*> traverse zonkClockExpr c
+    Call f es c -> Call f <$> traverse zonkExpr es <*> zonkClock c
 
 zonkCType :: CType -> M CType
 zonkCType ct =

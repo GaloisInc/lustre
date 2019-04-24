@@ -79,12 +79,6 @@ initNode node mbStart = (s0, stepNode node env)
                  , sValues = fromMaybe Map.empty mbStart
                  }
   env    = nodeEnv node
-{-
-  node1  = case orderedEqns (nEqns node) of
-             Right ok -> node { nEqns = ok }
-             Left err -> panic "initNode" [ "Failed to order equations"
-                                          , "*** Recursive: " ++ show err ]
--}
 
 
 stepNode :: Node              {- ^ Node, with equations properly ordered -} ->

@@ -5,9 +5,8 @@ module Language.Lustre.Semantics.Const
   where
 
 import Data.Map ( Map )
-import Data.Maybe (isNothing)
 import qualified Data.Map as Map
-import Control.Monad(msum,unless)
+import Control.Monad(msum)
 
 import Language.Lustre.AST
 import Language.Lustre.Pretty(showPP)
@@ -102,8 +101,9 @@ evalConst env expr =
          evalSelFun s =<< evalConst env e
 
     Call (NodeInst (CallPrim _ p) []) es cl ->
-      do unless (isNothing cl) $
-           bad "calls with a clock do not make sense for constants"
+      do case cl of
+           BaseClock -> pure ()
+           _ -> bad "calls with a clock do not make sense for constants"
          vs <- mapM (evalConst env) es
          case (p, vs) of
 
