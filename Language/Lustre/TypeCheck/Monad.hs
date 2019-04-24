@@ -306,9 +306,12 @@ zonkClock :: IClock -> M IClock
 zonkClock c =
   case c of
     BaseClock -> pure c
-    KnownClock (WhenClock _ v i)  -- clocks that are always true
-      | Just j <- isId v, j == i -> pure BaseClock
-    KnownClock _ -> pure c
+    KnownClock (WhenClock r v i) ->
+       do v' <- zonkExpr v
+          case isId v' of
+            Just j | i == j -- clocks that are always true
+                    -> pure BaseClock
+            _ -> pure (KnownClock (WhenClock r v' i))
     ClockVar v -> M $ do su <- rwClockVarSubst <$> get
                          pure (Map.findWithDefault c v su)
   where
