@@ -492,9 +492,7 @@ evalNode env nd args =
 
 -- | Evaluate a binder.have been evaluated already.
 evalBinder :: Env -> Binder -> Binder
-evalBinder env b = b { binderType = evalType env (binderType b)
-                     , binderClock = evalIClock env (binderClock b)
-                     }
+evalBinder env b = b { binderType = evalCType env (binderType b) }
 
 
 -- | Evaluate the binders in the type of a node.
@@ -822,11 +820,12 @@ getNodeInstProfile env (NodeInst c as) =
                 [ "Not yet implemented, IterBoolRed" ]
 
             where
-            toArr n x  = x { binderType = ArrayType (binderType x) n }
+            setTy x f = x { binderType = let ct = binderType x
+                                         in ct { cType = f (cType ct) } }
+            toArr n x  = setTy x (`ArrayType` n)
             toArrI n x =
               case x of
-                InputBinder b ->
-                  InputBinder b { binderType = ArrayType (binderType b) n }
+                InputBinder b -> InputBinder (setTy b (`ArrayType` n))
                 InputConst i t -> InputConst i (ArrayType t n)
 
             bad = panic "getNodeInstProfile"
@@ -1067,17 +1066,21 @@ nameCallSite env ni es cl =
                             [ "Undefined clock variable."
                             , "*** Clock: " ++ showPP i ]
 
-                toBind n b = Binder
-                               { binderDefines = n
-                               , binderType    = binderType b
-                               , binderClock =
-                                  case binderClock b of
-                                    BaseClock -> cl
-                                    KnownClock curCl ->
-                                      KnownClock (renClock curCl)
-                                    ClockVar i -> panic "nameCallSite.toBind"
-                                      [ "Unexpected clock variable", showPP i ]
-                               }
+                toBind n b =
+                  Binder
+                    { binderDefines = n
+                    , binderType =
+                        let ct = binderType b
+                        in ct { cClock =
+                                 case cClock ct of
+                                   BaseClock -> cl
+                                   KnownClock curCl ->
+                                     KnownClock (renClock curCl)
+                                   ClockVar i ->
+                                     panic "nameCallSite.toBind"
+                                       [ "Unexpected clock variable", showPP i ]
+                              }
+                    }
                 binds = zipWith toBind ns outs
             let lhs = map LVar ns
             recordCallSite (range ni) lhs

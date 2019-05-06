@@ -303,12 +303,12 @@ and a mapping:
 expandBinder :: Binder -> NosM [Binder]
 expandBinder b =
   do env <- getStructInfo
-     case expandType env (binderType b) of
+     case expandType env (cType (binderType b)) of
        (False, _) -> pure [b]
        (True, ts) ->
          do bs <- traverse (newSubName b) ts
             let is   = map (identOrigName . binderDefines) bs
-                expr = toNormE env (binderType b) is
+                expr = toNormE env (cType (binderType b)) is
             addStructured (identOrigName (binderDefines b)) expr
             pure bs
 
@@ -892,8 +892,7 @@ newSubName b (p,t) = NosM $
                      }
 
      pure Binder { binderDefines = origNameToIdent newName
-                 , binderType    = t
-                 , binderClock   = binderClock b
+                 , binderType    = (binderType b) { cType = t }
                  }
   where
   newSubText u ps = Text.concat (u : map toText ps)

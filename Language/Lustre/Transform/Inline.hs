@@ -123,8 +123,10 @@ computeRenaming cl lhs nd =
             pure $ case cl of
                      BaseClock -> n -- still need to apply subst to clocks
                      KnownClock c ->
-                       case binderClock n of
-                         BaseClock -> n { binderClock = KnownClock c }
+                       case cClock (binderType n) of
+                         BaseClock ->
+                           let ct = binderType n
+                           in n { binderType = ct { cClock = KnownClock c } }
                          KnownClock _ -> n -- still need to apply su
                          ClockVar i -> panic "computeRenaming"
                                       [ "Unexpected clock variable", showPP i ]
@@ -138,7 +140,7 @@ computeRenaming cl lhs nd =
                                     zipExact renBind oldBinders newBinders
                       , renClock = cl
                       }
-         renB b = b { binderClock = rename renaming (binderClock b) }
+         renB b = b { binderType = rename renaming (binderType b) }
      pure (renaming, map (LocalVar . renB) newBinders, map lhsIdent lhs)
   where
   prof = nodeProfile nd

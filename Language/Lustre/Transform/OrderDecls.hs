@@ -203,13 +203,18 @@ instance Resolve InputBinder where
       InputBinder b  -> InputBinder  <$> resolveDef ds b
       InputConst c t -> InputConst (lkpDef ds AConst c) <$> resolve t
 
+instance Resolve CType where
+  resolveDef _ ct =
+    do t <- resolve (cType ct)
+       c <- resolve (cClock ct)
+       pure CType { cType = t, cClock = c }
+
 instance Resolve Binder where
   resolveDef ds b =
     do t <- resolve (binderType b)
-       c <- resolve (binderClock b)
        pure Binder { binderDefines = lkpDef ds AVal (binderDefines b)
                    , binderType    = t
-                   , binderClock   = c }
+                   }
 
 
 instance Resolve IClock where

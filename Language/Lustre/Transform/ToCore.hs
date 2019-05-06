@@ -88,7 +88,7 @@ orderBinders = map fromSCC . stronglyConnComp . map depNode
                                   : map (showPP . P.binderDefines) xs
                                   )
   depNode b = (b, identUID (P.binderDefines b),
-                  case P.binderClock b of
+                  case P.cClock (P.binderType b) of
                     P.BaseClock -> []
                     P.KnownClock (P.WhenClock _ _ i) -> [identUID i]
                     P.ClockVar i -> panic "ToCore.orderBinders"
@@ -266,12 +266,12 @@ evalInputBinder inp =
 -- | Add the type of a binder to the environment.
 evalBinder :: P.Binder -> M C.Binder
 evalBinder b =
-  do c <- case P.binderClock b of
+  do c <- case P.cClock (P.binderType b) of
             P.BaseClock     -> pure C.BaseClock
             P.KnownClock c  -> C.WhenTrue <$> evalClockExpr c
             P.ClockVar i -> panic "evalBinder"
                               [ "Unexpected clock variable", showPP i ]
-     let t = evalType (P.binderType b) `C.On` c
+     let t = evalType (P.cType (P.binderType b)) `C.On` c
      let xi = P.binderDefines b
      addLocal xi t
      let bn = xi C.::: t

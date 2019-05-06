@@ -148,8 +148,7 @@ data InputBinder = InputBinder Binder
 -- | Introduces a local variable (not constant).
 data Binder = Binder
   { binderDefines :: Ident
-  , binderType    :: Type
-  , binderClock   :: IClock
+  , binderType    :: CType
   } deriving Show
 
 

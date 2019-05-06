@@ -130,11 +130,13 @@ instance Pretty InputBinder where
       InputConst i t -> "const" <+> pp i <+> ":" <+> pp t
 
 instance Pretty Binder where
-  ppPrec _ b = pp (binderDefines b) <+> ":" <+> pp (binderType b) <+> clockDoc
-    where clockDoc = case binderClock b of
-                       BaseClock     -> empty
-                       KnownClock c  -> "when" <+> pp c
-                       ClockVar i    -> "when" <+> pp i
+  ppPrec _ b = pp (binderDefines b) <+> ":" <+> pp (cType ty) <+> clockDoc
+    where
+    ty = binderType b
+    clockDoc = case cClock ty of
+                 BaseClock     -> empty
+                 KnownClock c  -> "when" <+> pp c
+                 ClockVar i    -> "when" <+> pp i
 
 instance Pretty StaticParam where
   ppPrec _ sp =

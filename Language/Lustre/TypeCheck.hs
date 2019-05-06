@@ -276,22 +276,18 @@ checkStaticArgTypes actual expected =
   checkIn arg param =
     case (arg,param) of
       (InputConst _ t, InputConst _ t1) -> subType t1 t
-      (InputBinder b, InputBinder b1) -> subCType (cTypeOf b1) (cTypeOf b)
+      (InputBinder b, InputBinder b1) -> subCType (binderType b1) (binderType b)
       (InputBinder {}, InputConst {}) ->
         reportError "Expected a constant input."
       (InputConst {}, InputBinder {}) ->
         reportError "Unexpected constant input." -- XXX: perhaps this is ok?
 
-  checkOut arg param = subCType (cTypeOf arg) (cTypeOf param)
+  checkOut arg param = subCType (binderType arg) (binderType param)
 
   subCType x y =
     do subType (cType x) (cType y)
        sameClock (cClock x) (cClock y)
 
-
-
-cTypeOf :: Binder -> CType
-cTypeOf b = CType { cType  = binderType b, cClock = binderClock b }
 
 
 
@@ -342,15 +338,17 @@ instantiateInputBinder env inp =
 
 instantiateBinder :: StaticEnv -> Binder -> Binder
 instantiateBinder env b =
-  b { binderType  = iType (binderType b)
-    , binderClock = case binderClock b of
-                      BaseClock -> BaseClock
-                      KnownClock c -> KnownClock (iClock c)
-                      ClockVar i -> ClockVar i }
+  b { binderType  =
+        CType { cType = instantiateType env (cType ct)
+              , cClock = case cClock ct of
+                           BaseClock -> BaseClock
+                           KnownClock c -> KnownClock (iClock c)
+                           ClockVar i -> ClockVar i
+              }
+    }
   where
-  iClock (WhenClock r e i) = WhenClock r (iConst e) i
-  iConst = instantiateConst env
-  iType  = instantiateType env
+  ct = binderType b
+  iClock (WhenClock r e i) = WhenClock r (instantiateConst env e) i
 
 
 -- | Instantiate a type with the given static parameters.
@@ -527,15 +525,15 @@ checkInputBinder ib m =
 
 checkBinder :: Binder -> M a -> M (Binder,a)
 checkBinder b m =
-  do c <- case binderClock b of
+  do c <- case cClock (binderType b) of
             BaseClock -> pure BaseClock
             KnownClock e  -> do (e',_) <- inferClockExpr e
                                 pure (KnownClock e')
             ClockVar i -> panic "checkBinder"
                             [ "Unexpected clock variable: " ++ showPP i ]
-     t <- checkType (binderType b)
+     t <- checkType (cType (binderType b))
      let ty   = CType { cType = t, cClock = c }
-         newB = b { binderType = t, binderClock = c }
+         newB = b { binderType = ty }
      addFst newB $ withLocal (binderDefines b) ty m
 
 checkInputBinders :: [InputBinder] -> M a -> M ([InputBinder],a)
@@ -887,7 +885,7 @@ inferCall f as es0 cl0 =
      pure (Call ni es1 cl, cts)
   where
   renBinderClock cl mp b =
-    case binderClock b of
+    case cClock (binderType b) of
       BaseClock -> pure cl
 
       KnownClock (WhenClock r p i) ->
@@ -924,7 +922,7 @@ inferCall f as es0 cl0 =
     case ib of
       InputBinder b ->
         do c  <- renBinderClock cl mp b
-           (e',clk) <- checkExpr1 e (binderType b)
+           (e',clk) <- checkExpr1 e (cType (binderType b))
            sameClock c clk
            pure ( e'
                 , case isClock e' of
@@ -947,7 +945,7 @@ inferCall f as es0 cl0 =
   checkOut cl mp b =
     do let t = binderType b
        c <- renBinderClock cl mp b
-       pure CType { cType = t, cClock = c }
+       pure t { cClock = c }
 
 
 

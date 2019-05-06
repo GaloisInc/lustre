@@ -890,16 +890,16 @@ instance ToConstDef (Ident,Type,Expression) where
 
 simpBinder :: Ident -> Type -> Binder
 simpBinder i t = Binder { binderDefines = i
-                        , binderType = t
-                        , binderClock = BaseClock }
+                        , binderType = CType { cType = t, cClock = BaseClock }
+                        }
 
 toVarDeclBase :: ([Ident], Type) -> [ Binder ]
 toVarDeclBase (xs,t) = [ simpBinder x t | x <- xs ]
 
 toVarDecl :: ([Ident], Type) -> ClockExpr -> [ Binder ]
 toVarDecl (xs,t) c = [ Binder { binderDefines = x
-                              , binderType    = t
-                              , binderClock   = KnownClock c
+                              , binderType = CType { cType = t
+                                                   , cClock = KnownClock c }
                               } | x <- xs ]
 
 isUnsafe :: Maybe SourceRange -> Safety
