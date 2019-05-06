@@ -1,0 +1,10 @@
+
+type r = subrange [-2, 8] of int;
+
+const x : r = -1;
+
+node main(p : int) returns (q : int)
+let
+  q = x;
+tel;
+

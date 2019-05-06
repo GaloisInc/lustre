@@ -1,0 +1,20 @@
+PhaseToCore
+===========
+
+node (p : int)
+  returns (q)
+  assumes ()
+  shows ()
+let
+  q : int
+    = -1
+tel
+
+--- Step 1 ---
+p : int  = 1
+q = -1
+--- Step 2 ---
+p : int  = 2
+q = -1
+--- Step 3 ---
+p : int  = (EOF)
