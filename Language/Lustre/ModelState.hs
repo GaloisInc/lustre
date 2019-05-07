@@ -14,7 +14,7 @@ module Language.Lustre.ModelState
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Language.Lustre.Name(Ident,origNameToIdent,OrigName)
+import Language.Lustre.Name(OrigName)
 import qualified Language.Lustre.AST  as P
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
@@ -25,7 +25,7 @@ import qualified Language.Lustre.Semantics.Value as V
 import Language.Lustre.Panic(panic)
 
 -- | A state for a core lustre program.
-type S            = Map Ident CoreValue
+type S            = Map OrigName CoreValue
 type CoreValue    = L.Value -- ^ Value for a core expression
 type SourceValue  = V.Value -- ^ Value for full Lustre
 
@@ -124,7 +124,7 @@ lookupVar l s i0 =
       do si1 <- traverse (lookupVar l s) si
          pure (restruct si1)
     Nothing ->
-      do v1 <- Map.lookup (origNameToIdent i) s
+      do v1 <- Map.lookup i s
          reval v1
   where
   i = Map.findWithDefault i0 i0 (lSubst l)
