@@ -9,13 +9,12 @@ module Language.Lustre.ModelState
     S, Vars(..), lookupVars, locVars,
     -- * Names
     CoreValue, SourceValue,
-    SourceIdent
   ) where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Language.Lustre.Name(Ident,origNameToIdent)
+import Language.Lustre.Name(Ident,origNameToIdent,OrigName)
 import qualified Language.Lustre.AST  as P
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
@@ -27,10 +26,8 @@ import Language.Lustre.Panic(panic)
 
 -- | A state for a core lustre program.
 type S            = Map Ident CoreValue
-type CoreValue    = L.Value     -- ^ Value for a core expression
-
-type SourceIdent  = P.OrigName -- ^ Identifier in the source syntax
-type SourceValue  = V.Value    -- ^ Value for full Lustre
+type CoreValue    = L.Value -- ^ Value for a core expression
+type SourceValue  = V.Value -- ^ Value for full Lustre
 
 --------------------------------------------------------------------------------
 
@@ -45,11 +42,11 @@ data Loc = Loc
   , lFunInfo   :: ModelFunInfo
     {- ^ Information about the translation of the specific function we are in -}
 
-  , lSubst     :: Map SourceIdent SourceIdent
+  , lSubst     :: Map OrigName OrigName
     {- ^ Accumulated renamings for variables resulting from Lustre-Lustre
          translations -}
 
-  , lVars      :: Vars SourceIdent
+  , lVars      :: Vars OrigName
     -- ^ These are the variables we are observing.  The names are in their
     -- original form.
 
@@ -110,17 +107,17 @@ exitCall = lAbove
 --------------------------------------------------------------------------------
 
 -- | The variables at this location.
-locVars :: Loc -> Vars SourceIdent
+locVars :: Loc -> Vars OrigName
 locVars = lVars
 
 -- | Get the values for all varialbes in a location.
-lookupVars :: Loc -> S -> Vars (SourceIdent, Maybe SourceValue)
+lookupVars :: Loc -> S -> Vars (OrigName, Maybe SourceValue)
 lookupVars l s = fmap lkp (lVars l)
   where lkp i = (i, lookupVar l s i)
 
 
 -- | Get the value for a variable in a location, in a specific state.
-lookupVar :: Loc -> S -> SourceIdent -> Maybe SourceValue
+lookupVar :: Loc -> S -> OrigName -> Maybe SourceValue
 lookupVar l s i0 =
   case Map.lookup i (mfiStructs (lFunInfo l)) of
     Just si ->
@@ -181,7 +178,7 @@ instance Traversable Vars where
 
 
 -- | Get the variables from a node.
-nodeVars :: P.NodeDecl -> Vars SourceIdent
+nodeVars :: P.NodeDecl -> Vars OrigName
 nodeVars nd = Vars { vIns = fromB [ b | P.InputBinder b <- P.nodeInputs prof ]
                    , vLocs = fromB locs
                    , vOuts = fromB (P.nodeOutputs prof)

@@ -17,6 +17,7 @@ import MonadLib hiding (Label)
 import AlexTools(SourceRange(..),SourcePos(..))
 
 import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..), identUID
+                           , identOrigName, nameOrigName
                            , Label(..))
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
@@ -28,7 +29,7 @@ import Language.Lustre.Pretty(showPP)
 -- | Compute info about enums from some top-level declarations.
 -- The result maps the original names of enum constructors, to numeric
 -- expressions that should represent them.
-getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> Map P.OrigName C.Literal
+getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> Map OrigName C.Literal
 getEnumInfo tds = foldr addDefs Map.empty enums
   where
   enums = [ is | P.DeclareType
@@ -46,7 +47,7 @@ getEnumInfo tds = foldr addDefs Map.empty enums
 -- We also return a mapping from original name to core names for translating
 -- models back.
 evalNodeDecl ::
-  Map P.OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
+  Map OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
   P.NodeDecl               {- ^ Simplified source Lustre -} ->
   LustreM C.Node
 evalNodeDecl enumCs nd
@@ -114,7 +115,7 @@ evalType ty =
 type M = StateT St LustreM
 
 
-runProcessNode :: Map P.OrigName C.Literal -> M a -> LustreM a
+runProcessNode :: Map OrigName C.Literal -> M a -> LustreM a
 runProcessNode enumCs m =
   do (a,_finS) <- runStateT st m
      pure a
@@ -129,15 +130,15 @@ runProcessNode enumCs m =
           }
 
 data St = St
-  { stLocalTypes :: Map Ident C.CType
+  { stLocalTypes :: Map OrigName C.CType
     -- ^ Types of local translated variables.
     -- These may change as we generate new equations.
 
-  , stSrcLocalTypes :: Map P.OrigName C.CType
+  , stSrcLocalTypes :: Map OrigName C.CType
     -- ^ Types of local variables from the source.
     -- These shouldn't change.
 
-  , stGlobEnumCons  :: Map P.OrigName C.Literal
+  , stGlobEnumCons  :: Map OrigName C.Literal
     -- ^ Definitions for enum constants.
     -- Currently we assume that these would be int constants.
 
@@ -147,43 +148,43 @@ data St = St
     -- Since we process things in depth-first fashion, this should be
     -- reverse to get proper definition order.
 
-  , stAssertNames :: [(Label,Ident)]
+  , stAssertNames :: [(Label,OrigName)]
     -- ^ The names of the equations corresponding to asserts.
 
-  , stPropertyNames :: [(Label,Ident)]
+  , stPropertyNames :: [(Label,OrigName)]
     -- ^ The names of the equatiosn corresponding to properties.
 
 
-  , stVarMap :: Map P.OrigName Ident
+  , stVarMap :: Map OrigName OrigName
     {- ^ Remembers what names we used for values in the core.
     This is so that when we can parse traces into their original names. -}
   }
 
 -- | Get the collected assert names.
-getAssertNames :: M [(Label,Ident)]
+getAssertNames :: M [(Label,OrigName)]
 getAssertNames = stAssertNames <$> get
 
 -- | Get the collected property names.
-getPropertyNames :: M [(Label,Ident)]
+getPropertyNames :: M [(Label,OrigName)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
-getEnumCons :: M (Map P.OrigName C.Literal)
+getEnumCons :: M (Map OrigName C.Literal)
 getEnumCons = stGlobEnumCons <$> get
 
 -- | Get the collection of local types.
-getLocalTypes :: M (Map Ident C.CType)
+getLocalTypes :: M (Map OrigName C.CType)
 getLocalTypes = stLocalTypes <$> get
 
 -- | Record the type of a local.
-addLocal :: Ident -> C.CType -> M ()
+addLocal :: OrigName -> C.CType -> M ()
 addLocal i t = sets_ $ \s -> s { stLocalTypes = Map.insert i t (stLocalTypes s)}
 
 addBinder :: C.Binder -> M ()
 addBinder (i C.::: t) = addLocal i t
 
 -- | Generate a fresh local name with the given stemp
-newIdentFrom :: Text -> M Ident
+newIdentFrom :: Text -> M OrigName
 newIdentFrom stem =
   do x <- inBase newInt
      let i = Ident { identLabel    = Label { labText = stem, labRange = noLoc }
@@ -194,7 +195,7 @@ newIdentFrom stem =
                       , rnIdent   = i
                       , rnThing   = AVal
                       }
-     pure i { identResolved = Just o }
+     pure o
 
   where
   -- XXX: Currently core epxressions have no locations.
@@ -237,15 +238,15 @@ nameExpr expr =
            C.Merge a _ _ -> namedStem "merge" a
 
   namedStem t a = case a of
-                    C.Var i -> t <> "_" <> P.identText i
+                    C.Var i -> t <> "_" <> P.origNameTextName i
                     _       -> "$" <> t
 
 -- | Remember that the given identifier was used for an assert.
-addAssertName :: Label -> Ident -> M ()
+addAssertName :: Label -> OrigName -> M ()
 addAssertName t i = sets_ $ \s -> s { stAssertNames = (t,i) : stAssertNames s }
 
 -- | Remember that the given identifier was used for a property.
-addPropertyName :: Label -> Ident -> M ()
+addPropertyName :: Label -> OrigName -> M ()
 addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 
@@ -272,7 +273,7 @@ evalBinder b =
             P.ClockVar i -> panic "evalBinder"
                               [ "Unexpected clock variable", showPP i ]
      let t = evalType (P.cType (P.binderType b)) `C.On` c
-     let xi = P.binderDefines b
+     let xi = identOrigName (P.binderDefines b)
      addLocal xi t
      let bn = xi C.::: t
      addBinder bn
@@ -294,13 +295,14 @@ evalEqn eqn =
       case ls of
         [ P.LVar x ] ->
             do tys <- getLocalTypes
-               let t = case Map.lookup x tys of
+               let x' = identOrigName x
+               let t = case Map.lookup x' tys of
                          Just ty -> ty
                          Nothing ->
                             panic "evalEqn" [ "Defining unknown variable:"
                                             , "*** Name: " ++ showPP x ]
-               e1  <- evalExpr (Just x) e
-               addEqn (x C.::: t C.:= e1)
+               e1  <- evalExpr (Just x') e
+               addEqn (x' C.::: t C.:= e1)
                clearEqns
 
 
@@ -310,7 +312,7 @@ evalEqn eqn =
                 ]
 
   where
-  evalForm :: String -> (Ident -> M ()) -> P.Expression -> M [ C.Eqn ]
+  evalForm :: String -> (OrigName -> M ()) -> P.Expression -> M [ C.Eqn ]
   evalForm x f e =
     do e1 <- evalExprAtom e
        case e1 of
@@ -343,7 +345,7 @@ evalClockExpr :: P.ClockExpr -> M C.Atom
 evalClockExpr (P.WhenClock _ e1 i) =
   do a1  <- evalConstExpr e1
      env <- getLocalTypes
-     let a2 = C.Var i
+     let a2 = C.Var (identOrigName i)
          ty = C.typeOf env a2
      pure $ case a1 of
               C.Bool True -> a2
@@ -356,7 +358,7 @@ evalIClock clo =
     P.KnownClock c -> C.WhenTrue <$> evalClockExpr c
     P.ClockVar {} -> panic "evalIClockExpr" [ "Unexpectec clock variable." ]
 
-evalCurrentWith :: Maybe Ident -> C.Atom -> C.Atom -> M C.Expr
+evalCurrentWith :: Maybe OrigName -> C.Atom -> C.Atom -> M C.Expr
 evalCurrentWith xt d e =
   do env <- getLocalTypes
      let ty = C.typeOf env e
@@ -401,15 +403,12 @@ evalCType t =
      pure (evalType (P.cType t) `C.On` c)
 
 -- | Evaluate a source expression to a core expression.
-evalExpr :: Maybe Ident -> P.Expression -> M C.Expr
+evalExpr :: Maybe OrigName -> P.Expression -> M C.Expr
 evalExpr xt expr =
   case expr of
     P.ERange _ e -> evalExpr xt e
 
-    P.Var i ->
-      case i of
-        P.Unqual j -> pure (C.Atom (C.Var j))
-        _          -> bad "qualified name"
+    P.Var i -> pure (C.Atom (C.Var (nameOrigName i)))
 
     P.Const e t ->
       do l <- evalConstExpr e
@@ -425,7 +424,7 @@ evalExpr xt expr =
 
 
     P.Merge i alts ->
-      do let j = C.Var i
+      do let j = C.Var (identOrigName i)
          env <- getLocalTypes
          let ty = C.typeOf env j
          as <- forM alts $ \(P.MergeCase k e) -> do p  <- evalConstExpr k

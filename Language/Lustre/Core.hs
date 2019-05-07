@@ -37,11 +37,11 @@ typeOfCType (t `On` _) = t
 clockOfCType :: CType -> Clock
 clockOfCType (_ `On` c) = c
 
-data Binder   = Ident ::: CType
+data Binder   = OrigName ::: CType
                 deriving Show
 
 data Atom     = Lit Literal CType
-              | Var Ident
+              | Var OrigName
               | Prim Op [Atom]
                 deriving Show
 
@@ -70,12 +70,12 @@ infix 2 :::
 infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
-                     , nOutputs     :: [Ident]
+                     , nOutputs     :: [OrigName]
 
-                     , nAssuming    :: [(Label,Ident)]
+                     , nAssuming    :: [(Label,OrigName)]
                        -- ^ Assuming that these are true
 
-                     , nShows       :: [(Label,Ident)]
+                     , nShows       :: [(Label,OrigName)]
                        -- ^ Need to show that these are also true
 
                      , nEqns        :: [EqnGroup]
@@ -97,14 +97,14 @@ grpEqns g =
 --------------------------------------------------------------------------------
 -- Ordering equations
 
-usesAtom :: Atom -> Set Ident
+usesAtom :: Atom -> Set OrigName
 usesAtom atom =
   case atom of
     Lit _ _   -> Set.empty
     Var x     -> Set.singleton x
     Prim _ as -> Set.unions (map usesAtom as)
 
-usesExpr :: Expr -> Set Ident
+usesExpr :: Expr -> Set OrigName
 usesExpr expr =
   case expr of
     Atom a        -> usesAtom a
@@ -114,7 +114,7 @@ usesExpr expr =
     Current a     -> usesAtom a
     Merge a b c   -> Set.unions (map usesAtom [a,b,c])
 
-usesClock :: Clock -> Set Ident
+usesClock :: Clock -> Set OrigName
 usesClock c =
   case c of
     BaseClock -> Set.empty
@@ -136,7 +136,7 @@ orderedEqns eqns = map cvt (stronglyConnComp graph)
 
 
 -- | Local identifier numbering. See `identVariants`.
-type PPInfo = Map Ident Int
+type PPInfo = Map OrigName Int
 
 noInfo :: PPInfo
 noInfo = Map.empty
@@ -144,10 +144,10 @@ noInfo = Map.empty
 ppPrim :: Op -> Doc
 ppPrim = text . show
 
-ppIdent :: PPInfo -> Ident -> Doc
+ppIdent :: PPInfo -> OrigName -> Doc
 ppIdent info i =
   case Map.lookup i info of
-    Nothing -> pp (identText i) PP.<> "$u" PP.<> PP.int (identUID i)
+    Nothing -> pp (origNameTextName i) PP.<> "$u" PP.<> PP.int (rnUID i)
     Just 0  -> pp i
     Just n  -> pp i PP.<> "$" PP.<> PP.int n
 
@@ -222,7 +222,7 @@ ppNode node =
 -- Identifiers with the same text name are going to get different numbers.
 -- Identifiers that only have one version around will get the number 0.
 -- This is handy for pretty printing and exporting to external tools.
-identVariants :: Node -> Map Ident Int
+identVariants :: Node -> Map OrigName Int
 identVariants node = Map.fromList
                    $ concat
                    $ Map.elems
@@ -232,7 +232,7 @@ identVariants node = Map.fromList
                    $ nInputs node ++ [ b | g <- nEqns node, b := _ <- grpEqns g]
 
   where
-  binderInfo (x ::: _) = (identText x, [x])
+  binderInfo (x ::: _) = (origNameTextName x, [x])
 
 
 
@@ -267,14 +267,14 @@ instance Pretty Node where
 
 
 -- | Compute the typing environment for a node.
-nodeEnv :: Node -> Map Ident CType
+nodeEnv :: Node -> Map OrigName CType
 nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++
                             map fromE (concatMap grpEqns (nEqns nd))
   where
   fromB (x ::: t) = (x,t)
   fromE (b := _)  = fromB b
 
-clockParent :: Map Ident CType -> Clock -> Maybe Clock
+clockParent :: Map OrigName CType -> Clock -> Maybe Clock
 clockParent env c =
   case c of
     BaseClock -> Nothing
@@ -282,7 +282,7 @@ clockParent env c =
 
 class TypeOf t where
   -- | Get the type of something well-formed (panics if not).
-  typeOf :: Map Ident CType -> t -> CType
+  typeOf :: Map OrigName CType -> t -> CType
 
 instance TypeOf Atom where
   typeOf env atom =

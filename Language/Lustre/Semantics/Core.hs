@@ -11,7 +11,7 @@ import Text.PrettyPrint
 
 import Language.Lustre.Panic
 import Language.Lustre.Pretty
-import Language.Lustre.Name(Ident)
+import Language.Lustre.Name(OrigName)
 import Language.Lustre.Core
 import Language.Lustre.Semantics.BuiltIn(eucledean_div_mod)
 
@@ -46,11 +46,11 @@ instance Pretty Value where
 
 
 data State = State
-  { sValues :: Map Ident Value
+  { sValues :: Map OrigName Value
     -- ^ Values for identifiers.
     -- If a value is missing, then its value is assumed to be 'VNil'.
 
-  , sInitialized :: Set Ident
+  , sInitialized :: Set OrigName
     -- ^ Additional state to implement @a -> b@
     -- Contains the identifiers that have transition to the second phase.
   }
@@ -71,8 +71,8 @@ instance Pretty State where
   ppPrec _ = ppState noInfo
 
 initNode :: Node ->
-            Maybe (Map Ident Value) {- Optional inital values -} ->
-            (State, State -> Map Ident Value -> State)
+            Maybe (Map OrigName Value) {- Optional inital values -} ->
+            (State, State -> Map OrigName Value -> State)
 initNode node mbStart = (s0, stepNode node env)
   where
   s0     = State { sInitialized = Set.empty
@@ -82,9 +82,9 @@ initNode node mbStart = (s0, stepNode node env)
 
 
 stepNode :: Node              {- ^ Node, with equations properly ordered -} ->
-            (Map Ident CType) {- ^ Types of identifiers -} ->
+            (Map OrigName CType) {- ^ Types of identifiers -} ->
             State             {- ^ Current state -} ->
-            Map Ident Value   {- ^ Inputs -} ->
+            Map OrigName Value   {- ^ Inputs -} ->
             State             {- ^ Next state -}
 stepNode node env old ins = foldl' (evalEqnGrp env old) new (nEqns node)
   where
@@ -102,7 +102,7 @@ evalLit lit =
     Bool b -> VBool b
 
 -- | Lookup the value of a variable.
-evalVar :: State -> Ident -> Value
+evalVar :: State -> OrigName -> Value
 evalVar s x = Map.findWithDefault VNil x (sValues s)
 
 -- | Interpret an atom in the given state.
@@ -116,7 +116,7 @@ evalAtom s atom =
     Prim op as -> evalPrimOp op (map (evalAtom s) as)
 
 
-evalEqnGrp :: Map Ident CType ->
+evalEqnGrp :: Map OrigName CType ->
               State ->
               State ->
               EqnGroup ->
@@ -137,11 +137,11 @@ evalEqnGrp env old new grp =
 
 
 
-evalEqn :: Map Ident CType {- ^ Types of identifier    -} ->
-           State           {- ^ Old state              -} ->
-           State           {- ^ New state (partial)    -} ->
-           Eqn             {- ^ Equation to evaluate   -} ->
-           State           {- ^ Updated new state      -}
+evalEqn :: Map OrigName CType {- ^ Types of identifier    -} ->
+           State              {- ^ Old state              -} ->
+           State              {- ^ New state (partial)    -} ->
+           Eqn                {- ^ Equation to evaluate   -} ->
+           State              {- ^ Updated new state      -}
 
 evalEqn env old new (x ::: _ `On` c := expr) =
   case expr of
