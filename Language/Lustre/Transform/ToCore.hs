@@ -21,6 +21,7 @@ import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..), identUID
                            , Label(..))
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
+import Language.Lustre.Core (CoreName, coreNameFromOrig)
 import Language.Lustre.Monad
 import Language.Lustre.Panic
 import Language.Lustre.Pretty(showPP)
@@ -44,8 +45,8 @@ getEnumInfo tds = foldr addDefs Map.empty enums
 
 
 -- | Translate a node to core form, given information about enumerations.
--- We also return a mapping from original name to core names for translating
--- models back.
+-- We don't return a mapping from original name to core names because
+-- for the moment this mapping is very simply: just use 'origNameToCoreName'
 evalNodeDecl ::
   Map OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
   P.NodeDecl               {- ^ Simplified source Lustre -} ->
@@ -130,7 +131,7 @@ runProcessNode enumCs m =
           }
 
 data St = St
-  { stLocalTypes :: Map OrigName C.CType
+  { stLocalTypes :: Map CoreName C.CType
     -- ^ Types of local translated variables.
     -- These may change as we generate new equations.
 
@@ -148,24 +149,24 @@ data St = St
     -- Since we process things in depth-first fashion, this should be
     -- reverse to get proper definition order.
 
-  , stAssertNames :: [(Label,OrigName)]
+  , stAssertNames :: [(Label,CoreName)]
     -- ^ The names of the equations corresponding to asserts.
 
-  , stPropertyNames :: [(Label,OrigName)]
+  , stPropertyNames :: [(Label,CoreName)]
     -- ^ The names of the equatiosn corresponding to properties.
 
 
-  , stVarMap :: Map OrigName OrigName
+  , stVarMap :: Map OrigName CoreName
     {- ^ Remembers what names we used for values in the core.
     This is so that when we can parse traces into their original names. -}
   }
 
 -- | Get the collected assert names.
-getAssertNames :: M [(Label,OrigName)]
+getAssertNames :: M [(Label,CoreName)]
 getAssertNames = stAssertNames <$> get
 
 -- | Get the collected property names.
-getPropertyNames :: M [(Label,OrigName)]
+getPropertyNames :: M [(Label,CoreName)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
@@ -173,18 +174,18 @@ getEnumCons :: M (Map OrigName C.Literal)
 getEnumCons = stGlobEnumCons <$> get
 
 -- | Get the collection of local types.
-getLocalTypes :: M (Map OrigName C.CType)
+getLocalTypes :: M (Map CoreName C.CType)
 getLocalTypes = stLocalTypes <$> get
 
 -- | Record the type of a local.
-addLocal :: OrigName -> C.CType -> M ()
+addLocal :: CoreName -> C.CType -> M ()
 addLocal i t = sets_ $ \s -> s { stLocalTypes = Map.insert i t (stLocalTypes s)}
 
 addBinder :: C.Binder -> M ()
 addBinder (i C.::: t) = addLocal i t
 
 -- | Generate a fresh local name with the given stemp
-newIdentFrom :: Text -> M OrigName
+newIdentFrom :: Text -> M CoreName
 newIdentFrom stem =
   do x <- inBase newInt
      let i = Ident { identLabel    = Label { labText = stem, labRange = noLoc }
@@ -195,7 +196,7 @@ newIdentFrom stem =
                       , rnIdent   = i
                       , rnThing   = AVal
                       }
-     pure o
+     pure (coreNameFromOrig o)
 
   where
   -- XXX: Currently core epxressions have no locations.
@@ -238,15 +239,15 @@ nameExpr expr =
            C.Merge a _ _ -> namedStem "merge" a
 
   namedStem t a = case a of
-                    C.Var i -> t <> "_" <> P.origNameTextName i
+                    C.Var i -> t <> "_" <> C.coreNameTextName i
                     _       -> "$" <> t
 
 -- | Remember that the given identifier was used for an assert.
-addAssertName :: Label -> OrigName -> M ()
+addAssertName :: Label -> CoreName -> M ()
 addAssertName t i = sets_ $ \s -> s { stAssertNames = (t,i) : stAssertNames s }
 
 -- | Remember that the given identifier was used for a property.
-addPropertyName :: Label -> OrigName -> M ()
+addPropertyName :: Label -> CoreName -> M ()
 addPropertyName t i =
   sets_ $ \s -> s { stPropertyNames = (t,i) : stPropertyNames s }
 
@@ -273,7 +274,7 @@ evalBinder b =
             P.ClockVar i -> panic "evalBinder"
                               [ "Unexpected clock variable", showPP i ]
      let t = evalType (P.cType (P.binderType b)) `C.On` c
-     let xi = identOrigName (P.binderDefines b)
+     let xi = evalIdent (P.binderDefines b)
      addLocal xi t
      let bn = xi C.::: t
      addBinder bn
@@ -295,7 +296,7 @@ evalEqn eqn =
       case ls of
         [ P.LVar x ] ->
             do tys <- getLocalTypes
-               let x' = identOrigName x
+               let x' = evalIdent x
                let t = case Map.lookup x' tys of
                          Just ty -> ty
                          Nothing ->
@@ -312,7 +313,7 @@ evalEqn eqn =
                 ]
 
   where
-  evalForm :: String -> (OrigName -> M ()) -> P.Expression -> M [ C.Eqn ]
+  evalForm :: String -> (CoreName -> M ()) -> P.Expression -> M [ C.Eqn ]
   evalForm x f e =
     do e1 <- evalExprAtom e
        case e1 of
@@ -340,12 +341,17 @@ evalExprAtom expr =
        _        -> nameExpr e1
 
 
+evalIdent :: Ident -> CoreName
+evalIdent = coreNameFromOrig . identOrigName
+
+
+
 -- | Evaluate a clock-expression to an atom.
 evalClockExpr :: P.ClockExpr -> M C.Atom
 evalClockExpr (P.WhenClock _ e1 i) =
   do a1  <- evalConstExpr e1
      env <- getLocalTypes
-     let a2 = C.Var (identOrigName i)
+     let a2 = C.Var (evalIdent i)
          ty = C.typeOf env a2
      pure $ case a1 of
               C.Bool True -> a2
@@ -358,7 +364,7 @@ evalIClock clo =
     P.KnownClock c -> C.WhenTrue <$> evalClockExpr c
     P.ClockVar {} -> panic "evalIClockExpr" [ "Unexpectec clock variable." ]
 
-evalCurrentWith :: Maybe OrigName -> C.Atom -> C.Atom -> M C.Expr
+evalCurrentWith :: Maybe CoreName -> C.Atom -> C.Atom -> M C.Expr
 evalCurrentWith xt d e =
   do env <- getLocalTypes
      let ty = C.typeOf env e
@@ -403,12 +409,12 @@ evalCType t =
      pure (evalType (P.cType t) `C.On` c)
 
 -- | Evaluate a source expression to a core expression.
-evalExpr :: Maybe OrigName -> P.Expression -> M C.Expr
+evalExpr :: Maybe CoreName -> P.Expression -> M C.Expr
 evalExpr xt expr =
   case expr of
     P.ERange _ e -> evalExpr xt e
 
-    P.Var i -> pure (C.Atom (C.Var (nameOrigName i)))
+    P.Var i -> pure (C.Atom (C.Var (coreNameFromOrig (nameOrigName i))))
 
     P.Const e t ->
       do l <- evalConstExpr e
@@ -424,7 +430,7 @@ evalExpr xt expr =
 
 
     P.Merge i alts ->
-      do let j = C.Var (identOrigName i)
+      do let j = C.Var (evalIdent i)
          env <- getLocalTypes
          let ty = C.typeOf env j
          as <- forM alts $ \(P.MergeCase k e) -> do p  <- evalConstExpr k

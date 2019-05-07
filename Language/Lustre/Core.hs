@@ -2,6 +2,7 @@
 module Language.Lustre.Core
   (module Language.Lustre.Core, Literal(..)) where
 
+import Data.Text(Text)
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Set(Set)
@@ -17,6 +18,9 @@ import Language.Lustre.Name
 import Language.Lustre.Pretty
 import Language.Lustre.Panic(panic)
 
+
+newtype CoreName = CoreName OrigName
+                      deriving (Show,Eq,Ord)
 
 -- XXX: Support for integer ranges.
 -- This would be useful to model enums, as well as "subrange [x,y] of int"
@@ -37,11 +41,11 @@ typeOfCType (t `On` _) = t
 clockOfCType :: CType -> Clock
 clockOfCType (_ `On` c) = c
 
-data Binder   = OrigName ::: CType
+data Binder   = CoreName ::: CType
                 deriving Show
 
 data Atom     = Lit Literal CType
-              | Var OrigName
+              | Var CoreName
               | Prim Op [Atom]
                 deriving Show
 
@@ -70,12 +74,12 @@ infix 2 :::
 infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
-                     , nOutputs     :: [OrigName]
+                     , nOutputs     :: [CoreName]
 
-                     , nAssuming    :: [(Label,OrigName)]
+                     , nAssuming    :: [(Label,CoreName)]
                        -- ^ Assuming that these are true
 
-                     , nShows       :: [(Label,OrigName)]
+                     , nShows       :: [(Label,CoreName)]
                        -- ^ Need to show that these are also true
 
                      , nEqns        :: [EqnGroup]
@@ -97,14 +101,14 @@ grpEqns g =
 --------------------------------------------------------------------------------
 -- Ordering equations
 
-usesAtom :: Atom -> Set OrigName
+usesAtom :: Atom -> Set CoreName
 usesAtom atom =
   case atom of
     Lit _ _   -> Set.empty
     Var x     -> Set.singleton x
     Prim _ as -> Set.unions (map usesAtom as)
 
-usesExpr :: Expr -> Set OrigName
+usesExpr :: Expr -> Set CoreName
 usesExpr expr =
   case expr of
     Atom a        -> usesAtom a
@@ -114,7 +118,7 @@ usesExpr expr =
     Current a     -> usesAtom a
     Merge a b c   -> Set.unions (map usesAtom [a,b,c])
 
-usesClock :: Clock -> Set OrigName
+usesClock :: Clock -> Set CoreName
 usesClock c =
   case c of
     BaseClock -> Set.empty
@@ -130,13 +134,21 @@ orderedEqns eqns = map cvt (stronglyConnComp graph)
             AcyclicSCC e -> NonRec e
             CyclicSCC es -> Rec es
 
+coreNameTextName :: CoreName -> Text
+coreNameTextName (CoreName x) = origNameTextName x
+
+coreNameUID :: CoreName -> Int
+coreNameUID (CoreName x) = rnUID x
+
+coreNameFromOrig :: OrigName -> CoreName
+coreNameFromOrig = CoreName
 
 --------------------------------------------------------------------------------
 -- Pretty Printing
 
 
 -- | Local identifier numbering. See `identVariants`.
-type PPInfo = Map OrigName Int
+type PPInfo = Map CoreName Int
 
 noInfo :: PPInfo
 noInfo = Map.empty
@@ -144,10 +156,10 @@ noInfo = Map.empty
 ppPrim :: Op -> Doc
 ppPrim = text . show
 
-ppIdent :: PPInfo -> OrigName -> Doc
+ppIdent :: PPInfo -> CoreName -> Doc
 ppIdent info i =
   case Map.lookup i info of
-    Nothing -> pp (origNameTextName i) PP.<> "$u" PP.<> PP.int (rnUID i)
+    Nothing -> pp (coreNameTextName i) PP.<> "$u" PP.<> PP.int (coreNameUID i)
     Just 0  -> pp i
     Just n  -> pp i PP.<> "$" PP.<> PP.int n
 
@@ -222,7 +234,7 @@ ppNode node =
 -- Identifiers with the same text name are going to get different numbers.
 -- Identifiers that only have one version around will get the number 0.
 -- This is handy for pretty printing and exporting to external tools.
-identVariants :: Node -> Map OrigName Int
+identVariants :: Node -> Map CoreName Int
 identVariants node = Map.fromList
                    $ concat
                    $ Map.elems
@@ -232,7 +244,7 @@ identVariants node = Map.fromList
                    $ nInputs node ++ [ b | g <- nEqns node, b := _ <- grpEqns g]
 
   where
-  binderInfo (x ::: _) = (origNameTextName x, [x])
+  binderInfo (x ::: _) = (coreNameTextName x, [x])
 
 
 
@@ -261,20 +273,23 @@ instance Pretty Eqn where
 instance Pretty Node where
   ppPrec _ = ppNode
 
+instance Pretty CoreName where
+  ppPrec n (CoreName x) = ppPrec n x
+
 
 --------------------------------------------------------------------------------
 -- Computing the the type of an expression.
 
 
 -- | Compute the typing environment for a node.
-nodeEnv :: Node -> Map OrigName CType
+nodeEnv :: Node -> Map CoreName CType
 nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++
                             map fromE (concatMap grpEqns (nEqns nd))
   where
   fromB (x ::: t) = (x,t)
   fromE (b := _)  = fromB b
 
-clockParent :: Map OrigName CType -> Clock -> Maybe Clock
+clockParent :: Map CoreName CType -> Clock -> Maybe Clock
 clockParent env c =
   case c of
     BaseClock -> Nothing
@@ -282,7 +297,7 @@ clockParent env c =
 
 class TypeOf t where
   -- | Get the type of something well-formed (panics if not).
-  typeOf :: Map OrigName CType -> t -> CType
+  typeOf :: Map CoreName CType -> t -> CType
 
 instance TypeOf Atom where
   typeOf env atom =

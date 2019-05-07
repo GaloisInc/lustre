@@ -14,8 +14,9 @@ module Language.Lustre.ModelState
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Language.Lustre.Name(OrigName)
 import qualified Language.Lustre.AST  as P
+import Language.Lustre.Core(CoreName,coreNameFromOrig)
+import Language.Lustre.Name(OrigName)
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
 import Language.Lustre.Transform.Inline(Renaming(..))
@@ -25,7 +26,7 @@ import qualified Language.Lustre.Semantics.Value as V
 import Language.Lustre.Panic(panic)
 
 -- | A state for a core lustre program.
-type S            = Map OrigName CoreValue
+type S            = Map CoreName CoreValue
 type CoreValue    = L.Value -- ^ Value for a core expression
 type SourceValue  = V.Value -- ^ Value for full Lustre
 
@@ -47,8 +48,7 @@ data Loc = Loc
          translations -}
 
   , lVars      :: Vars OrigName
-    -- ^ These are the variables we are observing.  The names are in their
-    -- original form.
+    -- ^ These are the variables we are observing.
 
   , lAbove     :: Maybe Loc
     -- ^ Locations on the current call path.  This is for navigation,
@@ -111,7 +111,7 @@ locVars :: Loc -> Vars OrigName
 locVars = lVars
 
 -- | Get the values for all varialbes in a location.
-lookupVars :: Loc -> S -> Vars (OrigName, Maybe SourceValue)
+lookupVars :: Loc -> S -> Vars (OrigName , Maybe SourceValue)
 lookupVars l s = fmap lkp (lVars l)
   where lkp i = (i, lookupVar l s i)
 
@@ -124,7 +124,7 @@ lookupVar l s i0 =
       do si1 <- traverse (lookupVar l s) si
          pure (restruct si1)
     Nothing ->
-      do v1 <- Map.lookup i s
+      do v1 <- Map.lookup (coreNameFromOrig i) s
          reval v1
   where
   i = Map.findWithDefault i0 i0 (lSubst l)
