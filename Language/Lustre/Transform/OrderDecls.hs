@@ -18,6 +18,7 @@ import Data.Graph.SCC(stronglyConnComp)
 import Data.Foldable(traverse_)
 import MonadLib
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Monad (LustreM, LustreError(..), ResolverError(..)
@@ -27,7 +28,7 @@ import Language.Lustre.Panic(panic)
 import Language.Lustre.Defines
 
 
--- | Resoolve some declaration in an empty scope.
+-- | Resolve some declaration in an empty scope.
 -- Useful to quickly test things, or if we are just doing a once off module.
 quickOrderTopDecl :: [TopDecl] -> LustreM [TopDecl]
 quickOrderTopDecl ds = orderTopDecls scp ds
@@ -65,7 +66,7 @@ resolveGroup check ds k =
          k . concat =<< traverse check comps
 
 
--- | Resolve a list of declaratons, where the results of each are in scope
+-- | Resolve a list of declarations, where the results of each are in scope
 -- of the next. The continuation is then executed in the newly computed scope.
 -- Note that value identifiers still cannot shadow each other
 -- so multiple declarations should still result in errors.

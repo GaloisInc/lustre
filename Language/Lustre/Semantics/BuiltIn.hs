@@ -22,6 +22,7 @@ module Language.Lustre.Semantics.BuiltIn
 
 import Data.List(genericReplicate,genericDrop,genericIndex,genericLength)
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Semantics.Value
 

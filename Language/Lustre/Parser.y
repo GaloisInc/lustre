@@ -23,6 +23,7 @@ import Control.Exception(throwIO)
 
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Parser.Monad
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty(showPP)
 import Language.Lustre.Panic

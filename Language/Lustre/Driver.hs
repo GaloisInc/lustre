@@ -9,6 +9,7 @@ import Data.Text(Text)
 import AlexTools(sourceFrom,sourceIndex)
 import Text.PrettyPrint(Doc)
 
+import Language.Lustre.Name
 import qualified Language.Lustre.AST as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Monad
@@ -34,8 +35,8 @@ quickNodeToCore mb ds =
      nodeToCore mb info ds1
 
 data Env = Env
-  { envNodes :: Map P.OrigName ModelFunInfo
-  , envEnums :: Map P.OrigName C.Literal
+  { envNodes :: Map OrigName ModelFunInfo
+  , envEnums :: Map OrigName C.Literal
   }
 
 -- | Process a bunch of declarations in preparation for translating to core.
@@ -88,7 +89,7 @@ nodeToCore mb env ds =
      core <- evalNodeDecl (envEnums env) nd
      dumpPhase PhaseToCore (pp core)
      pure (ModelInfo { infoNodes = envNodes env
-                     , infoTop   = P.identOrigName (P.nodeName nd)
+                     , infoTop   = identOrigName (P.nodeName nd)
                      }
           , core)
 
@@ -102,14 +103,14 @@ findNode mb ds =
     [nd] -> pure nd
     [] | nd : _ <- sortBy later nodes -> pure nd
     nds  -> reportError $ BadEntryPoint
-                                [ P.identOrigName (P.nodeName nd) | nd <- nds ]
+                                [ identOrigName (P.nodeName nd) | nd <- nds ]
   where
   nodes = [ nd | P.DeclareNode nd <- ds ]
 
   selected =
     case mb of
       Nothing -> hasMain
-      Just t  -> \nd -> P.identText (P.nodeName nd) == t
+      Just t  -> \nd -> identText (P.nodeName nd) == t
 
   hasMain nd
      | Just b <- P.nodeDef nd = any isMain (P.nodeEqns b)
@@ -121,16 +122,16 @@ findNode mb ds =
                  _          -> False
 
   -- XXX: assumes all declaration in the same file.
-  locId = sourceIndex . sourceFrom . P.identRange . P.nodeName
+  locId = sourceIndex . sourceFrom . identRange . P.nodeName
   later x y = compare (locId y) (locId x)
 
 --------------------------------------------------------------------------------
 -- | Information for mapping traces back to source Lustre
 data ModelInfo = ModelInfo
-  { infoNodes   :: Map P.OrigName ModelFunInfo
+  { infoNodes   :: Map OrigName ModelFunInfo
     -- ^ Translation information for nodes.
 
-  , infoTop     :: P.OrigName
+  , infoTop     :: OrigName
     -- ^ Name for top node
   }
 
@@ -143,17 +144,17 @@ data ModelInfo = ModelInfo
 -- | Collected information about a translated node.
 -- Mostly stuff we need to map from Core models, back to original source.
 data ModelFunInfo = ModelFunInfo
-  { mfiCallSites :: Map CallSiteId [P.OrigName]
+  { mfiCallSites :: Map CallSiteId [OrigName]
     {- ^ For each call site, rememebr the identifiers keeping the results
          of the call. -}
 
-  , mfiStructs :: Map P.OrigName (StructData P.OrigName)
+  , mfiStructs :: Map OrigName (StructData OrigName)
     {- ^ Identifiers of strucutred types (e.g., structs, arrays) are
          "exploded" into multiple variables.  This mapping remembers how
          we did that: the key is a value of a strucutred type, and
          the entry in the map is the value for it -}
 
-  , mfiInlined :: Map [P.OrigName] (P.OrigName, Renaming)
+  , mfiInlined :: Map [OrigName] (OrigName, Renaming)
     {- ^ Information about what we called, and how things got renamed
          when we inlined things.
          For each call site (identified by its return values),
@@ -167,7 +168,7 @@ data ModelFunInfo = ModelFunInfo
 
 
 
-mfiMap :: [P.TopDecl] -> NosOut -> AllRenamings -> Map P.OrigName ModelFunInfo
+mfiMap :: [P.TopDecl] -> NosOut -> AllRenamings -> Map OrigName ModelFunInfo
 mfiMap ordDs nos rens =
   Map.fromList $ map build
                $ Set.toList
@@ -190,17 +191,17 @@ mfiMap ordDs nos rens =
 -- | Compute a mapping from node names to the actual source that implements
 -- them.  For example, consider the declaration @f = g <<3>>@.  If we want to
 -- see how @f@ works, we should really look for the code for @g@.
-nodeSourceMap :: [P.TopDecl] -> Map P.OrigName P.NodeDecl
+nodeSourceMap :: [P.TopDecl] -> Map OrigName P.NodeDecl
 nodeSourceMap = foldl' add Map.empty
   where
   add mp tde =
     case tde of
-      P.DeclareNode nd -> Map.insert (P.identOrigName (P.nodeName nd)) nd mp
+      P.DeclareNode nd -> Map.insert (identOrigName (P.nodeName nd)) nd mp
       P.DeclareNodeInst nid ->
         case P.nodeInstDef nid of
           P.NodeInst (P.CallUser f) _
-            | Just nd <- Map.lookup (P.nameOrigName f) mp ->
-                         Map.insert (P.identOrigName (P.nodeInstName nid)) nd mp
+            | Just nd <- Map.lookup (nameOrigName f) mp ->
+                         Map.insert (identOrigName (P.nodeInstName nid)) nd mp
           _ -> mp
       P.DeclareType {} -> mp
       P.DeclareConst {} -> mp

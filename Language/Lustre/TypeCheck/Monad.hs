@@ -9,6 +9,7 @@ import Data.Foldable(for_)
 import Text.PrettyPrint as PP
 import MonadLib
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Monad (LustreM, LustreError(..))

@@ -16,9 +16,7 @@ import Data.Graph(SCC(..))
 import MonadLib hiding (Label)
 import AlexTools(SourceRange(..),SourcePos(..))
 
-import Language.Lustre.Name(Ident(..), OrigName(..), Thing(..), identUID
-                           , identOrigName, nameOrigName
-                           , Label(..))
+import Language.Lustre.Name
 import qualified Language.Lustre.AST  as P
 import qualified Language.Lustre.Core as C
 import Language.Lustre.Core (CoreName, coreNameFromOrig)
@@ -39,14 +37,14 @@ getEnumInfo tds = foldr addDefs Map.empty enums
   -- The constructors of an enum are represented by 0, 1, .. etc
   addDefs is m = foldr addDef m (zipWith mkDef is [ 0 .. ])
 
-  mkDef i n = (P.identOrigName i, C.Int n)
+  mkDef i n = (identOrigName i, C.Int n)
 
   addDef (i,n) = Map.insert i n
 
 
 -- | Translate a node to core form, given information about enumerations.
 -- We don't return a mapping from original name to core names because
--- for the moment this mapping is very simply: just use 'origNameToCoreName'
+-- for the moment this mapping is very simple: just use 'origNameToCoreName'
 evalNodeDecl ::
   Map OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
   P.NodeDecl               {- ^ Simplified source Lustre -} ->
@@ -392,7 +390,7 @@ evalConstExpr expr =
     P.ERange _ e -> evalConstExpr e
     P.Var i ->
       do cons <- getEnumCons
-         case Map.lookup (P.nameOrigName i) cons of
+         case Map.lookup (nameOrigName i) cons of
           Just e -> pure e
           Nothing -> bad "undefined constant symbol"
     P.Lit l -> pure l

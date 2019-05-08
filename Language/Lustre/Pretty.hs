@@ -11,6 +11,7 @@ import Numeric(showGFloat)
 import Data.Ratio(numerator,denominator)
 
 import Language.Lustre.AST
+import Language.Lustre.Name
 import Language.Lustre.Panic(panic)
 import AlexTools(prettySourceRange)
 

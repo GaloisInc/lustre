@@ -14,9 +14,9 @@ module Language.Lustre.ModelState
 import Data.Map (Map)
 import qualified Data.Map as Map
 
+import Language.Lustre.Name
 import qualified Language.Lustre.AST  as P
 import Language.Lustre.Core(CoreName,coreNameFromOrig)
-import Language.Lustre.Name(OrigName)
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
 import Language.Lustre.Transform.Inline(Renaming(..))
@@ -188,5 +188,5 @@ nodeVars nd = Vars { vIns = fromB [ b | P.InputBinder b <- P.nodeInputs prof ]
   locs = case P.nodeDef nd of
            Nothing -> []
            Just d -> [ b | P.LocalVar b <- P.nodeLocals d ]
-  fromB = map (P.identOrigName . P.binderDefines)
+  fromB = map (identOrigName . P.binderDefines)
 

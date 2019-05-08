@@ -18,6 +18,7 @@ import Data.Traversable(for)
 import Text.PrettyPrint((<+>), braces, brackets, parens)
 import MonadLib hiding (Label)
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Transform.NoStatic(CallSiteMap,CallSiteId)

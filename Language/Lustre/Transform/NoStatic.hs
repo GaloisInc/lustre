@@ -52,6 +52,7 @@ import qualified Data.Text as Text
 import MonadLib hiding (Label)
 import Text.PrettyPrint(punctuate,comma,hsep)
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Monad
 import qualified Language.Lustre.Semantics.Const as C

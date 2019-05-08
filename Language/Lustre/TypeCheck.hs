@@ -11,6 +11,7 @@ import Data.List(group,sort)
 import Data.Traversable(for)
 import Data.Foldable(for_)
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 import Language.Lustre.Panic

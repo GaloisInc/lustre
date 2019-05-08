@@ -8,6 +8,7 @@ import Data.Map ( Map )
 import qualified Data.Map as Map
 import Control.Monad(msum)
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty(showPP)
 import Language.Lustre.Semantics.Value

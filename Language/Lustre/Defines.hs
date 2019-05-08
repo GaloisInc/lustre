@@ -15,6 +15,7 @@ import qualified Data.Set as Set
 import Data.Foldable(traverse_)
 import MonadLib
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Monad
 

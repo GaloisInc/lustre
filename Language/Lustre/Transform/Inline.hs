@@ -16,6 +16,7 @@ import qualified Data.Map as Map
 import MonadLib
 import Data.Traversable(for)
 
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Monad
 import Language.Lustre.Pretty

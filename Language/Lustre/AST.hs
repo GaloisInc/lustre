@@ -1,8 +1,90 @@
 -- | Reference:
 -- http://www-verimag.imag.fr/DIST-TOOLS/SYNCHRONE/lustre-v6/doc/lv6-ref-man.pdf
 module Language.Lustre.AST
-  ( module Language.Lustre.AST
-  , module Language.Lustre.Name
+  ( Program(..)
+
+    -- * Packages
+
+    {- | We don't support packages beyond parsing them. -}
+
+  , PackDecl(..)
+  , Package(..)
+  , PackageProvides(..)
+
+
+    -- * Top-Level Declarations
+  , TopDecl(..)
+
+    -- ** Types
+  , TypeDecl(..)
+  , TypeDef(..)
+  , Type(..)
+  , FieldType(..)
+  , CType(..)
+  , IClock(..)
+  , CVar(..)
+
+    -- ** Constants
+  , ConstDef(..)
+
+    -- ** Nodes
+  , NodeDecl(..)
+  , NodeInstDecl(..)
+  , NodeProfile(..)
+  , Safety(..)
+  , NodeType(..)
+
+  , InputBinder(..)
+  , Binder(..)
+
+  , NodeBody(..)
+  , LocalDecl(..)
+  , Equation(..)
+  , LHS(..)
+  , Selector(..)
+  , ArraySlice(..)
+
+  , Expression(..)
+  , MergeCase(..)
+  , ClockExpr(..)
+  , NodeInst(..)
+
+
+
+    -- ** Contracts
+    -- {- | Support for contracts is incomplete. -}
+  , Contract(..)
+  , ContractItem(..)
+  , ContractDecl(..)
+
+
+
+  , eOp1
+  , eOp2
+  , eITE
+  , eOpN
+
+  , Callable(..)
+  , PrimNode(..)
+  , Iter(..)
+
+  , StaticParam(..)
+  , StaticArg(..)
+
+  , Literal(..)
+
+  , Field(..)
+
+
+  , Op1(..)
+  , Op2(..)
+  , OpN(..)
+
+  , exprRangeMaybe
+  , typeRangeMaybe
+  , argRangeMaybe
+  , eqnRangeMaybe
+
   , HasRange(..)
   , SourceRange(..)
   , SourcePos(..)
@@ -15,10 +97,13 @@ import AlexTools(SourceRange(..), SourcePos(..), HasRange(..), (<->))
 import Language.Lustre.Panic
 import Language.Lustre.Name
 
-data Program  = ProgramDecls [TopDecl]
-              | ProgramPacks [PackDecl]
+-- | A Lustre program.  Currently we don't support packages beyond parsing.
+data Program  = ProgramDecls [TopDecl]      -- ^ Some declarations
+              | ProgramPacks [PackDecl]     -- ^ Some packages
                 deriving Show
 
+-- | A package declaration.  We can parse these, but not do anything with
+-- them yet.
 data PackDecl = PackDecl Package
               | PackInst Ident Ident [ (Ident, StaticArg) ]
                 deriving Show
@@ -48,37 +133,61 @@ data TopDecl =
   | DeclareContract !ContractDecl
     deriving Show
 
+-- | Declare a named type.
 data TypeDecl = TypeDecl
   { typeName :: !Ident
   , typeDef  :: !(Maybe TypeDef)
+    -- ^ Types with no definitions are abstract.
+    -- We do not have good support for abstract types at the moment.
   } deriving Show
 
-data TypeDef = IsType !Type
-             | IsEnum ![ Ident ]
-             | IsStruct ![ FieldType ]
+
+
+-- | A definition for a named type.
+data TypeDef = IsType !Type             -- ^ A type alias.
+             | IsEnum ![ Ident ]        -- ^ An enumeration type.
+             | IsStruct ![ FieldType ]  -- ^ A record type.
               deriving Show
 
-
+-- | The type of value or a constant.
 data Type =
-    NamedType Name
+    NamedType Name                -- ^ A named type.  See 'TypeDef'.
   | ArrayType Type Expression
-  | IntType | RealType | BoolType
-  | IntSubrange Expression Expression  -- ^ An extension
+    -- ^ An array type.  The 'Expression' is for the size of the array.
+
+  | IntType     -- ^ Type of integers.
+  | RealType    -- ^ Type of real numbers.
+  | BoolType    -- ^ Type of boolean values.
+
+  | IntSubrange Expression Expression
+    -- ^ An interval subset of the integers.  The 'Expression's are bounds.
+    -- Their values are included in the interval.
+
   | TypeRange SourceRange Type
+    -- ^ A type annotated with a source location.
+
     deriving Show
 
+
+-- | The type of the field of a structure.
 data FieldType  = FieldType
-  { fieldName     :: Label
-  , fieldType     :: Type
+  { fieldName     :: Label              -- ^ The name of the field.
+  , fieldType     :: Type               -- ^ The field's type.
   , fieldDefault  :: Maybe Expression
+    -- ^ Optional default constant value, used if the field is omitted.
   } deriving Show
 
 
 -- | Note: only one of the type or definition may be "Nothing".
 data ConstDef = ConstDef
   { constName     :: Ident
-  , constType     :: Maybe Type
+  , constType     :: Maybe Type   -- ^ Optional type annotation.
   , constDef      :: Maybe Expression
+    {- ^ Optional definition. If the definition is omitted, then the constant
+         is abstract.  In that case, the type cannot be omitted.
+
+         Note that at the moment we don't have good support for abstract
+         constants. -}
   } deriving Show
 
 
@@ -102,6 +211,8 @@ data ContractDecl = ContractDecl
   , cdRange    :: SourceRange
   } deriving Show
 
+
+-- | The declaration of a node.
 data NodeDecl = NodeDecl
   { nodeSafety       :: Safety
   , nodeExtern       :: Bool
@@ -115,6 +226,7 @@ data NodeDecl = NodeDecl
   , nodeRange        :: !SourceRange
   } deriving Show
 
+-- | A named instantiation of a node with static parameters.
 data NodeInstDecl = NodeInstDecl
   { nodeInstSafety       :: Safety
   , nodeInstType         :: NodeType
@@ -123,6 +235,7 @@ data NodeInstDecl = NodeInstDecl
   , nodeInstProfile      :: Maybe NodeProfile
   , nodeInstDef          :: NodeInst
   } deriving Show
+
 
 data NodeProfile = NodeProfile
   { nodeInputs    :: [InputBinder]
@@ -352,18 +465,29 @@ data OpN = AtMostOne | Nor
 --------------------------------------------------------------------------------
 -- Type checking
 
--- | A type, together with its clock.
+-- | The type of a non-constant expression.  We keep track of the clock,
+-- and when the value may be updated.
 data CType      = CType { cType :: Type, cClock :: IClock }
                   deriving Show
 
--- | A single clock expression.
-data IClock     = BaseClock
-                | KnownClock ClockExpr
-                | ClockVar CVar         -- ^ Only present during type-checking
-                  deriving Show
+-- | A clock for a value.
+data IClock =
+    BaseClock
+    {- ^ At the root node, this is the system's base clock.
+         For other nodes, this refers to the clock of of the
+         current node invocation.  See the 'Call' expression. -}
 
--- | A clock variable
-newtype CVar    = CVar Int deriving (Eq,Ord,Show)
+  | KnownClock ClockExpr
+    -- ^ A specific clock expression.
+
+  | ClockVar CVar
+    -- ^ A placeholder for a clock that is being inferred.
+    -- Used only during type-checking
+    deriving Show
+
+-- | A clock variable, used during type checking to infer the clock of
+-- some expressions.
+newtype CVar = CVar Int deriving (Eq,Ord,Show)
 
 
 
@@ -375,6 +499,7 @@ instance HasRange e => HasRange (Field e) where
 instance HasRange ClockExpr where
   range (WhenClock r _ _) = r
 
+-- | Get the source range associated with an expression, if any.
 exprRangeMaybe :: Expression -> Maybe SourceRange
 exprRangeMaybe expr =
   case expr of
@@ -394,6 +519,8 @@ exprRangeMaybe expr =
     Struct {}       -> Nothing
     UpdateStruct {} -> Nothing
 
+
+-- | Get the source range associated with a type, if any.
 typeRangeMaybe :: Type -> Maybe SourceRange
 typeRangeMaybe ty =
   case ty of
@@ -405,6 +532,8 @@ typeRangeMaybe ty =
     BoolType {}     -> Nothing
     IntSubrange {}  -> Nothing
 
+
+-- | Get the source range of a static argument, if any.
 argRangeMaybe :: StaticArg -> Maybe SourceRange
 argRangeMaybe arg =
   case arg of
@@ -413,6 +542,8 @@ argRangeMaybe arg =
     ExprArg e    -> exprRangeMaybe e
     NodeArg {}   -> Nothing
 
+
+-- | Get the source range of an equation, if any.
 eqnRangeMaybe :: Equation -> Maybe SourceRange
 eqnRangeMaybe eqn =
   case eqn of

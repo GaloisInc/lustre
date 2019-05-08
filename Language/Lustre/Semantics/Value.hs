@@ -2,6 +2,7 @@
 module Language.Lustre.Semantics.Value where
 
 import Text.PrettyPrint as P
+import Language.Lustre.Name
 import Language.Lustre.AST
 import Language.Lustre.Pretty
 
