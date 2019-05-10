@@ -36,7 +36,7 @@ quickNodeToCore mb ds =
 
 data Env = Env
   { envNodes :: Map OrigName ModelFunInfo
-  , envEnums :: Map OrigName C.Literal
+  , envEnums :: EnumInfo
   }
 
 -- | Process a bunch of declarations in preparation for translating to core.
@@ -47,6 +47,7 @@ quickDeclsSimp :: [P.TopDecl] ->
 quickDeclsSimp ds =
   do ds1 <- quickOrderTopDecl ds
      let enums = getEnumInfo ds1
+
      dumpPhase PhaseRename $ vcatSep $ map pp ds1
      ds2 <- quickCheckDecls ds1
      dumpPhase PhaseTypecheck $ vcatSep $ map pp ds2

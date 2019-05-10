@@ -22,8 +22,6 @@ import Language.Lustre.Panic(panic)
 newtype CoreName = CoreName OrigName
                       deriving (Show,Eq,Ord)
 
--- XXX: Support for integer ranges.
--- This would be useful to model enums, as well as "subrange [x,y] of int"
 data Type     = TInt | TReal | TBool
                 deriving Show
 

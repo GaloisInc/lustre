@@ -3,7 +3,7 @@
 {-# Language TypeSynonymInstances #-}
 -- | Translate siplified Lustre into the Core representation.
 module Language.Lustre.Transform.ToCore
-  ( getEnumInfo, evalNodeDecl
+  ( getEnumInfo, EnumInfo, evalNodeDecl
   ) where
 
 import Data.Map(Map)
@@ -25,17 +25,33 @@ import Language.Lustre.Panic
 import Language.Lustre.Pretty(showPP)
 
 
+data EnumInfo = EnumInfo
+  { enumConMap :: !(Map OrigName C.Literal)
+    -- ^ Maps enum constructor to value
+
+  , enumMax :: !(Map OrigName C.Literal)
+    -- ^ Maps enum type to largest con
+  }
+
+blankEnumInfo :: EnumInfo
+blankEnumInfo = EnumInfo { enumConMap = Map.empty, enumMax = Map.empty }
+
 -- | Compute info about enums from some top-level declarations.
 -- The result maps the original names of enum constructors, to numeric
 -- expressions that should represent them.
-getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> Map OrigName C.Literal
-getEnumInfo tds = foldr addDefs Map.empty enums
+getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> EnumInfo
+getEnumInfo tds = foldr addDefs blankEnumInfo enums
   where
-  enums = [ is | P.DeclareType
-                 P.TypeDecl { P.typeDef = Just (P.IsEnum is) } <- tds ]
+  enums = [ (identOrigName n,is) | P.DeclareType
+                 P.TypeDecl { P.typeName = n
+                            , P.typeDef = Just (P.IsEnum is) } <- tds ]
 
   -- The constructors of an enum are represented by 0, 1, .. etc
-  addDefs is m = foldr addDef m (zipWith mkDef is [ 0 .. ])
+  addDefs (n,is) ei = EnumInfo
+    { enumConMap = foldr addDef (enumConMap ei) (zipWith mkDef is [ 0 .. ])
+    , enumMax = Map.insert n (C.Int (fromIntegral (length is) - 1))
+                             (enumMax ei)
+    }
 
   mkDef i n = (identOrigName i, C.Int n)
 
@@ -46,8 +62,8 @@ getEnumInfo tds = foldr addDefs Map.empty enums
 -- We don't return a mapping from original name to core names because
 -- for the moment this mapping is very simple: just use 'origNameToCoreName'
 evalNodeDecl ::
-  Map OrigName C.Literal {- ^ Enum constructor -> expr to represent it -} ->
-  P.NodeDecl               {- ^ Simplified source Lustre -} ->
+  EnumInfo              {- ^ Information about enums -} ->
+  P.NodeDecl            {- ^ Simplified source Lustre -} ->
   LustreM C.Node
 evalNodeDecl enumCs nd
   | null (P.nodeStaticInputs nd)
@@ -114,7 +130,7 @@ evalType ty =
 type M = StateT St LustreM
 
 
-runProcessNode :: Map OrigName C.Literal -> M a -> LustreM a
+runProcessNode :: EnumInfo -> M a -> LustreM a
 runProcessNode enumCs m =
   do (a,_finS) <- runStateT st m
      pure a
@@ -137,7 +153,7 @@ data St = St
     -- ^ Types of local variables from the source.
     -- These shouldn't change.
 
-  , stGlobEnumCons  :: Map OrigName C.Literal
+  , stGlobEnumCons  :: EnumInfo
     -- ^ Definitions for enum constants.
     -- Currently we assume that these would be int constants.
 
@@ -168,7 +184,7 @@ getPropertyNames :: M [(Label,CoreName)]
 getPropertyNames = stPropertyNames <$> get
 
 -- | Get the map of enumeration constants.
-getEnumCons :: M (Map OrigName C.Literal)
+getEnumCons :: M EnumInfo
 getEnumCons = stGlobEnumCons <$> get
 
 -- | Get the collection of local types.
@@ -186,7 +202,7 @@ addBinder (i C.::: t) = addLocal i t
 newIdentFrom :: Text -> M CoreName
 newIdentFrom stem =
   do x <- inBase newInt
-     let i = Ident { identLabel    = Label { labText = stem, labRange = noLoc }
+     let i = Ident { identLabel    = toLabel stem
                    , identResolved = Nothing
                    }
          o = OrigName { rnUID     = x
@@ -196,12 +212,16 @@ newIdentFrom stem =
                       }
      pure (coreNameFromOrig o)
 
+
+toLabel :: Text -> Label
+toLabel t = Label { labText = t, labRange = noLoc }
+
+-- XXX: Currently core epxressions have no locations.
+noLoc :: SourceRange
+noLoc = SourceRange { sourceFrom = noPos, sourceTo = noPos }
   where
-  -- XXX: Currently core epxressions have no locations.
-  noLoc = SourceRange { sourceFrom = noPos, sourceTo = noPos }
   noPos = SourcePos { sourceIndex = -1, sourceLine = -1
                     , sourceColumn = -1, sourceFile = "" }
-
 
 
 -- | Remember an equation.
@@ -255,12 +275,58 @@ addPropertyName t i =
 evalInputBinder :: P.InputBinder -> M C.Binder
 evalInputBinder inp =
   case inp of
-    P.InputBinder b -> evalBinder b
+    P.InputBinder b -> do b1 <- evalBinder b
+                          inputTypeAsmps b1 (P.cType (P.binderType b))
+                          pure b1
     P.InputConst i t ->
       panic "evalInputBinder"
         [ "Unexpected constant parameter"
         , "*** Name: " ++ showPP i
         , "*** Type: " ++ showPP t ]
+
+
+-- | Type assumptions for an input.
+-- Currently these are assumptions arising from sub-range types and enums.
+inputTypeAsmps :: C.Binder -> P.Type -> M ()
+inputTypeAsmps (v C.::: ct) ty =
+
+  case ty of
+    P.NamedType i ->
+      do x <- getEnumCons
+         case Map.lookup (nameOrigName i) (enumMax x) of
+           Just s -> inRange (C.Int 0) s
+           Nothing -> panic "inputTypeAsmps"
+                        [ "Undefined `enum` type", showPP i ]
+
+    P.IntSubrange l u ->
+      do le <- evalConstExpr l
+         ue <- evalConstExpr u
+         inRange le ue
+
+    P.IntType        -> pure ()
+    P.RealType       -> pure ()
+    P.BoolType       -> pure ()
+    P.TypeRange {}   -> panic "evalTypeAsmps" [ "Unexpected type range" ]
+    P.ArrayType {}   -> panic "evalTypeAsmps"
+                         [ "Unexpected array type"
+                         , "*** Type: " ++ showPP ty
+                         ]
+
+
+  where
+  lit l = C.Lit l ct
+
+  inRange x y =
+    do let va   = C.Var v
+           lb   = C.Prim C.Leq [ lit x, va ]
+           ub   = C.Prim C.Leq [ va, lit y ]
+           prop = C.Prim C.And [ lb, ub ]
+           lab  = C.coreNameTextName v <> "_bounds"
+       pn <- newIdentFrom lab
+       let lhs = pn C.::: C.TBool `C.On` C.clockOfCType ct
+           eqn = lhs C.:= C.Atom prop
+       addEqn eqn
+       addAssertName (toLabel lab) pn
 
 
 -- | Add the type of a binder to the environment.
@@ -390,7 +456,7 @@ evalConstExpr expr =
     P.ERange _ e -> evalConstExpr e
     P.Var i ->
       do cons <- getEnumCons
-         case Map.lookup (nameOrigName i) cons of
+         case Map.lookup (nameOrigName i) (enumConMap cons) of
           Just e -> pure e
           Nothing -> bad "undefined constant symbol"
     P.Lit l -> pure l
