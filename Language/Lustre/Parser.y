@@ -746,8 +746,8 @@ EndBy1_rev(sep,thing) :: { [thing] }
 
 SepEndBy1(sep,thing) :: { [thing] }
   : thing                           { [$1] }
-  | thing ';'                       { [$1] }
-  | thing ';' SepEndBy1(sep,thing)  { $1 : $3 }
+  | thing sep                       { [$1] }
+  | thing sep SepEndBy1(sep,thing)  { $1 : $3 }
 
 
 
