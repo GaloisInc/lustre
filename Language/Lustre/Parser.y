@@ -327,7 +327,8 @@ builtInType :: { Type }
 -- Node Declarations -----------------------------------------------------------
 
 extDecl :: { NodeDecl }
-  : Perhaps('unsafe') externKW nodeType ident nodeProfile Perhaps(';')
+  : Perhaps('unsafe') 'extern' nodeType ident nodeProfile Perhaps(';')
+    Opt(contract)
       { NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = True
@@ -337,14 +338,29 @@ extDecl :: { NodeDecl }
           , nodeProfile = thing $5
           , nodeDef     = Nothing
           , nodeRange   = optR $1 $2 <-> optR $6 $5
+          , nodeContract = $7
           }
       }
 
--- ISD: I am not sure if these are different in any way, but kind2 uses
--- 'imported', while Lustre seems to use 'extern' instead.
-externKW :: { SourceRange }
-  : 'extern'   { $1 }
-  | 'imported' { $1 }
+-- We treat 'imported' the same as 'extern'.  Hopefully that's the intention.
+extDecl :: { NodeDecl }
+  : Perhaps('unsafe') nodeType 'imported' ident nodeProfile Perhaps(';')
+    Opt(contract)
+      { NodeDecl
+          { nodeSafety  = isUnsafe $1
+          , nodeExtern  = True
+          , nodeType    = thing $2
+          , nodeName    = $4
+          , nodeStaticInputs = [] -- XXX
+          , nodeProfile = thing $5
+          , nodeDef     = Nothing
+          , nodeRange   = optR $1 $2 <-> optR $6 $5
+          , nodeContract = $7
+          }
+      }
+
+
+
 
 nodeDecl :: { NodeDecl }
   : Perhaps('unsafe') nodeType ident staticParams nodeProfile Perhaps(';')
