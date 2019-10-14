@@ -467,7 +467,7 @@ LHS :: { LHS Expression }
 
 params(par) :: { Located par }
   : '(' ')'                      { lat ($1 <-> $2) [] }
-  | '(' SepEndBy1(',',par) ')'   { lat ($1 <-> $3) (concat $2) }
+  | '(' SepEndBy1(';',par) ')'   { lat ($1 <-> $3) (concat $2) }
 
 inputParam :: { [InputBinder] }
   : varDecl                      { map InputBinder $1 }
