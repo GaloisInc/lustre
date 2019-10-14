@@ -171,6 +171,8 @@ evalNode nd =
                                , nodeOutputs = outBs
                                }
 
+     newC <- traverse evalContract (nodeContract nd)
+
      (simp,newDef) <-
         case nodeDef nd of
           Nothing -> pure (Map.empty, Nothing)
@@ -181,7 +183,9 @@ evalNode nd =
 
      finishNode (identOrigName (nodeName nd)) simp
 
-     pure nd { nodeProfile = newProf, nodeDef = newDef }
+     pure nd { nodeProfile = newProf
+             , nodeContract = newC
+             , nodeDef = newDef }
 
 
 inB :: InputBinder -> Binder
@@ -836,6 +840,27 @@ evalSlice s = ArraySlice { arrayStart = exprToInteger (arrayStart s)
                          , arrayEnd   = exprToInteger (arrayEnd s)
                          , arrayStep  = exprToInteger <$> arrayStep s
                          }
+
+
+evalContract :: Contract -> NosM Contract
+evalContract c =
+  do cis <- mapM evalContractItem (contractItems c)
+     pure c { contractItems = cis }
+
+evalContractItem :: ContractItem -> NosM ContractItem
+evalContractItem ci =
+  case ci of
+
+    Assume e ->
+      do ~(SLeaf e1) <- evalExpr e
+         pure (Assume e1)
+
+    Guarantee e ->
+      do ~(SLeaf e1) <- evalExpr e
+         pure (Guarantee e1)
+
+    _ -> panic "evalContractItem" ["Unsupported contract item."]
+
 
 
 --------------------------------------------------------------------------------

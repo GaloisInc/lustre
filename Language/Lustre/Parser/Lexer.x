@@ -51,13 +51,14 @@ $hexdigit       = [0-9a-fA-F]
 @special_comment = "--%"($letter|$digit)*
 @not_star        = \n | ~\*
 
+
 @not_cparen     = [^\*\)] | \n
 @block1_cont    = @not_star | ("*"+ @not_cparen)
-@block_comment1 = "(*" @block1_cont* "*"+ ")"
+@block_comment1 = "(*" [^@] @block1_cont* "*"+ ")"
 
 @not_fslash     = [^\*\/] | \n
 @block2_cont    = @not_star | "*"+ @not_fslash
-@block_comment2 = "/*" @block2_cont* "*"+ "/"
+@block_comment2 = "/*" [^@] @block2_cont* "*"+ "/"
 :-
 
 $white+         { return [] }

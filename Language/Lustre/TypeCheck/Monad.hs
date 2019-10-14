@@ -406,4 +406,15 @@ zonkEqn eqn =
     Realizable {} -> pure eqn
     Define lhs e -> Define lhs <$> zonkExpr e
 
+zonkContract :: Contract -> M Contract
+zonkContract c =
+  do cis <- mapM zonkContractItem (contractItems c)
+     pure c { contractItems = cis }
+
+zonkContractItem :: ContractItem -> M ContractItem
+zonkContractItem ci =
+  case ci of
+    Assume e    -> Assume    <$> zonkExpr e
+    Guarantee e -> Guarantee <$> zonkExpr e
+    _ -> panic "zonkContractItem" ["unsupported contract item"]
 

@@ -114,7 +114,7 @@ checkNodeDecl nd k =
     inClockScope $
     allowTemporal (nodeType nd == Node) $
     allowUnsafe   (nodeSafety nd == Unsafe) $
-    do (ps,(prof,bod)) <-
+    do (ps,(prof,ctr,bod)) <-
           checkStaticParams (nodeStaticInputs nd) $
           do when (nodeExtern nd) $
                case nodeDef nd of
@@ -123,31 +123,33 @@ checkNodeDecl nd k =
                            ["Node:" <+> pp (nodeName nd)]
                  Nothing -> pure ()
              let prof = nodeProfile nd
-             (ins,(outs,bod)) <-
+             (ins,(outs,(ctr,bod))) <-
                 checkInputBinders  (nodeInputs prof) $
                 checkOutputBinders (nodeOutputs prof) $
-                do case nodeContract nd of
-                     Nothing -> pure ()
-                     Just _  -> notYetImplemented "Node contracts"
-
-                   case nodeDef nd of
-                     Nothing ->
-                        do unless (nodeExtern nd) $ reportError $ nestedError
-                                  "Missing node definition"
-                                  ["Node:" <+> pp (nodeName nd)]
-                           pure Nothing
-                     Just b -> Just <$> checkNodeBody b
+                do c <- traverse checkContract (nodeContract nd)
+                   b <- case nodeDef nd of
+                         Nothing ->
+                            do unless (nodeExtern nd)
+                                $ reportError $ nestedError
+                                      "Missing node definition"
+                                      ["Node:" <+> pp (nodeName nd)]
+                               pure Nothing
+                         Just b -> Just <$> checkNodeBody b
+                   pure (c,b)
 
              let newProf = NodeProfile { nodeInputs = ins
                                        , nodeOutputs = outs
                                        }
 
+             ctr1 <- traverse zonkContract ctr
              bod1 <- traverse zonkBody bod
 
-             -- XXX: contract
-             pure (newProf, bod1)
+             pure (newProf, ctr1, bod1)
 
-       pure nd { nodeStaticInputs = ps, nodeProfile = prof, nodeDef = bod }
+       pure nd { nodeStaticInputs = ps
+               , nodeProfile = prof
+               , nodeContract = ctr
+               , nodeDef = bod }
 
 checkStaticParam :: StaticParam -> M a -> M (StaticParam,a)
 checkStaticParam sp m =
@@ -1054,6 +1056,29 @@ inferSelector sel ty =
             [ "Selector:" <+> pp sel
             , "Input:" <+> pp ty
             ]
+
+
+checkContract :: Contract -> M Contract
+checkContract c =
+  do cis <- mapM checkContractItem (contractItems c)
+     pure c { contractItems = cis }
+
+checkContractItem :: ContractItem -> M ContractItem
+checkContractItem ci =
+  case ci of
+    Assume e ->
+      do (e1,clk) <- checkExpr1 e BoolType
+         sameClock BaseClock clk    -- do we want to support others?
+         pure (Assume e1)
+
+    Guarantee e ->
+      do (e1,clk) <- checkExpr1 e BoolType
+         sameClock BaseClock clk    -- do we want to support others?
+         pure (Guarantee e1)
+
+    _ -> notYetImplemented "contract feature"
+
+
 
 
 

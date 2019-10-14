@@ -82,6 +82,9 @@ evalTopDecl env td =
     DeclareConst cd     -> evalConstDef env cd
     DeclareNode nd      -> evalNodeDecl env nd
     DeclareNodeInst nid -> evalNodeInstDecl env nid
+    DeclareContract {}  ->
+      panic "evalTopDecl"
+        [ "Declaring top-level contracts is not yet supported." ]
 
 -- | Evaluate multiple top-level declarations from the same modeule.
 evalTopDecls :: Env -> [TopDecl ] -> Env
@@ -438,55 +441,58 @@ evalNodeDecl env nd =
 -- We assume that the arguments have been evaluated already.
 evalNode :: Env -> NodeDecl -> [StaticArg] -> Env
 evalNode env nd args =
+  envRet2 { readyDecls = DeclareNode newNode : readyDecls envRet2
+          , nodeInfo   = Map.insert name newProf (nodeInfo envRet2)
+          }
+  where
+  name      = identOrigName (nodeName nd)
 
-  case nodeDef nd of
-    -- XXX
-    Nothing -> panic "evalNode" [ "Not yet implemented:"
-                                , "*** Node without a definition"
-                                , "*** Name: " ++ showPP (nodeName nd)
-                                ]
-    Just body ->
-         envRet2 { readyDecls = DeclareNode newNode : readyDecls envRet2
-                 , nodeInfo   = Map.insert name newProf (nodeInfo envRet2)
-                 }
-      where
-      name      = identOrigName (nodeName nd)
+  -- 1. bind the provided static arguments.
+  env0      = addStaticParams (nodeStaticInputs nd) args env
+  newProf   = evalNodeProfile env0 (nodeProfile nd)
 
-      -- 1. bind the provided static arguments.
-      env0      = addStaticParams (nodeStaticInputs nd) args env
-      newProf   = evalNodeProfile env0 (nodeProfile nd)
+  -- 2. evaluate constants in the locals
+  (bs,env1) = evalLocalDecls env0 $ case nodeDef nd of
+                                      Nothing -> []
+                                      Just body -> nodeLocals body
 
-      -- 2. evaluate constants in the locals
-      (bs,env1) = evalLocalDecls env0 (nodeLocals body)
+  -- 3. "blackhole" the name seed, which should not be used.
+  -- This a strict field, so we can't put a panic there, so instead
+  -- we just make up a very invalid value, which would hopefully be
+  -- easy to spot, in case it get used accidentally.
+  env2      = env1 { envNameInstSeed = invalidNameSeed 77 }
 
-      -- 3. "blackhole" the name seed, which should not be used.
-      -- This a strict field, so we can't put a panic there, so instead
-      -- we just make up a very invalid value, which would hopefully be
-      -- easy to spot, in case it get used accidentally.
-      env2      = env1 { envNameInstSeed = invalidNameSeed 77 }
+  -- 4. Evaluate the equations in the body of a node.
+  ((eqs,ctr),newLs,insts,info,newS) =
+      runNameStatic (envNameInstSeed env)
+                    (envCurMod env) $
+        do newCtr <- traverse (evalContract env2) (nodeContract nd)
+           -- here we assume that locals are in scope in the contract?
 
-      -- 4. Evaluate the equations in the body of a node.
-      (eqs,newLs,insts,info,newS) =
-          runNameStatic (envNameInstSeed env)
-                        (envCurMod env)
-                        (concat <$> mapM (evalEqn env2) (nodeEqns body))
+           newEqs <- case nodeDef nd of
+                      Nothing   -> pure []
+                      Just body -> traverse (evalEqn env2) (nodeEqns body)
+           pure (concat newEqs, newCtr)
 
-      -- Results, updating the *original* environment.
-      envRet1 = env { envNameInstSeed = newS
-                    , envCallSiteMap = Map.insert name info (envCallSiteMap env)
-                    }
-      envRet2 = addEvaluatedNodeInsts envRet1 insts
+  -- Results, updating the *original* environment.
+  envRet1 = env { envNameInstSeed = newS
+                , envCallSiteMap = Map.insert name info (envCallSiteMap env)
+                }
+  envRet2 = addEvaluatedNodeInsts envRet1 insts
 
 
-      newDef    = NodeBody
-                    { nodeLocals = map LocalVar (newLs ++ bs)
-                    , nodeEqns   = eqs
-                    }
+  newDef    = case nodeDef nd of
+                Nothing -> Nothing
+                Just _ -> Just NodeBody
+                            { nodeLocals = map LocalVar (newLs ++ bs)
+                            , nodeEqns   = eqs
+                            }
 
-      newNode   = nd { nodeStaticInputs = []
-                     , nodeProfile = newProf
-                     , nodeDef = Just newDef
-                    }
+  newNode   = nd { nodeStaticInputs = []
+                 , nodeProfile = newProf
+                 , nodeContract = ctr
+                 , nodeDef = newDef
+                }
 
 
 
@@ -524,22 +530,22 @@ evalLocalDecls env ds = ( [ evalBinder env1 b | LocalVar b <- ds ]
   where
   env1 = foldl' evalConstDef env [ c | LocalConst c <- ds ]
 
-{-
-evalContractItems env cis = undefined
-  where
-  consts = [ (c,e) | GhostConst c _ e <- cis ]
-  evalC env (c,e) = let v = evalExprToVal env e
-                        n = Unqual Ghost c
-                    in env { 
 
--- | Assumes that ghost variables have been ordered.
-evalContractItem :: Env -> ContractItem -> M [ContractItem]
+evalContract :: Env -> Contract -> M Contract
+evalContract env c =
+  do cis <- mapM (evalContractItem env) (contractItems c)
+     pure c { contractItems = cis }
+
+evalContractItem :: Env -> ContractItem -> M ContractItem
 evalContractItem env ci =
   case ci of
+    Assume e           -> Assume <$> evalDynExpr NestedExpr env e
+    Guarantee e        -> Guarantee <$> evalDynExpr NestedExpr env e
+    _ -> panic "evalContractItem"
+          [ "Unsupported contract iterm.  For now just `assume`/`guarante`."]
+{-
     GhostConst c mbT e -> GhostConst c 
     GhostVar   b e     ->
-    Assume e           ->
-    Guarantee e        ->
     Mode m as ts       ->
     Import c is os     ->
 -}

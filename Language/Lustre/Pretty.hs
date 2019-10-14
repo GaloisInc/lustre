@@ -155,6 +155,7 @@ instance Pretty NodeDecl where
     pp (nodeName nd) <+>
     ppSaticParams (nodeStaticInputs nd) <+>
     pp (nodeProfile nd) $$
+    maybe "/* no contract */" pp (nodeContract nd) $$
     bodyDoc
     where bodyDoc = case nodeDef nd of
                       Nothing -> semi
