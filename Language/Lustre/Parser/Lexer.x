@@ -138,6 +138,7 @@ $white+         { return [] }
 
 "unsafe"            { lexeme TokKwUnsafe }
 "extern"            { lexeme TokKwExtern }
+"imported"          { lexeme TokKwImported }
 "node"              { lexeme TokKwNode }
 "function"          { lexeme TokKwFunction }
 "returns"           { lexeme TokKwReturns }
@@ -203,6 +204,7 @@ data Token =
 
   | TokKwExtern
   | TokKwUnsafe
+  | TokKwImported
   | TokKwNode
   | TokKwFunction
   | TokKwReturns

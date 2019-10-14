@@ -66,6 +66,7 @@ import Language.Lustre.Panic
   '<>'        { Lexeme { lexemeRange = $$, lexemeToken = TokNotEq } }
 
   'extern'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwExtern } }
+  'imported'  { Lexeme { lexemeRange = $$, lexemeToken = TokKwImported } }
   'unsafe'    { Lexeme { lexemeRange = $$, lexemeToken = TokKwUnsafe } }
   'node'      { Lexeme { lexemeRange = $$, lexemeToken = TokKwNode } }
   'function'  { Lexeme { lexemeRange = $$, lexemeToken = TokKwFunction } }
@@ -326,7 +327,7 @@ builtInType :: { Type }
 -- Node Declarations -----------------------------------------------------------
 
 extDecl :: { NodeDecl }
-  : Perhaps('unsafe') 'extern' nodeType ident nodeProfile Perhaps(';')
+  : Perhaps('unsafe') externKW nodeType ident nodeProfile Perhaps(';')
       { NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = True
@@ -338,6 +339,12 @@ extDecl :: { NodeDecl }
           , nodeRange   = optR $1 $2 <-> optR $6 $5
           }
       }
+
+-- ISD: I am not sure if these are different in any way, but kind2 uses
+-- 'imported', while Lustre seems to use 'extern' instead.
+externKW :: { SourceRange }
+  : 'extern'   { $1 }
+  | 'imported' { $1 }
 
 nodeDecl :: { NodeDecl }
   : Perhaps('unsafe') nodeType ident staticParams nodeProfile Perhaps(';')
