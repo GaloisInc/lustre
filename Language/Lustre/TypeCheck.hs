@@ -116,17 +116,19 @@ checkNodeDecl nd k =
     allowUnsafe   (nodeSafety nd == Unsafe) $
     do (ps,(prof,ctr,bod)) <-
           checkStaticParams (nodeStaticInputs nd) $
-          do when (nodeExtern nd) $
+          do {-when (nodeExtern nd) $
                case nodeDef nd of
                  Just _ -> reportError $ nestedError
                            "Extern node with a definition."
                            ["Node:" <+> pp (nodeName nd)]
-                 Nothing -> pure ()
+                 Nothing -> pure ()-}
              let prof = nodeProfile nd
              (ins,(outs,(ctr,bod))) <-
                 checkInputBinders  (nodeInputs prof) $
                 checkOutputBinders (nodeOutputs prof) $
                 do c <- traverse checkContract (nodeContract nd)
+                   -- XXX: maybe check that outputs are not mentioned in assume?
+
                    b <- case nodeDef nd of
                          Nothing ->
                             do unless (nodeExtern nd)
@@ -1066,15 +1068,15 @@ checkContract c =
 checkContractItem :: ContractItem -> M ContractItem
 checkContractItem ci =
   case ci of
-    Assume e ->
+    Assume l e ->
       do (e1,clk) <- checkExpr1 e BoolType
          sameClock BaseClock clk    -- do we want to support others?
-         pure (Assume e1)
+         pure (Assume l e1)
 
-    Guarantee e ->
+    Guarantee l e ->
       do (e1,clk) <- checkExpr1 e BoolType
          sameClock BaseClock clk    -- do we want to support others?
-         pure (Guarantee e1)
+         pure (Guarantee l e1)
 
     _ -> notYetImplemented "contract feature"
 

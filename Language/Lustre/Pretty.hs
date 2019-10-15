@@ -155,7 +155,7 @@ instance Pretty NodeDecl where
     pp (nodeName nd) <+>
     ppSaticParams (nodeStaticInputs nd) <+>
     pp (nodeProfile nd) $$
-    maybe "/* no contract */" pp (nodeContract nd) $$
+    maybe empty pp (nodeContract nd) $$
     bodyDoc
     where bodyDoc = case nodeDef nd of
                       Nothing -> semi
@@ -480,11 +480,10 @@ instance Pretty Contract where
 instance Pretty ContractItem where
   ppPrec _ item =
     case item of
-      GhostConst x mbT e -> "const" <+> pp x <+> sig <+> "=" <+> pp e PP.<> semi
-        where sig = maybe empty (\t -> ":" <+> pp t) mbT
+      GhostConst d -> pp d
       GhostVar b e -> "var" <+> pp b <+> "=" <+> pp e PP.<> semi
-      Assume e -> "assume" <+> pp e PP.<> semi
-      Guarantee e -> "guarantee" <+> pp e PP.<> semi
+      Assume _ e -> "assume" <+> pp e PP.<> semi
+      Guarantee _ e -> "guarantee" <+> pp e PP.<> semi
       Mode i res ens -> "mode" <+> pp i <+> "("
                         $$ nest 2 (vcat (map (ppClause "requre") res))
                         $$ nest 2 (vcat (map (ppClause "ensure") ens))

@@ -126,10 +126,10 @@ instance Defines LocalDecl where
 instance Defines ContractItem where
   defines ci =
     case ci of
-      GhostConst x _ _   -> addDef x AConst
+      GhostConst d       -> defines d
       GhostVar   b _     -> addDef (binderDefines b) AVal
-      Assume _           -> pure ()
-      Guarantee _        -> pure ()
+      Assume _ _         -> pure ()
+      Guarantee _ _      -> pure ()
       Mode _ _ _         -> pure () -- XXX: node references?
       Import _ _ _       -> pure () -- XXX: node references
 

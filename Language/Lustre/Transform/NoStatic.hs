@@ -467,7 +467,10 @@ evalNode env nd args =
       runNameStatic (envNameInstSeed env)
                     (envCurMod env) $
         do newCtr <- traverse (evalContract env2) (nodeContract nd)
-           -- here we assume that locals are in scope in the contract?
+           -- XXX: here we assume that locals are in scope in the contract?
+           -- also, function calls in the contract become ordinary locals,
+           -- instead of ghost variables, and we may want to distinguish
+           -- between this (e.g., if generating code).
 
            newEqs <- case nodeDef nd of
                       Nothing   -> pure []
@@ -539,8 +542,8 @@ evalContract env c =
 evalContractItem :: Env -> ContractItem -> M ContractItem
 evalContractItem env ci =
   case ci of
-    Assume e           -> Assume <$> evalDynExpr NestedExpr env e
-    Guarantee e        -> Guarantee <$> evalDynExpr NestedExpr env e
+    Assume l e      -> Assume l <$> evalDynExpr NestedExpr env e
+    Guarantee l e   -> Guarantee l <$> evalDynExpr NestedExpr env e
     _ -> panic "evalContractItem"
           [ "Unsupported contract iterm.  For now just `assume`/`guarante`."]
 {-

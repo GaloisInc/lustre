@@ -851,13 +851,13 @@ evalContractItem :: ContractItem -> NosM ContractItem
 evalContractItem ci =
   case ci of
 
-    Assume e ->
+    Assume l e ->
       do ~(SLeaf e1) <- evalExpr e
-         pure (Assume e1)
+         pure (Assume l e1)
 
-    Guarantee e ->
+    Guarantee l e ->
       do ~(SLeaf e1) <- evalExpr e
-         pure (Guarantee e1)
+         pure (Guarantee l e1)
 
     _ -> panic "evalContractItem" ["Unsupported contract item."]
 

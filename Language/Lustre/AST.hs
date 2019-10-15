@@ -196,10 +196,10 @@ data Contract = Contract
   , contractItems :: [ContractItem]
   } deriving Show
 
-data ContractItem = GhostConst Ident (Maybe Type) Expression
-                  | GhostVar   Binder             Expression
-                  | Assume Expression
-                  | Guarantee Expression
+data ContractItem = GhostConst ConstDef
+                  | GhostVar   Binder Expression
+                  | Assume Label Expression
+                  | Guarantee Label Expression
                   | Mode Ident [Expression] [Expression]
                   | Import Ident [Expression] [Expression]
                     deriving Show

@@ -446,19 +446,18 @@ resolveContractItems cits =
       _             -> (cs, vs, ci : others)
 
   getIdent ci = case ci of
-                  GhostConst i _ _ -> i
-                  GhostVar b _     -> binderDefines b
+                  GhostConst d -> constName d
+                  GhostVar b _ -> binderDefines b
                   _ -> panic "getIdent (in Contract)"
                         [ "Called on non-ghost var/const decl." ]
 
 instance Resolve ContractItem where
   resolveDef ds ci =
     case ci of
-      GhostConst c mbT e -> GhostConst (lkpDef ds AConst c)
-                              <$> traverse resolve mbT <*> resolveConstExpr e
+      GhostConst d       -> GhostConst <$> resolveDef ds d
       GhostVar b e       -> GhostVar <$> resolveDef ds b <*> resolveExpr e
-      Assume e           -> Assume <$> resolveExpr e
-      Guarantee e        -> Guarantee <$> resolveExpr e
+      Assume l e         -> Assume l <$> resolveExpr e
+      Guarantee l e      -> Guarantee l <$> resolveExpr e
       -- XXX: resolve mode names
       Mode x mas mgs     -> Mode x <$> traverse resolveExpr mas
                                    <*> traverse resolveExpr mgs

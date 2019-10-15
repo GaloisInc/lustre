@@ -414,7 +414,7 @@ zonkContract c =
 zonkContractItem :: ContractItem -> M ContractItem
 zonkContractItem ci =
   case ci of
-    Assume e    -> Assume    <$> zonkExpr e
-    Guarantee e -> Guarantee <$> zonkExpr e
+    Assume l e    -> Assume l    <$> zonkExpr e
+    Guarantee l e -> Guarantee l <$> zonkExpr e
     _ -> panic "zonkContractItem" ["unsupported contract item"]
 

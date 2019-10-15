@@ -60,9 +60,9 @@ tel
 Transform `g` as follows:
 
 1. Compute name renaming:
-  a -> a1   -- choose non-clashing names
+  a -> a1   -- choose non-clashing names inputs
   b -> b1   -- ditto
-  e -> e1   -- choose non-clashing name for
+  e -> e1   -- choose non-clashing name for locals
   c -> x    -- match output with LHS
   d -> y    -- ditto
 

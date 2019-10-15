@@ -20,6 +20,7 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString as BS
 import Data.Semigroup ((<>))
 import Control.Exception(throwIO)
+import Control.Monad(foldM)
 
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Parser.Monad
@@ -329,7 +330,7 @@ builtInType :: { Type }
 extDecl :: { NodeDecl }
   : Perhaps('unsafe') 'extern' nodeType ident nodeProfile Perhaps(';')
     Opt(contract)
-      { NodeDecl
+      {% desugarContract NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = True
           , nodeType    = thing $3
@@ -346,7 +347,7 @@ extDecl :: { NodeDecl }
 extDecl :: { NodeDecl }
   : Perhaps('unsafe') nodeType 'imported' ident nodeProfile Perhaps(';')
     Opt(contract)
-      { NodeDecl
+      {% desugarContract NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = True
           , nodeType    = thing $2
@@ -366,7 +367,7 @@ nodeDecl :: { NodeDecl }
   : Perhaps('unsafe') nodeType ident staticParams nodeProfile Perhaps(';')
     Opt(contract)
     localDecls body Perhaps(';')
-      { NodeDecl
+      {% desugarContract NodeDecl
           { nodeSafety  = isUnsafe $1
           , nodeExtern  = False
           , nodeType    = thing $2
@@ -395,13 +396,15 @@ contract :: { Contract }
   | '(*@contract' ListOf1(contractItem) '*)' { mkContract $1 $2 $3 }
 
 contractItem :: { ContractItem }
-  : 'const' ident '=' expression Perhaps(';') { GhostConst $2 Nothing   $4 }
+  : 'const' ident '=' expression Perhaps(';') { GhostConst
+                                                  (toConstDef1 ($2,$4)) }
   | 'const' ident ':' type
-                  '=' expression Perhaps(';') { GhostConst $2 (Just $4) $6 }
+                  '=' expression Perhaps(';') { GhostConst
+                                                  (toConstDef1 ($2,$4,$6)) }
   | 'var'   ident ':' type
                   '=' expression Perhaps(';') { GhostVar (simpBinder $2 $4) $6 }
-  | 'assume' expression Perhaps(';')          { Assume $2 }
-  | 'guarantee' expression Perhaps(';')       { Guarantee $2 }
+  | 'assume' expression Perhaps(';')          { Assume (propName $1 $2) $2 }
+  | 'guarantee' expression Perhaps(';')       { Guarantee (propName $1 $2) $2 }
   | 'mode' ident '(' ListOf(require)
                      ListOf(ensure)
                   ')' Perhaps(';')            { Mode $2 $4 $5 }
@@ -886,29 +889,43 @@ instance ToFieldType (Label, [Label], Type) where
 
 --------------------------------------------------------------------------------
 
+
+class ToConstDef1 t where
+  toConstDef1 :: t -> ConstDef
+
+instance ToConstDef1 (Ident, Type) where
+  toConstDef1 (i,t) = ConstDef { constName = i
+                               , constType = Just t
+                               , constDef = Nothing
+                               }
+
+instance ToConstDef1 (Ident,Expression) where
+  toConstDef1 (i,e) = ConstDef { constName = i
+                               , constType = Nothing
+                               , constDef  = Just e
+                               }
+
+instance ToConstDef1 (Ident,Type,Expression) where
+  toConstDef1 (i,t,e) = ConstDef { constName = i
+                                 , constType = Just t
+                                 , constDef  = Just e
+                                 }
+
+
 class ToConstDef t where
   toConstDef :: t -> [ ConstDef ]
 
 instance ToConstDef (Ident, Type) where
-  toConstDef (i,t) = [ ConstDef { constName = i
-                                , constType = Just t
-                                , constDef = Nothing
-                                } ]
+  toConstDef x = [ toConstDef1 x ]
 
 instance ToConstDef (Ident, [Ident], Type) where
   toConstDef (i, is, t) = [ d | x <- i:is, d <- toConstDef (i,t) ]
 
 instance ToConstDef (Ident,Expression) where
-  toConstDef (i,e) = [ ConstDef { constName = i
-                                , constType = Nothing
-                                , constDef  = Just e
-                                } ]
+  toConstDef x = [ toConstDef1 x ]
 
 instance ToConstDef (Ident,Type,Expression) where
-  toConstDef (i,t,e) = [ ConstDef { constName = i
-                                  , constType = Just t
-                                  , constDef  = Just e
-                                  } ]
+  toConstDef x = [ toConstDef1 x ]
 
 --------------------------------------------------------------------------------
 
@@ -1056,6 +1073,38 @@ propName rng e = case e of
                               }
   where
   synthName = "Prop on line " <> Text.pack (show (sourceLine (sourceFrom rng)))
+
+
+
+addContractItemBody :: NodeBody -> ContractItem -> Parser NodeBody
+addContractItemBody bod ci =
+  case ci of
+    Assume l e -> pure bod { nodeEqns = Assert l e : nodeEqns bod }
+    Guarantee l e -> pure bod { nodeEqns = Property l e : nodeEqns bod }
+    GhostConst d -> pure bod { nodeLocals = LocalConst d : nodeLocals bod }
+    GhostVar b e -> pure bod { nodeLocals = LocalVar b : nodeLocals bod
+                             , nodeEqns = Define [ LVar (binderDefines b) ] e
+                                        : nodeEqns bod
+                             }
+    Mode i _ _ -> happyErrorAt (sourceFrom (range i))
+    Import i _ _ -> happyErrorAt (sourceFrom (range i))
+
+desugarContract :: NodeDecl -> Parser NodeDecl
+desugarContract d =
+  case nodeContract d of
+    Nothing -> pure d
+    Just c  ->
+      do b <- foldM addContractItemBody bod0 (contractItems c)
+         pure d { nodeDef = Just b, nodeContract = Nothing }
+  where
+  bod0 = case nodeDef d of
+           Nothing -> NodeBody { nodeLocals = [], nodeEqns = [] }
+           Just b  -> b
+
+
+
+
+--------------------------------------------------------------------------------
 
 
 
