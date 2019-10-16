@@ -399,7 +399,7 @@ zonkBody b =
 zonkEqn :: Equation -> M Equation
 zonkEqn eqn =
   case eqn of
-    Assert p e -> Assert p <$> zonkExpr e
+    Assert p ty e -> Assert p ty <$> zonkExpr e
     Property p e -> Property p <$> zonkExpr e
     IsMain {} -> pure eqn
     IVC {} -> pure eqn

@@ -397,7 +397,7 @@ instance Resolve LocalDecl where
 instance Resolve Equation where
   resolveDef _ eqn =
     case eqn of
-      Assert n e   -> Assert n   <$> resolveExpr e
+      Assert n t e -> Assert n t <$> resolveExpr e
       Property n e -> Property n <$> resolveExpr e
       Define lhs e -> Define     <$> traverse resolve lhs <*> resolveExpr e
       IsMain _     -> pure eqn

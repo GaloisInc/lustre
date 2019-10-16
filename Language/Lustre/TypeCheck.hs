@@ -5,7 +5,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           Data.List (find,transpose)
-import Control.Monad(when,unless,zipWithM_,zipWithM,foldM)
+import Control.Monad(unless,zipWithM_,zipWithM,foldM)
 import Text.PrettyPrint as PP
 import Data.List(group,sort)
 import Data.Traversable(for)
@@ -598,10 +598,10 @@ checkEquation :: Equation -> M Equation
 checkEquation eqn =
   enterRange $
   case eqn of
-    Assert l e ->
+    Assert l ty e ->
       do (e',clk) <- checkExpr1 e BoolType
          sameClock BaseClock clk    -- do we want to support others?
-         pure (Assert l e')
+         pure (Assert l ty e')
 
     Property l e ->
       do (e',clk) <- checkExpr1 e BoolType

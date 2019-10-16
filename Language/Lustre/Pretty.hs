@@ -177,7 +177,10 @@ instance Pretty LocalDecl where
 instance Pretty Equation where
   ppPrec _ eqn =
     case eqn of
-      Assert _ e -> "assert" <+> pp e
+      Assert _ ty e -> "assert" <+> tyd <+> pp e
+        where tyd = case ty of
+                      AssertPre -> empty
+                      AssertEnv -> "/*env*/"
       Define ls e -> lhs <+> "=" <+> pp e
         where lhs = case ls of
                       [] -> "()"

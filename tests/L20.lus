@@ -1,0 +1,14 @@
+
+node imported sqrt (x : real) returns (y : real);
+/*@contract
+    assume x >= 0.0;
+    guarantee y >= 0.0 and y * y = x;
+*/
+
+node test (i : real) returns (j : real)
+let
+  j = sqrt(i);
+tel
+
+
+

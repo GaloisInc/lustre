@@ -40,6 +40,7 @@ module Language.Lustre.AST
   , NodeBody(..)
   , LocalDecl(..)
   , Equation(..)
+  , AssertType(..)
   , LHS(..)
   , Selector(..)
   , ArraySlice(..)
@@ -274,13 +275,20 @@ data LocalDecl  = LocalVar Binder
                 | LocalConst ConstDef
                   deriving Show
 
-data Equation   = Assert Label Expression     -- ^ Assuming this
+data Equation   = Assert Label AssertType Expression     -- ^ Assuming this
                 | Property Label Expression   -- ^ Prove this
                 | IsMain SourceRange          -- ^ This is the main node,
                                               -- use it if nothing specified
                 | IVC [Ident]
                 | Realizable [Ident]
                 | Define [LHS Expression] Expression
+                  deriving Show
+
+data AssertType = AssertPre -- failure of this assertion indicates an
+                            -- error in the system.
+
+                | AssertEnv -- failure of this assertion idicates an
+                            -- unreachable system state.
                   deriving Show
 
 data LHS e      = LVar Ident
@@ -547,7 +555,7 @@ argRangeMaybe arg =
 eqnRangeMaybe :: Equation -> Maybe SourceRange
 eqnRangeMaybe eqn =
   case eqn of
-    Assert _ e -> exprRangeMaybe e
+    Assert _ _ e -> exprRangeMaybe e
     Property _ e -> exprRangeMaybe e
     IsMain r -> Just r
     IVC is ->

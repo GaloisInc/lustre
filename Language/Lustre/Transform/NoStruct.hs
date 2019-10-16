@@ -333,10 +333,10 @@ evalEqn :: Equation -> NosM [Equation]
 evalEqn eqn =
   case eqn of
 
-    Assert x e ->
+    Assert x ty e ->
       do e' <- evalExpr e
          pure (case e' of
-                 SLeaf b -> [ Assert x b ]
+                 SLeaf b -> [ Assert x ty b ]
                  _ -> panic "evalEqn" ["Assert expects a bool"])
 
     Property x e ->

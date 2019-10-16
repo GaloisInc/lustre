@@ -558,7 +558,7 @@ evalEqn :: Env -> Equation -> M [Equation]
 evalEqn env eqn =
   collectFunEqns $
   case eqn of
-    Assert x e    -> Assert x <$> evalDynExpr NestedExpr env e
+    Assert x t e   -> Assert x t <$> evalDynExpr NestedExpr env e
     Property x e  -> Property x <$> evalDynExpr NestedExpr env e
     Define ls e   -> let lhs = map (evalLHS env) ls
                      in Define lhs <$> evalDynExpr (TopExpr lhs) env e

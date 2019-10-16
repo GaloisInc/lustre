@@ -463,7 +463,8 @@ body :: { Located [Equation] }
   : 'let' ListOf1(equation) 'tel'   { lat ($1 <-> $3) $2 }
 
 equation :: { Equation }
-  : 'assert' expression ';'                     { Assert (propName $1 $2) $2 }
+  : 'assert' expression ';'                     { Assert (propName $1 $2)
+                                                         AssertPre $2 }
   | '--%PROPERTY' expression ';'                { Property (propName $1 $2) $2 }
   | '--%MAIN' opt_semi                          { IsMain $1 }
   | '--%IVC' SepBy1(',',ident) ';'              { IVC $2 }
@@ -1079,7 +1080,7 @@ propName rng e = case e of
 addContractItemBody :: NodeBody -> ContractItem -> Parser NodeBody
 addContractItemBody bod ci =
   case ci of
-    Assume l e -> pure bod { nodeEqns = Assert l e : nodeEqns bod }
+    Assume l e -> pure bod { nodeEqns = Assert l AssertPre e : nodeEqns bod }
     Guarantee l e -> pure bod { nodeEqns = Property l e : nodeEqns bod }
     GhostConst d -> pure bod { nodeLocals = LocalConst d : nodeLocals bod }
     GhostVar b e -> pure bod { nodeLocals = LocalVar b : nodeLocals bod

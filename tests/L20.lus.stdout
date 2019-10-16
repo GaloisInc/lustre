@@ -1,0 +1,26 @@
+PhaseToCore
+===========
+
+node (i : real)
+  returns (j$u5)
+  assumes (Implies)
+  shows (Geq)
+let
+  x : real
+    = i
+   
+  Implies : bool
+    = Implies(Geq(x, 0.0), And(Geq(j$u5, 0.0), Eq(Mul(j$u5, j$u5), x)))
+   
+  Geq : bool
+    = Geq(x, 0.0)
+tel
+
+--- Step 1 ---
+i : real  = 1.0
+j = nil
+--- Step 2 ---
+i : real  = 2.0
+j = nil
+--- Step 3 ---
+i : real  = (EOF)

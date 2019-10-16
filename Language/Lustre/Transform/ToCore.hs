@@ -354,7 +354,7 @@ evalEqn eqn =
     P.Realizable _ -> pure [] -- XXX: we should do something with these
 
     P.Property t e -> evalForm "--%PROPERTY" (addPropertyName t) e
-    P.Assert t e -> evalForm "assert" (addAssertName t) e
+    P.Assert t ty e -> evalForm "assert" (addAssertName t) e
 
     P.Define ls e ->
       case ls of

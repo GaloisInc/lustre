@@ -23,6 +23,8 @@ import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.Utils
 
+import Debug.Trace
+
 -- | Inline the calls from the given top declarations.  Resturns information
 -- about how things got renames, as well as new list of declarations.
 inlineCalls :: [NodeDecl] {- ^ Already inline decls from environment -} ->
@@ -43,6 +45,7 @@ let
   d = e5
   assume e6
   show e7
+  GLOBAL assume e8
 tel
 
 
@@ -85,8 +88,40 @@ let
   args_ok = e6[renaming] and ... others ...
   show (args_ok => e7 [renaming])
     -- note: no polarity switching, but we assume that inputs were OK
-  ...
+    -- this ensure that the spec on `f` was OK
+  GLOBAL assume e8[renaming]
+    -- no plarity switchin on global assumptions, as these are assumptions
+    -- about the environment that we just inheirt in our spec.
 
+
+3. Modular Reasoning
+
+Consider:
+   f (x : real) returns (y : real)
+   let
+      assume e1
+      show e2
+   tel
+
+Sometimes we may want to construct a proof which *assumes* that `f`
+is working correctly.  In that case, we translate `g` a bit different:
+
+node g(...) returns (...)
+  var ...
+  var a1 when t : A;   -- non-clashing names for params
+  var b1 when t : B;   -- non-clashing names for params
+let
+  ...
+  a1 = e1       -- renamed params
+  a2 = e2       -- ditto
+  -- no definitions for results
+  show (e6 [renaming])  -- prove that concrete values match expectations
+  args_ok = e6[renaming] and ... others ...
+  GLOBAL assume (args_ok => e7 [renaming])
+
+  NOTE: this assumes that guarantees do not mention any local variables.
+  if they do, then we'd have to also add the definitions of those variables.
+  ...
 -}
 
 
@@ -114,8 +149,8 @@ computeRenaming ::
   [LHS Expression]      {- ^ LHS of call site -} ->
   NodeDecl              {- ^ Function being called -} ->
   InM (Renaming, [LocalDecl], [OrigName])
-  -- ^ new used, renaming of identifiers, new locals to add
-  -- Last argument is a "call site id",  which is used for showing traces
+  -- ^ renaming of identifiers, new locals to add
+  -- Last result is a "call site id",  which is used for showing traces
   -- (i.e., a kind of inverse)
 computeRenaming cl lhs nd =
   do newBinders <-
@@ -264,7 +299,7 @@ instance Rename a => Rename (LHS a) where
 instance Rename Equation where
   rename su eqn =
     case eqn of
-      Assert x e    -> Assert x (rename su e)    -- XXX: change names?
+      Assert x ty e -> Assert x ty (rename su e)    -- XXX: change names?
       Property x e  -> Property x (rename su e)  -- XXX: change names?
       IsMain r      -> IsMain r
       Define ls e   -> Define (rename su ls) (rename su e)
@@ -318,7 +353,8 @@ inlineCallsNode nd =
                let paramDef b p = Define [LVar (rename su (binderDefines b))] p
                    paramDefs    = zipExact paramDef
                                         (map inputBinder (nodeInputs prof)) es
-                   thisEqns     = updateProps (rename su (nodeEqns def))
+                   thisEqns     = updateProps (nodeExtern cnd)
+                                              (rename su (nodeEqns def))
                (otherDefs,otherEqns,rens) <- renameEqns ready more
                pure ( newLocals ++ otherDefs
                     , paramDefs ++ thisEqns ++ otherEqns
@@ -328,8 +364,8 @@ inlineCallsNode nd =
           _ -> do (otherDefs, otherEqns, rens) <- renameEqns ready more
                   pure (otherDefs, eqn : otherEqns, rens)
 
-  updateProps eqns =
-    let asmps = [ e | Assert _ e <- eqns ]
+  updateProps extern eqns =
+    let asmps = [ e | Assert _ AssertPre e <- eqns ]
 
         addAsmps e1 = case asmps of
                         [] -> e1
@@ -338,9 +374,15 @@ inlineCallsNode nd =
                                    (foldr1 (eOp2 (range e1) And) as)
                                    e1
         upd eqn = case eqn of
-                    Assert x e   -> Property x e
-                    Property x e -> Property x (addAsmps e)
-                    _            -> eqn
+                    Assert x ty e ->
+                       case ty of
+                          AssertPre -> Property x e
+                          AssertEnv -> Assert x AssertEnv e
+
+                    Property x e
+                      | extern -> Assert x AssertEnv (addAsmps e)
+                      | otherwise -> Property x (addAsmps e)
+                    _ -> eqn
     in map upd eqns
 
 inlineDecl :: TopDecl -> InM TopDecl
