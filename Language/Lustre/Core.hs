@@ -9,7 +9,7 @@ import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
-import Text.PrettyPrint( Doc, text, (<+>)
+import Text.PrettyPrint( Doc, text, (<+>), vcat
                        , hsep, nest, parens, punctuate, comma, ($$) )
 import qualified Text.PrettyPrint as PP
 
@@ -73,6 +73,8 @@ infix 3 `On`
 
 data Node     = Node { nInputs      :: [Binder]
                      , nOutputs     :: [CoreName]
+                     , nAbstract    :: [Binder]
+                       -- ^ Locals with no definitions
 
                      , nAssuming    :: [(Label,CoreName)]
                        -- ^ Assuming that these are true
@@ -220,6 +222,7 @@ ppNode node =
                                                 (nAssuming node))
             $$ text "shows" <+> ppTuple (map (ppIdent env .snd) (nShows node))
             )
+  $$ vcat [ "var" <+> ppBinder env b | b <- nAbstract node ]
   $$ text "let"
   $$ nest 2 (vcatSep (map (ppEqnGroup env) (nEqns node)))
   $$ text "tel"
@@ -239,7 +242,9 @@ identVariants node = Map.fromList
                    $ fmap (`zip` [ 0 .. ])
                    $ Map.fromListWith (++)
                    $ map binderInfo
-                   $ nInputs node ++ [ b | g <- nEqns node, b := _ <- grpEqns g]
+                   $ nInputs node ++
+                     nAbstract node ++
+                     [ b | g <- nEqns node, b := _ <- grpEqns g]
 
   where
   binderInfo (x ::: _) = (coreNameTextName x, [x])
@@ -282,6 +287,7 @@ instance Pretty CoreName where
 -- | Compute the typing environment for a node.
 nodeEnv :: Node -> Map CoreName CType
 nodeEnv nd = Map.fromList $ map fromB (nInputs nd) ++
+                            map fromB (nAbstract nd) ++
                             map fromE (concatMap grpEqns (nEqns nd))
   where
   fromB (x ::: t) = (x,t)

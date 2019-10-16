@@ -2,15 +2,19 @@ PhaseToCore
 ===========
 
 node (i : real)
-  returns (j$u5)
+  returns (j)
   assumes (Implies)
   shows (Geq)
+var k : real
 let
+  j : real
+    = k
+   
   x : real
     = i
    
   Implies : bool
-    = Implies(Geq(x, 0.0), And(Geq(j$u5, 0.0), Eq(Mul(j$u5, j$u5), x)))
+    = Implies(Geq(x, 0.0), And(Geq(k, 0.0), Eq(Mul(k, k), x)))
    
   Geq : bool
     = Geq(x, 0.0)

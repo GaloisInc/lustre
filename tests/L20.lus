@@ -6,8 +6,10 @@ node imported sqrt (x : real) returns (y : real);
 */
 
 node test (i : real) returns (j : real)
+  var k : real;
 let
-  j = sqrt(i);
+  k = sqrt(i);
+  j = k;
 tel
 
 

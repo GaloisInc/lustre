@@ -8,11 +8,10 @@ module Language.Lustre.Transform.ToCore
 
 import Data.Map(Map)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Semigroup ( (<>) )
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Graph.SCC(stronglyConnComp)
-import Data.Graph(SCC(..))
 import MonadLib hiding (Label)
 import AlexTools(SourceRange(..),SourcePos(..))
 
@@ -72,18 +71,19 @@ evalNodeDecl enumCs nd
       do let prof = P.nodeProfile nd
          ins  <- mapM evalInputBinder (P.nodeInputs prof)
          outs <- mapM evalBinder (P.nodeOutputs prof)
-
-
-
-         locs <- mapM evalBinder
-              $ orderBinders [ b | P.LocalVar b <- P.nodeLocals def ]
+         locs <- mapM evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
 
 
          eqnss <- mapM evalEqn (P.nodeEqns def)
+         let withDef = Set.fromList
+                        [ x | eqns <- eqnss, (x C.::: _) C.:= _ <- eqns ]
+
          asts <- getAssertNames
          props <- getPropertyNames
          pure C.Node { C.nInputs   = ins
                      , C.nOutputs  = [ i | i C.::: _ <- outs ]
+                     , C.nAbstract = [ l | l@(x C.::: _) <- locs
+                                         , not (x `Set.member` withDef) ]
                      , C.nAssuming = asts
                      , C.nShows    = props
                      , C.nEqns     = C.orderedEqns (concat eqnss)
@@ -93,22 +93,6 @@ evalNodeDecl enumCs nd
                 [ "Unexpected node declaration"
                 , "*** Node: " ++ showPP nd
                 ]
-
-orderBinders :: [P.Binder] -> [P.Binder]
-orderBinders = map fromSCC . stronglyConnComp . map depNode
-  where
-  fromSCC s = case s of
-                AcyclicSCC x -> x
-                CyclicSCC xs -> panic "ToCore.orderBinders"
-                                  ( "Unexpected recursive binder group"
-                                  : map (showPP . P.binderDefines) xs
-                                  )
-  depNode b = (b, identUID (P.binderDefines b),
-                  case P.cClock (P.binderType b) of
-                    P.BaseClock -> []
-                    P.KnownClock (P.WhenClock _ _ i) -> [identUID i]
-                    P.ClockVar i -> panic "ToCore.orderBinders"
-                                    [ "Unexpected clock variable", showPP i ])
 
 
 -- | Rewrite a type, replacing named enumeration types with @int@.
@@ -354,7 +338,8 @@ evalEqn eqn =
     P.Realizable _ -> pure [] -- XXX: we should do something with these
 
     P.Property t e -> evalForm "--%PROPERTY" (addPropertyName t) e
-    P.Assert t ty e -> evalForm "assert" (addAssertName t) e
+    P.Assert t _ty e -> evalForm "assert" (addAssertName t) e
+      -- at the top-level both kinds of assert are treated as assumptions.
 
     P.Define ls e ->
       case ls of
