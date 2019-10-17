@@ -4,6 +4,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Language.Lustre.Parser.Lexer
   ( lexer
+  , testLexer
   , Lexeme(..)
   , Token(..)
   , Input(..), initialInput
@@ -13,6 +14,7 @@ module Language.Lustre.Parser.Lexer
   ) where
 import Data.Text(Text)
 import qualified Data.Text as Text
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Char(isAscii,toLower)
 import Data.Ratio((%))
@@ -49,28 +51,32 @@ $hexdigit       = [0-9a-fA-F]
 
 @line_comment    = "--"[^\%].* | "--"
 @special_comment = "--%"($letter|$digit)*
-@not_star        = \n | ~\*
+@special_block   = ("(*@" | "/*@")($letter|$digit)*
 
-
-@not_cparen     = [^\*\)] | \n
-@block1_cont    = @not_star | ("*"+ @not_cparen)
-@block_comment1 = "(*" [^@] @block1_cont* "*"+ ")"
-
-@not_fslash     = [^\*\/] | \n
-@block2_cont    = @not_star | "*"+ @not_fslash
-@block_comment2 = "/*" [^@] @block2_cont* "*"+ "/"
 :-
 
-$white+         { return [] }
-@line_comment   { return [] }
-@block_comment1 { return [] }
-@block_comment2 { return [] }
+<parenBlockComment> {
+"*)"                { setLexerState 0 >> pure [] }
+.                   ;
+\n                  ;
+}
 
-@special_comment    { specialComment }
+<slashBlockComment> {
+"*/"                { setLexerState 0 >> pure [] }
+.                   ;
+\n                  ;
+}
 
-"/*@contract"       { lexeme TokStartSlashCommentContract }
+
+<0> {
+$white+             ;
+@line_comment       ;
+@special_comment    { specialComment specialLine }
+
+"(*"                { setLexerState parenBlockComment >> pure [] }
+"/*"                { setLexerState slashBlockComment >> pure [] }
+@special_block      { specialComment specialBlock }
 "*/"                { lexeme TokEndSlashComment }
-"(*@contract"       { lexeme TokStartParenCommentContract }
 "*)"                { lexeme TokEndParenComment }
 
 "package"           { lexeme TokKwPackage }
@@ -184,7 +190,7 @@ $white+         { return [] }
 @float16            { lexeme' . TokReal . floating 16 =<< matchText }
 
 .                   { lexeme TokError }
-
+}
 
 {
 
@@ -295,7 +301,7 @@ data Token =
     deriving (Eq,Show)
 
 
-lexeme' :: Token -> Action () [Lexeme Token]
+lexeme' :: Token -> Action s [Lexeme Token]
 lexeme' t = lexeme $! t
 
 numDotDot :: Action s [ Lexeme Token ]
@@ -313,19 +319,30 @@ numDotDot =
                                                  , sourceTo = to } }
             ]
 
-specialComment :: Action s [ Lexeme Token ]
-specialComment =
+
+specialComment :: Map Text Token -> Action s [ Lexeme Token ]
+specialComment known =
   do txt <- matchText
      rng <- matchRange
      pure [ Lexeme { lexemeText = txt
                    , lexemeToken = Map.findWithDefault TokError txt known
                    , lexemeRange = rng } ]
-  where
-  known = Map.fromList [ ("--%PROPERTY", TokPragmaProperty)
-                       , ("--%MAIN", TokPragmaMain)
-                       , ("--%IVC", TokPragmaIVC)
-                       , ("--%REALIZABLE", TokPragmaRealizable)
-                       ]
+
+specialBlock :: Map Text Token
+specialBlock = Map.fromList
+  [ ("(*@contract", TokStartParenCommentContract)
+  , ("/*@contract", TokStartSlashCommentContract)
+  ]
+
+specialLine :: Map Text Token
+specialLine = Map.fromList
+  [ ("--%PROPERTY", TokPragmaProperty)
+  , ("--%MAIN", TokPragmaMain)
+  , ("--%IVC", TokPragmaIVC)
+  , ("--%REALIZABLE", TokPragmaRealizable)
+  ]
+
+
 
 qualIdent :: Action s [ Lexeme Token ]
 qualIdent =
@@ -382,11 +399,29 @@ alexGetByte = makeAlexGetByte toByte
             | otherwise  = 0   -- Should cause an error token to be emitted
 
 lexer :: Input -> [Lexeme Token]
-lexer = $makeLexer simpleLexer { lexerEOF = \_ p -> [eof p] }
+lexer = $makeLexer cfg { lexerEOF = \_ p -> [eof p] }
   where eof p = Lexeme { lexemeToken = TokEOF
                        , lexemeText  = ""
                        , lexemeRange = AlexTools.range p
                        }
+        err p = Lexeme { lexemeToken = TokError
+                       , lexemeText = "Unterminated comment."
+                       , lexemeRange = AlexTools.range p
+                       }
+        cfg = LexerConfig { lexerInitialState = 0
+                          , lexerStateMode = id
+                          , lexerEOF = \s p ->
+                              [ if s == 0 then eof p else err p ]
+                          }
+
+testLexer :: String -> [Lexeme Token]
+testLexer txt = lexer
+  Input { inputPos       = p0
+        , inputText      = Text.pack txt
+        , inputPrev      = prevPos p0
+        , inputPrevChar  = '\n'
+        }
+  where p0 = startPos "(test)"
 }
 
 

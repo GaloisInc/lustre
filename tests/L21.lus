@@ -1,0 +1,8 @@
+(**)A(*tests*)
+
+
+node f(i : int) returns (j : int)
+let
+  j = i;
+tel
+
