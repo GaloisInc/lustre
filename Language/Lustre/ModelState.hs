@@ -1,6 +1,6 @@
 module Language.Lustre.ModelState
   ( -- * Locations and Navigation
-    Loc, locTop, ModelInfo, locCalls, enterCall, exitCall,
+    Loc, locTop, ModelInfo, locCalls, enterCall, exitCall, locName,
 
     -- * Call sites
     CallSiteId, callSiteName,
@@ -47,7 +47,7 @@ data Loc = Loc
     {- ^ Accumulated renamings for variables resulting from Lustre-Lustre
          translations -}
 
-  , lVars      :: Vars OrigName
+  , lVars      :: Vars (OrigName, P.Type)
     -- ^ These are the variables we are observing.
 
   , lAbove     :: Maybe Loc
@@ -57,6 +57,10 @@ data Loc = Loc
   , lRange     :: P.SourceRange
     -- ^ Location in the source code for this node
   }
+
+-- | Get the name of node corresponding to the current location.
+locName :: Loc -> OrigName
+locName = identOrigName . P.nodeName . mfiSource . lFunInfo
 
 instance P.HasRange Loc where
   range = lRange
@@ -107,13 +111,13 @@ exitCall = lAbove
 --------------------------------------------------------------------------------
 
 -- | The variables at this location.
-locVars :: Loc -> Vars OrigName
+locVars :: Loc -> Vars (OrigName, P.Type)
 locVars = lVars
 
 -- | Get the values for all varialbes in a location.
-lookupVars :: Loc -> S -> Vars (OrigName , Maybe SourceValue)
+lookupVars :: Loc -> S -> Vars (OrigName, P.Type, Maybe SourceValue)
 lookupVars l s = fmap lkp (lVars l)
-  where lkp i = (i, lookupVar l s i)
+  where lkp (i,t) = (i, t, lookupVar l s i)
 
 
 -- | Get the value for a variable in a location, in a specific state.
@@ -178,7 +182,7 @@ instance Traversable Vars where
 
 
 -- | Get the variables from a node.
-nodeVars :: P.NodeDecl -> Vars OrigName
+nodeVars :: P.NodeDecl -> Vars (OrigName, P.Type)
 nodeVars nd = Vars { vIns = fromB [ b | P.InputBinder b <- P.nodeInputs prof ]
                    , vLocs = fromB locs
                    , vOuts = fromB (P.nodeOutputs prof)
@@ -188,5 +192,8 @@ nodeVars nd = Vars { vIns = fromB [ b | P.InputBinder b <- P.nodeInputs prof ]
   locs = case P.nodeDef nd of
            Nothing -> []
            Just d -> [ b | P.LocalVar b <- P.nodeLocals d ]
-  fromB = map (identOrigName . P.binderDefines)
+  fromB bs = [ ( identOrigName (P.binderDefines b)
+               , P.cType (P.binderType b)
+               )
+             | b <- bs ]
 
