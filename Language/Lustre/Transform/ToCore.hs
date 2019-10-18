@@ -14,6 +14,8 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import MonadLib hiding (Label)
 import AlexTools(SourceRange(..),SourcePos(..))
+import Data.Foldable(toList)
+import Data.Graph.SCC(stronglyConnComp)
 
 import Language.Lustre.Name
 import qualified Language.Lustre.AST  as P
@@ -95,8 +97,8 @@ evalNodeDecl enumCs nd
       do let prof = P.nodeProfile nd
          ins  <- mapM evalInputBinder (P.nodeInputs prof)
          outs <- mapM evalBinder (P.nodeOutputs prof)
-         locs <- mapM evalBinder [ b | P.LocalVar b <- P.nodeLocals def ]
-
+         locs <- mapM evalBinder
+               $ orderLocals [ b | P.LocalVar b <- P.nodeLocals def ]
 
          eqnss <- mapM evalEqn (P.nodeEqns def)
          let withDef = Set.fromList
@@ -117,6 +119,14 @@ evalNodeDecl enumCs nd
                 [ "Unexpected node declaration"
                 , "*** Node: " ++ showPP nd
                 ]
+
+  where
+  depsOf b = case P.cClock (P.binderType b) of
+               P.KnownClock (P.WhenClock _ _ c) -> [c]
+               _ -> []
+
+  orderLocals bs = concatMap toList
+                 $ stronglyConnComp [ (b,P.binderDefines b,depsOf b) | b <- bs]
 
 
 -- | Rewrite a type, replacing named enumeration types with @int@.
