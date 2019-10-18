@@ -23,8 +23,6 @@ import Language.Lustre.Pretty
 import Language.Lustre.Panic
 import Language.Lustre.Utils
 
-import Debug.Trace
-
 -- | Inline the calls from the given top declarations.  Resturns information
 -- about how things got renames, as well as new list of declarations.
 inlineCalls :: [NodeDecl] {- ^ Already inline decls from environment -} ->
