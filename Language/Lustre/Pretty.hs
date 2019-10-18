@@ -52,7 +52,10 @@ instance Pretty SourceRange where
   ppPrec _ = text . prettySourceRange
 
 instance Pretty Ident where
-  ppPrec n i = ppPrec n (identText i) -- <> int (identUID i)
+  ppPrec n i = ppPrec n (identText i) {- <> _mbId -}
+    where _mbId = case identResolved i of
+                    Nothing -> "?"
+                    Just on -> int (rnUID on)
 
 instance Pretty Name where
   ppPrec n nam =
@@ -521,7 +524,7 @@ instance Pretty Label where
 
 
 instance Pretty OrigName where
-  ppPrec _ x = pp (rnIdent x) -- XXX: more?
+  ppPrec _ x = pp (origNameToIdent x)
 
 
 instance Pretty IClock where
