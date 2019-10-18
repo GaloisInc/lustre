@@ -91,6 +91,7 @@ nodeToCore mb env ds =
      dumpPhase PhaseToCore (pp core)
      pure (ModelInfo { infoNodes = envNodes env
                      , infoTop   = identOrigName (P.nodeName nd)
+                     , infoEnums = envEnums env
                      }
           , core)
 
@@ -134,6 +135,9 @@ data ModelInfo = ModelInfo
 
   , infoTop     :: OrigName
     -- ^ Name for top node
+
+  , infoEnums   :: !EnumInfo
+    -- ^ Information about enums
   }
 
 

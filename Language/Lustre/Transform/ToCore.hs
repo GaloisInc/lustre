@@ -3,7 +3,7 @@
 {-# Language TypeSynonymInstances #-}
 -- | Translate siplified Lustre into the Core representation.
 module Language.Lustre.Transform.ToCore
-  ( getEnumInfo, EnumInfo, evalNodeDecl
+  ( getEnumInfo, EnumInfo, evalNodeDecl, enumFromVal
   ) where
 
 import Data.Map(Map)
@@ -30,10 +30,16 @@ data EnumInfo = EnumInfo
 
   , enumMax :: !(Map OrigName C.Literal)
     -- ^ Maps enum type to largest con
+
+  , enumFromVal :: !(Map (OrigName,Integer) OrigName)
+    -- ^ Given a type and a number, give back the constructor.
   }
 
 blankEnumInfo :: EnumInfo
-blankEnumInfo = EnumInfo { enumConMap = Map.empty, enumMax = Map.empty }
+blankEnumInfo = EnumInfo { enumConMap = Map.empty
+                         , enumMax = Map.empty
+                         , enumFromVal = Map.empty
+                         }
 
 -- | Compute info about enums from some top-level declarations.
 -- The result maps the original names of enum constructors, to numeric
@@ -41,6 +47,18 @@ blankEnumInfo = EnumInfo { enumConMap = Map.empty, enumMax = Map.empty }
 getEnumInfo :: [ P.TopDecl ] {- ^ Renamed decls -} -> EnumInfo
 getEnumInfo tds = foldr addDefs blankEnumInfo enums
   where
+  aliases = Map.fromList
+              [ (nameOrigName t, identOrigName n) | P.DeclareType
+                  P.TypeDecl { P.typeName = n
+                             , P.typeDef = Just (P.IsType (P.NamedType t))
+                             } <- tds
+              ]
+
+  enumAliases n = case Map.lookup n aliases of
+                    Nothing -> [n]
+                    Just s  -> s : enumAliases s
+
+
   enums = [ (identOrigName n,is) | P.DeclareType
                  P.TypeDecl { P.typeName = n
                             , P.typeDef = Just (P.IsEnum is) } <- tds ]
@@ -50,9 +68,15 @@ getEnumInfo tds = foldr addDefs blankEnumInfo enums
     { enumConMap = foldr addDef (enumConMap ei) (zipWith mkDef is [ 0 .. ])
     , enumMax = Map.insert n (C.Int (fromIntegral (length is) - 1))
                              (enumMax ei)
+    , enumFromVal = Map.union
+                    (Map.fromList (concatMap (mkRevDef n) (zip [0..] is)))
+                    (enumFromVal ei)
+
     }
 
+
   mkDef i n = (identOrigName i, C.Int n)
+  mkRevDef n (i,c) = [ ((j,i),identOrigName c) | j <- enumAliases n ]
 
   addDef (i,n) = Map.insert i n
 

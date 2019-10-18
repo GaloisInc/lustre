@@ -20,6 +20,7 @@ import Language.Lustre.Core(CoreName,coreNameFromOrig)
 import Language.Lustre.Transform.NoStatic(CallSiteId,callSiteName)
 import Language.Lustre.Transform.NoStruct(StructData(..))
 import Language.Lustre.Transform.Inline(Renaming(..))
+import Language.Lustre.Transform.ToCore(enumFromVal)
 import Language.Lustre.Driver(ModelInfo(..), ModelFunInfo(..))
 import qualified Language.Lustre.Semantics.Core as L
 import qualified Language.Lustre.Semantics.Value as V
@@ -117,28 +118,33 @@ locVars = lVars
 -- | Get the values for all varialbes in a location.
 lookupVars :: Loc -> S -> Vars (OrigName, P.Type, Maybe SourceValue)
 lookupVars l s = fmap lkp (lVars l)
-  where lkp (i,t) = (i, t, lookupVar l s i)
+  where lkp (i,t) = (i, t, lookupVar l s t i)
 
 
 -- | Get the value for a variable in a location, in a specific state.
-lookupVar :: Loc -> S -> OrigName -> Maybe SourceValue
-lookupVar l s i0 =
+lookupVar :: Loc -> S -> P.Type -> OrigName -> Maybe SourceValue
+lookupVar l s t i0 =
   case Map.lookup i (mfiStructs (lFunInfo l)) of
     Just si ->
-      do si1 <- traverse (lookupVar l s) si
+      do si1 <- traverse (lookupVar l s t) si
          pure (restruct si1)
     Nothing ->
       do v1 <- Map.lookup (coreNameFromOrig i) s
-         reval v1
+         reval l t v1
   where
   i = Map.findWithDefault i0 i0 (lSubst l)
 
 
 -- | Change representations of values.
-reval :: L.Value -> Maybe SourceValue
-reval val =
+reval :: Loc -> P.Type -> L.Value -> Maybe SourceValue
+reval loc t val =
   case val of
-    L.VInt n  -> Just (V.VInt n)
+    L.VInt n
+      | P.NamedType tn <- t
+      , let tno = nameOrigName tn
+      , Just c <- Map.lookup (tno,n) (enumFromVal (infoEnums (lModel loc)))
+                   -> Just (V.VEnum tno c)
+      | otherwise  -> Just (V.VInt n)
     L.VBool n -> Just (V.VBool n)
     L.VReal n -> Just (V.VReal n)
     L.VNil    -> Nothing
@@ -161,7 +167,7 @@ data Vars i = Vars
   { vIns  :: [i]
   , vLocs :: [i]
   , vOuts :: [i]
-  }
+  } deriving Show
 
 instance Functor Vars where
   fmap f vs = Vars { vIns   = fmap f (vIns vs)
