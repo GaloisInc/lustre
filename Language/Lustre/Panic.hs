@@ -11,6 +11,6 @@ instance PanicComponent Lustre where
   panicComponentIssues _   = "https://github.com/GaloisInc/lustre"
   panicComponentRevision   = $useGitRevision
 
-panic :: String -> [String] -> a
+panic :: HasCallStack => String -> [String] -> a
 panic = Panic.panic Lustre
 
