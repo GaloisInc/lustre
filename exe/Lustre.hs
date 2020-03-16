@@ -46,7 +46,7 @@ main =
 
      a <- case progFile opts of
             Nothing ->
-              throwIO (GetOptException ["No Lustre file was speicifed."])
+              throwIO (GetOptException ["No Lustre file was specified."])
             Just f -> parseProgramFromFileLatin1 f
 
      case a of
