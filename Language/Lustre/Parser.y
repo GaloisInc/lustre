@@ -728,6 +728,7 @@ name :: { Name }
 
 label :: { Label }
   : IDENT                { toLabel $1 }
+  | 'mode'               { Label "mode" $1 }
 
 ident :: { Ident }
   : label                 { toIdent $1 }
