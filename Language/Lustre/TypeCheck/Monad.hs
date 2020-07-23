@@ -83,7 +83,7 @@ data RO = RO
 
 data RW = RW
   { rwClockVarSubst  :: Map CVar IClock
-  , rwClockVars       :: Set CVar
+  , rwClockVars      :: Set CVar
     -- ^ Clock variables in the current node.
     -- Ones that don't get bound are defaulted to the base clocks.
   }
@@ -98,10 +98,7 @@ data NamedType = StructTy [FieldType]
 reportError :: Doc -> M a
 reportError msg =
   M $ do rs <- roCurRange <$> ask
-         let msg1 = case rs of
-                      [] -> msg
-                      l : _  -> "Type error at:" <+> pp l $$ msg
-         inBase $ L.reportError $ TCError msg1
+         inBase $ L.reportError $ TCError rs msg
 
 notYetImplemented :: Doc -> M a
 notYetImplemented f =

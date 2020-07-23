@@ -5,14 +5,14 @@ import Text.PrettyPrint hiding ((<>))
 import qualified Text.PrettyPrint as PP
 import Control.Exception
 
-import Language.Lustre.AST(range)
+import Language.Lustre.AST(SourceRange(..),range)
 import Language.Lustre.Name
 import Language.Lustre.Pretty
 
 
 data LustreError =
     ResolverError ResolverError
-  | TCError Doc   -- ^ XXX
+  | TCError [SourceRange] Doc
   | BadEntryPoint [ OrigName ]
     deriving Show
 
@@ -41,7 +41,9 @@ instance Pretty LustreError where
   ppPrec n err =
     case err of
       ResolverError re -> ppPrec n re
-      TCError d        -> d
+      TCError locs d   -> case locs of
+                            [] -> d
+                            l : _ -> pp l PP.<> colon <+> d
       BadEntryPoint xs ->
         case xs of
           [] -> "Failed to find an entry point, please use %MAIN"
