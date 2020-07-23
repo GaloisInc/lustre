@@ -12,15 +12,19 @@ module Language.Lustre.Parser.Monad
 import Control.Monad(liftM,ap)
 import Control.Exception (Exception)
 import Data.Text(Text)
-import AlexTools(prevPos, startPos, prettySourcePosLong)
+import AlexTools(prevPos, startPos, range)
 import Text.PrettyPrint
 
 import Language.Lustre.Parser.Lexer
 import Language.Lustre.Pretty
 import Language.Lustre.Panic
 
-newtype Parser a = Parser ([Lexeme Token] ->
-                            Either ParseError (a, [Lexeme Token]))
+newtype Parser a = Parser (PState -> Either ParseError (a, PState))
+
+data PState = PState
+  { curToken   :: Maybe (Lexeme Token)
+  , nextToknes :: [Lexeme Token]
+  }
 
 {-| Run the given parser on the input text. We always try to parse the
 whole text, starting at the input, and report an error if there was
@@ -34,13 +38,15 @@ parseStartingAt ::
   Text      {- ^ Parse this text -} ->
   Either ParseError a
 parseStartingAt (Parser m) p txt =
-  case m (lexer input) of
+  case m s0 of
     Left err -> Left err
-    Right (a,ls) ->
-      case ls of
+    Right (a,sFin) ->
+      case nextToknes sFin of
         []    -> Right a
-        l : _ -> Left $ ParseError $ Just $ sourceFrom $ lexemeRange l
+        l : _ -> Left $ ParseError $ lexemeRange l
   where
+  s0 = PState { curToken = Nothing, nextToknes = lexer input }
+
   input = Input { inputPos       = p
                 , inputText      = txt
                 , inputPrev      = pPos
@@ -73,31 +79,31 @@ instance Monad Parser where
                                       in m1 ls1)
 
 happyGetToken :: (Lexeme Token -> Parser a) -> Parser a
-happyGetToken k = Parser $ \ls ->
-  case ls of
+happyGetToken k = Parser $ \s ->
+  case nextToknes s of
     []     -> panic "happyGetToken" ["We run out of tokens.", "Missing TokEOF?"]
     t : ts -> let Parser m = k t
-              in m ts
+              in m PState { curToken = Just t, nextToknes = ts }
 
-newtype ParseError = ParseError (Maybe SourcePos) -- ^ Nothing means EOF
+newtype ParseError = ParseError SourceRange
                       deriving Show
 
 instance Exception ParseError
 
 happyErrorAt :: SourcePos -> Parser a
-happyErrorAt p = Parser (\_ -> Left (ParseError (Just p)))
+happyErrorAt p = Parser (\_ -> Left (ParseError (range p)))
 
 happyError :: Parser a
-happyError = Parser $ \ls ->
+happyError = Parser $ \s ->
   Left $ ParseError
-       $ case ls of
-           []    -> Nothing
-           t : _ -> Just $ sourceFrom $ lexemeRange t
-
+       $ case curToken s of
+           Nothing ->
+             case nextToknes s of
+               [] -> panic "happyGetToken" ["We run out of tokens.", "Missing TokEOF?"]
+               t : _ -> lexemeRange t
+           Just t -> lexemeRange t
 
 instance Pretty ParseError where
-  ppPrec _ (ParseError mb) =
-    case mb of
-      Nothing -> "Parser error at the end of the input."
-      Just x  -> text (prettySourcePosLong x ++ ": Parse error.")
+  ppPrec _ (ParseError x) =
+    text (prettySourceRange x ++ ": Parse error.")
 
