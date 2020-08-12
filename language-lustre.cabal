@@ -46,7 +46,7 @@ library
                        Language.Lustre.Semantics.Core
 
 
-  build-depends:       base < 4.14,
+  build-depends:       base < 4.15,
                        alex-tools >=0.4,
                        bytestring, text, array, panic, containers,
                        GraphSCC, pretty, monadLib >= 3.8
