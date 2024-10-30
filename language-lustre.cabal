@@ -65,7 +65,7 @@ executable lustre
     base,
     containers,
     pretty,
-    simple-get-opt,
+    simple-get-opt == 0.4.*,
     language-lustre
 
   ghc-options:         -Wall
