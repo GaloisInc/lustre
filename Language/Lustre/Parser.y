@@ -564,11 +564,11 @@ expression :: { Expression }
 
 
   | 'currentWith' '(' expression ',' expression ')'
-                                      { at $1 $6 (eOp2 $1 CurrentWith $3 $5) }
+                                      { at $1 $6 (eOp2 $1 CurrentWith $3 $5 Nothing) }
   | 'callWhen' '(' clockExpr ',' expression ')'
                                       {% mkCallWhen $1 $6 $3 $5 }
 
-  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3 BaseClock) }
+  | effNode '(' exprList ')'          { at $1 $4 (Call $1 $3 BaseClock Nothing) }
 
   | 'condact' '(' clockExpr ',' expression ',' expression ')'
                                       {%  mkCondact $1 $8 $3 $5 (Just $7)}
@@ -979,7 +979,7 @@ opIf r     = primArg r ITE
 
 -- | Call a primitive with no static parameters
 callPrim :: SourceRange -> PrimNode -> [Expression] -> Expression
-callPrim r p es = Call (NodeInst (CallPrim r p) []) es BaseClock
+callPrim r p es = Call (NodeInst (CallPrim r p) []) es BaseClock Nothing
 
 
 --------------------------------------------------------------------------------
@@ -1039,14 +1039,14 @@ mkCondact r1 r2 c e mb =
   do e1 <- checkCall r1 e
      pure $ at r1 r2
           $ case mb of
-              Nothing -> eOp1 r1 Current e1
-              Just d  -> eOp2 r1 CurrentWith d e1
+              Nothing -> eOp1 r1 Current e1 Nothing
+              Just d  -> eOp2 r1 CurrentWith d e1 Nothing
   where
   checkCall l e =
     case e of
       ERange r e1 -> ERange r <$> checkCall r e1
-      Call f es BaseClock ->
-        pure (Call f [ e `When` c | e <- es ] (KnownClock c))
+      Call f es BaseClock mTys ->
+        pure (Call f [ e `When` c | e <- es ] (KnownClock c) mTys)
       _ -> happyErrorAt (sourceFrom l)
 
 mkCallWhen ::
@@ -1056,7 +1056,7 @@ mkCallWhen r1 r2 c e = at r1 r2 <$> checkCall r1 e
   checkCall l e =
     case e of
       ERange r e1 -> ERange r <$> checkCall r e1
-      Call f es BaseClock -> pure (Call f es (KnownClock c))
+      Call f es BaseClock mTys -> pure (Call f es (KnownClock c) mTys)
       _ -> happyErrorAt (sourceFrom l)
 
 

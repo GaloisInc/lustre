@@ -5,3 +5,4 @@ cabal.project.local
 *.hs~
 /output
 /bin/test-runner
+.*.swp

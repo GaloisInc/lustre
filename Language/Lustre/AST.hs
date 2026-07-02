@@ -342,10 +342,15 @@ data Expression = ERange !SourceRange !Expression
                   {- ^ Merge different clocked values.  The branches are
                        clocked on different values for the ident. -}
 
-                | Call NodeInst [Expression] IClock
+                | Call NodeInst [Expression] IClock (Maybe [CType])
                   {- ^ Call a function.
-                      The clock expression allows for the node to
-                      be called only when the clock is active. -}
+                      The clock expression allows for the node to be
+                      called only when the clock is active. This also
+                      includes the return types when they are known;
+                      prior to type checking, this will be Nothing. Once
+                      type checking has been performed, this will be the
+                      types of this call's results.
+                      -}
                   deriving Show
 
 -- | The first expression (the "pattern") should be a constant.
@@ -365,17 +370,17 @@ data ClockExpr  = WhenClock SourceRange Expression Ident
 data NodeInst   = NodeInst Callable [StaticArg]
                   deriving Show
 
-eOp1 :: SourceRange -> Op1 -> Expression -> Expression
-eOp1 r op e = Call (NodeInst (CallPrim r (Op1 op)) []) [e] BaseClock
+eOp1 :: SourceRange -> Op1 -> Expression -> Maybe [CType] -> Expression
+eOp1 r op e tys = Call (NodeInst (CallPrim r (Op1 op)) []) [e] BaseClock tys
 
-eOp2 :: SourceRange -> Op2 -> Expression -> Expression -> Expression
-eOp2 r op e1 e2 = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2] BaseClock
+eOp2 :: SourceRange -> Op2 -> Expression -> Expression -> Maybe [CType] -> Expression
+eOp2 r op e1 e2 tys = Call (NodeInst (CallPrim r (Op2 op)) []) [e1,e2] BaseClock tys
 
-eITE :: SourceRange -> Expression -> Expression -> Expression -> Expression
-eITE r e1 e2 e3 = Call (NodeInst (CallPrim r ITE) []) [e1,e2,e3] BaseClock
+eITE :: SourceRange -> Expression -> Expression -> Expression -> Maybe [CType] -> Expression
+eITE r e1 e2 e3 tys = Call (NodeInst (CallPrim r ITE) []) [e1,e2,e3] BaseClock tys
 
-eOpN :: SourceRange -> OpN -> [Expression] -> Expression
-eOpN r op es = Call (NodeInst (CallPrim r (OpN op)) []) es BaseClock
+eOpN :: SourceRange -> OpN -> [Expression] -> Maybe [CType] -> Expression
+eOpN r op es tys = Call (NodeInst (CallPrim r (OpN op)) []) es BaseClock tys
 
 -- | Things that may be called
 data Callable   = CallUser Name                   -- ^ A user-defined node

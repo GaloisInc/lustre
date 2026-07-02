@@ -112,7 +112,7 @@ evalAtom s atom =
   case atom of
     Lit l _ -> evalLit l
     Var x -> evalVar s x
-    Prim op as -> evalPrimOp op (map (evalAtom s) as)
+    Prim op as _ -> evalPrimOp op (map (evalAtom s) as)
 
 
 evalEqnGrp :: Map CoreName CType ->
@@ -156,18 +156,25 @@ evalEqn env old new (x ::: _ `On` c := expr) =
       guarded $ done $
       evalAtom old a
 
-    a :-> b ->
+    (a, _) :-> b ->
       guarded $
        if x `Set.member` sInitialized old
           then done (evalAtom new b)
           else initialized $ done $ evalAtom new a
 
-    Merge a ifT ifF ->
-      guarded $ done $
-      case evalAtom new a of
-        VBool b -> evalAtom new (if b then ifT else ifF)
-        VNil    -> VNil
-        _       -> panic "evalEqn" [ "Merge expected a bool" ]
+    Merge (n, ty) alts ->
+      let nameAtom = Var n
+      in guarded $ done $
+          let go [] = VNil
+              go ((lit, e):rest) =
+                let cond = Prim Eq [ Lit lit ty, e ] [TBool `On` c]
+                in case evalAtom new cond of
+                  VBool b -> if b
+                             then evalAtom new e
+                             else go rest
+                  VNil    -> VNil
+                  _       -> panic "evalEqn" [ "Merge expected a bool" ]
+          in go alts
 
 
   where

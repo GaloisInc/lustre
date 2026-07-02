@@ -204,6 +204,13 @@ instance Resolve InputBinder where
       InputBinder b  -> InputBinder  <$> resolveDef ds b
       InputConst c t -> InputConst (lkpDef ds AConst c) <$> resolve t
 
+instance (Resolve a) => Resolve [a] where
+  resolveDef ds vs = mapM resolve vs
+
+instance (Resolve a) => Resolve (Maybe a) where
+  resolveDef _ Nothing = pure Nothing
+  resolveDef ds (Just v) = Just <$> resolve v
+
 instance Resolve CType where
   resolveDef _ ct =
     do t <- resolve (cType ct)
@@ -300,11 +307,14 @@ resolveConstExpr expr =
       WithThenElse <$> resolveConstExpr e1
                    <*> resolveConstExpr e2 <*> resolveConstExpr e3
 
-    Call ni as c
+    Call ni as c mTys
       | BaseClock <- c ->
         do ni1 <- resolve ni
            as1 <- traverse resolveConstExpr as
-           pure (Call ni1 as1 BaseClock)
+           mTys' <- case mTys of
+               Nothing -> return Nothing
+               Just tys -> Just <$> mapM resolve tys
+           pure (Call ni1 as1 BaseClock mTys')
       | otherwise -> bad "call with a clock from a constant"
 
     Merge {}  -> bad "merge"
@@ -342,8 +352,8 @@ resolveExpr expr =
                    <*> resolveExpr e2 <*> resolveExpr e3
 
     Merge x es  -> Merge <$> inferIdent x <*> traverse resolve es
-    Call f es c -> Call <$> resolve f <*> traverse resolveExpr es
-                                      <*> resolve c
+    Call f es c ts -> Call <$> resolve f <*> traverse resolveExpr es
+                           <*> resolve c <*> resolve ts
 
     Const {}  -> panic "resolveConstExpr" [ "Unexpected `Const` expresssion." ]
 

@@ -442,23 +442,24 @@ evalMerge i as =
                                           , "Got: structured" ]
 
 
-        Right sh -> rebuildShape sh mk [ e | MergeCase _ e <- opts ]
+        Right sh -> rebuildShape sh mk [ e | MergeCase _ e <- opts ] Nothing
           where
-          mk es' = evalMerge i
+          mk es' _ = evalMerge i
                      [ MergeCase p e | (MergeCase p _, e) <- zip opts es' ]
 
 
 -- | Lift a binary operator to the leaves of structured data.
 -- Assumes that the arguments have the same types, and hence the same shapes.
-evalBin :: (Expression -> Expression -> Expression) ->
+evalBin :: (Expression -> Expression -> Maybe [CType] -> Expression) ->
            StructData Expression ->
            StructData Expression ->
+           Maybe [CType] ->
            StructData Expression
-evalBin f e1 e2 =
+evalBin f e1 e2 mTys =
   case (getShape e1,getShape e2) of
-    (Left a, Left b) -> SLeaf (f a b)
+    (Left a, Left b) -> SLeaf (f a b mTys)
     (Right sh1, Right sh2)
-      | sh1 == sh2 -> rebuildShape sh1 (\ ~[x,y] -> evalBin f x y) [e1,e2]
+      | sh1 == sh2 -> rebuildShape sh1 (\ ~[x,y] tys -> evalBin f x y tys) [e1,e2] mTys
       | otherwise -> panic "Type error in binary operator"
                        [ "Shape 1:" ++ showPP sh1
                        , "Shape 2:" ++ showPP sh2
@@ -594,12 +595,12 @@ evalExpr expr =
       where evBranch (MergeCase p e) = MergeCase p <$> evalExpr e
 
     -- XXX: ITERATORS
-    Call f es cl ->
+    Call f es cl mTys ->
       do es' <- traverse evalExpr es
 
-         let bin r op x y =
+         let bin r op x y tys =
                case cl of
-                 BaseClock -> eOp2 r op x y
+                 BaseClock -> eOp2 r op x y tys
                  _         -> panic "notClocked"
                                  [ "Unexpected clock on primitive call." ]
          pure $
@@ -622,60 +623,65 @@ evalExpr expr =
 
              -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
              (NodeInst (CallPrim r (Op2 Fby)) [], [e1,e2]) ->
-               evalBin (bin r Fby) e1 e2
+               evalBin (bin r Fby) e1 e2 mTys
 
              -- [x1, x2] fby [y1,y2]   ~~~>   [ x1 ~~> y1, x2 ~~> y2 ]
              (NodeInst (CallPrim r (Op2 FbyArr)) [], [e1,e2]) ->
-               evalBin (bin r FbyArr) e1 e2
+               evalBin (bin r FbyArr) e1 e2 mTys
 
              -- pre [x,y] ~~~> [pre x, pre y]
              (NodeInst (CallPrim _ (Op1 Pre)) [], args) ->
                  case args of
                    [e] -> pre <$> e
                    _   -> STuple [ pre <$> e | e <- args ]
-                  where pre a = Call f [a] cl
+                  where pre a = Call f [a] cl Nothing
 
               -- current [x,y] -> [current x, current y]
              (NodeInst (CallPrim _ (Op1 Current)) [], args) ->
                  case args of
                    [e] -> cur <$> e
                    _   -> STuple [ cur <$> e | e <- args ]
-                  where cur a = Call f [a] cl
+                  where cur a = Call f [a] cl Nothing
 
               -- currentWith [a,b] [x,y] -> [currentWith a x, currentWith b y]
              (NodeInst (CallPrim r (Op2 CurrentWith)) [], [e1,e2]) ->
-                evalBin (bin r CurrentWith) e1 e2
+                evalBin (bin r CurrentWith) e1 e2 mTys
 
 
              -- if a then [x1,x2] else [y1,y2]  ~~>
              -- [ if a then x1 else y1, if a then x2 else y2 ]
              -- XXX: Duplicates `a`
-             (NodeInst (CallPrim r ITE) [], [e1,e2,e3]) -> evalBin ite e2 e3
+             (NodeInst (CallPrim r ITE) [], [e1,e2,e3]) -> evalBin ite e2 e3 mTys
                where
-               ite x y =
+               ite x y tys =
                  case e1 of
-                   SLeaf b -> Call (NodeInst (CallPrim r ITE) []) [b,x,y] cl
+                   SLeaf b -> Call (NodeInst (CallPrim r ITE) []) [b,x,y] cl tys
                    _ -> panic "evalExpr" [ "ITE expects a boolean" ]
 
              -- [x1, x2] = [y1,y2]  ~~~>  (x1 = x2) && (y1 = y2)
              (NodeInst (CallPrim r (Op2 Eq)) [], [e1,e2]) ->
-               SLeaf $ liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2
+               SLeaf $ liftFoldBin (bin r Eq) (bin r And) fTrue e1 e2 mTys
 
              -- [x1, x2] <> [y1,y2]  ~~~>  (x1 <> x2) || (y1 <> y2)
              (NodeInst (CallPrim r (Op2 Neq)) [], [e1,e2]) ->
-               SLeaf $ liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2
+               SLeaf $ liftFoldBin (bin r Neq) (bin r Or) fFalse e1 e2 mTys
 
              -- f([x1,x2])  ~~~>  f(x1,x2)
              (_, evs) -> SLeaf
-                       $ Call f [ v | e <- evs, v <- flatStructData e ] cl
+                       $ Call f [ v | e <- evs, v <- flatStructData e ] cl mTys
   where
 
 
   fTrue = Lit (Bool True)
   fFalse = Lit (Bool False)
 
-  liftFoldBin f cons nil e1 e2 =
-    fold cons nil (zipWith f (flatStructData e1) (flatStructData e2))
+  liftFoldBin f cons nil e1 e2 mTys =
+    -- This just re-uses the same type list that came from the original
+    -- Call since this is only used for boolean expressions, in which
+    -- case the original type list would have been Just [boolType] and
+    -- it's appropriate to use it for all of the subexpressions here.
+    fold (\a b -> cons a b mTys)
+      nil (zipWith3 f (flatStructData e1) (flatStructData e2) (repeat mTys))
 
   fold cons nil xs =
     case xs of
@@ -753,12 +759,21 @@ instance Pretty Shape where
 
 
 rebuildShape :: Shape ->
-                ([StructData Expression] -> StructData Expression) ->
-                [ StructData Expression ] -> StructData Expression
-rebuildShape sh mk es =
-  case sh of
+                ([StructData Expression] -> Maybe [CType] -> StructData Expression) ->
+                [ StructData Expression ] ->
+                Maybe [CType] ->
+                StructData Expression
+rebuildShape sh mk es mTys =
+  let tyList = case mTys of
+          -- Turn Nothing into a list of Nothings
+          Nothing -> repeat Nothing
 
-    ArrayShape n -> SArray [ mk (map (getN i) es) | i <- take n [ 0 .. ] ]
+          -- Turn Just tys in to Just a list of a singleton type
+          Just tys -> (Just . (:[])) <$> tys
+
+  in case sh of
+
+    ArrayShape n -> SArray [ mk (map (getN i) es) tys | i <- take n [ 0 .. ], tys <- tyList ]
       where getN i v = case v of
                          SArray vs ->
                            case drop i vs of
@@ -772,7 +787,7 @@ rebuildShape sh mk es =
                                 , "*** Got: " ++ showPP v ]
 
 
-    TupleShape n -> STuple [ mk (map (getN i) es) | i <- take n [ 0 .. ] ]
+    TupleShape n -> STuple [ mk (map (getN i) es) tys | i <- take n [ 0 .. ], tys <- tyList ]
       where getN i v = case v of
                          STuple vs ->
                            case drop i vs of
@@ -785,8 +800,8 @@ rebuildShape sh mk es =
                                 , "*** Expected: a tuple"
                                 , "*** Got: " ++ showPP v ]
 
-    StructShape s is -> SStruct s [ Field i (mk (map (getN i) es))
-                                                            | i <- is ]
+    StructShape s is -> SStruct s [ Field i (mk (map (getN i) es) tys)
+                                                            | i <- is, tys <- tyList ]
       where getN i v = case v of
                          SStruct s' vs | s == s' ->
                            case [ fv | Field l fv <- vs, l == i ] of

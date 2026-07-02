@@ -101,7 +101,7 @@ evalConst env expr =
       do s <- evalSel env sel
          evalSelFun s =<< evalConst env e
 
-    Call (NodeInst (CallPrim _ p) []) es cl ->
+    Call (NodeInst (CallPrim _ p) []) es cl _ ->
       do case cl of
            BaseClock -> pure ()
            _ -> bad "calls with a clock do not make sense for constants"

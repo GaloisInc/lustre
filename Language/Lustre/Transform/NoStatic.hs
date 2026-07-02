@@ -965,7 +965,7 @@ evalDynExpr eloc env expr =
         Just v  -> evalMergeConst env v ms
         Nothing -> Merge i <$> mapM (evalMergeCase env) ms
 
-    Call f es cl0 ->
+    Call f es cl0 mTys ->
       do let cl = evalIClock env cl0
          (cs,es0) <-
             case f of
@@ -1003,8 +1003,8 @@ evalDynExpr eloc env expr =
                                pure False
                          NestedExpr -> pure (nameCallSites env)
          if shouldName
-            then nameCallSite env ni es' cl
-            else pure (Call ni es' cl)
+            then nameCallSite env ni es' cl mTys
+            else pure (Call ni es' cl mTys)
 
   where
   isTuple e =
@@ -1042,8 +1042,8 @@ inputBindersToArgs ins es =
 -- and replacing the call with a tuple containing the results.
 -- We leave primitives with a single result as calls though.
 nameCallSite ::
-  Env -> NodeInst -> [Expression] -> IClock -> M Expression
-nameCallSite env ni es cl =
+  Env -> NodeInst -> [Expression] -> IClock -> Maybe [CType] -> M Expression
+nameCallSite env ni es cl mTys =
   do mb <- findInstProf env ni
      case mb of
        Just prof ->
@@ -1094,11 +1094,11 @@ nameCallSite env ni es cl =
                 binds = zipWith toBind ns outs
             let lhs = map LVar ns
             recordCallSite (range ni) lhs
-            addFunEqn binds (Define lhs (Call ni es cl))
+            addFunEqn binds (Define lhs (Call ni es cl (Just $ binderType <$> binds)))
             pure $ case map (Var . Unqual) ns of
                      [one] -> one
                      notOne -> Tuple notOne
-       Nothing -> pure (Call ni es cl)
+       Nothing -> pure (Call ni es cl mTys)
   where
   isIdent expr =
      case expr of

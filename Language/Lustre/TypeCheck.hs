@@ -395,8 +395,8 @@ instantiateConst env expr
         UpdateStruct (iStructTy <$> s) (iConst e) (map iField fs)
 
       WithThenElse e1 e2 e3 -> WithThenElse (iConst e1) (iConst e2) (iConst e3)
-      Call (NodeInst n as) es BaseClock ->
-        Call (NodeInst n (map iArg as)) (map iConst es) BaseClock
+      Call (NodeInst n as) es BaseClock tys ->
+        Call (NodeInst n (map iArg as)) (map iConst es) BaseClock tys
       Call {}       -> bad "call with a clock"
 
       When {}       -> bad "WhenClock"
@@ -722,7 +722,10 @@ inferExpr expr =
                             pure CType { cClock = cClock ctI, cType = t1 }
                 pure (Merge i as',cts)
 
-    Call (NodeInst call as) es cl ->
+    Call _ _ _ (Just {}) ->
+        panic "inferExpr" ["Got a call that already has types", show expr]
+
+    Call (NodeInst call as) es cl Nothing ->
       case call of
         CallUser f        -> inferCall f as es cl
         CallPrim r prim
@@ -887,7 +890,7 @@ inferCall f as es0 cl0 =
      (ni,prof) <- prepUserNodeInst f as reqSafety reqTemporal
      (es1,mp)  <- checkInputs cl [] Map.empty (nodeInputs prof) es0
      cts <- checkOuts cl mp (nodeOutputs prof)
-     pure (Call ni es1 cl, cts)
+     pure (Call ni es1 cl (Just cts), cts)
   where
   renBinderClock cl mp b =
     case cClock (binderType b) of

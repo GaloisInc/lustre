@@ -112,7 +112,7 @@ runNodeIO dumpS sIn node =
               mapM_ (showOut s1) (nOutputs node)
               go (n+1) s1
 
-  showOut s x = print (pp x <+> "=" <+> ppValue (evalVar s x))
+  showOut s (x ::: _) = print (pp x <+> "=" <+> ppValue (evalVar s x))
 
   getInputs   = Map.fromList <$> mapM getInput (nInputs node)
 

@@ -106,8 +106,9 @@ evalNodeDecl enumCs nd
 
          asts <- getAssertNames
          props <- getPropertyNames
-         pure C.Node { C.nInputs   = ins
-                     , C.nOutputs  = [ i | i C.::: _ <- outs ]
+         pure C.Node { C.nName     = P.nodeName nd
+                     , C.nInputs   = ins
+                     , C.nOutputs  = outs
                      , C.nAbstract = [ l | l@(x C.::: _) <- locs
                                          , not (x `Set.member` withDef) ]
                      , C.nAssuming = asts
@@ -265,14 +266,14 @@ nameExpr expr =
   where
   stem = case expr of
            C.Atom a -> case a of
-                         C.Prim op _ -> Text.pack (show op)
+                         C.Prim op _ _ -> Text.pack (show op)
                          _ -> panic "nameExpr" [ "Naming a simple atom?"
                                                , "*** Atom:" ++ showPP a ]
            C.Pre a       -> namedStem "pre" a
            _ C.:-> a     -> namedStem "init" a
            C.When _ a    -> namedStem "when" a
            C.Current a   -> namedStem "current" a
-           C.Merge a _ _ -> namedStem "merge" a
+           C.Merge (a, _) _ -> namedStem "merge" (C.Var a)
 
   namedStem t a = case a of
                     C.Var i -> t <> "_" <> C.coreNameTextName i
@@ -336,9 +337,10 @@ inputTypeAsmps (v C.::: ct) ty =
 
   inRange x y =
     do let va   = C.Var v
-           lb   = C.Prim C.Leq [ lit x, va ]
-           ub   = C.Prim C.Leq [ va, lit y ]
-           prop = C.Prim C.And [ lb, ub ]
+           lb   = C.Prim C.Leq [ lit x, va ] [boolTy]
+           ub   = C.Prim C.Leq [ va, lit y ] [boolTy]
+           prop = C.Prim C.And [ lb, ub ] [boolTy]
+           boolTy = C.TBool `C.On` C.clockOfCType ct
            lab  = C.coreNameTextName v <> "_bounds"
        pn <- newIdentFrom lab
        let lhs = pn C.::: C.TBool `C.On` C.clockOfCType ct
@@ -436,9 +438,10 @@ evalClockExpr (P.WhenClock _ e1 i) =
      env <- getLocalTypes
      let a2 = C.Var (evalIdent i)
          ty = C.typeOf env a2
+         boolTy = C.TBool `C.On` C.clockOfCType ty
      pure $ case a1 of
               C.Bool True -> a2
-              _           -> C.Prim C.Eq [ C.Lit a1 ty, a2 ]
+              _           -> C.Prim C.Eq [ C.Lit a1 ty, a2 ] [boolTy]
 
 evalIClock :: P.IClock -> M C.Clock
 evalIClock clo =
@@ -454,20 +457,20 @@ evalCurrentWith xt d e =
          c@(C.WhenTrue ca) = C.clockOfCType ty
          Just cc = C.clockParent env c
      case xt of
-       Just x -> desugar x ca
+       Just x -> desugar x ca ty
        Nothing ->
          do i  <- newIdentFrom "curW"
             let thisTy = C.typeOfCType ty `C.On` cc
             addLocal i thisTy
-            e1 <- desugar i ca
+            e1 <- desugar i ca thisTy
             addEqn (i C.::: thisTy C.:= e1)
             pure (C.Atom (C.Var i))
   where
-  desugar x c =
+  desugar x c ty =
     do cur  <- nameExpr (C.Current e)
        pre  <- nameExpr (C.Pre (C.Var x))
-       hold <- nameExpr (d C.:->  pre)
-       pure (C.Atom (C.Prim C.ITE [c,cur,hold]))
+       hold <- nameExpr ((d, ty) C.:->  pre)
+       pure (C.Atom (C.Prim C.ITE [c,cur,hold] [ty]))
 
 evalConstExpr :: P.Expression -> M C.Literal
 evalConstExpr expr =
@@ -513,32 +516,15 @@ evalExpr xt expr =
 
 
     P.Merge i alts ->
-      do let j = C.Var (evalIdent i)
+      do let iName = evalIdent i
          env <- getLocalTypes
-         let ty = C.typeOf env j
-         as <- forM alts $ \(P.MergeCase k e) -> do p  <- evalConstExpr k
-                                                    pure (p,e)
-         case as of
-           [ (C.Bool b, e1), (_,e2) ] ->
-              do e1' <- evalExprAtom e1
-                 e2' <- evalExprAtom e2
-                 pure $ if b then C.Merge j e1' e2' else C.Merge j e2' e1'
-           _ -> go ty j as
+         let ty = C.typeOf env (C.Var iName)
 
+         bs <- forM alts $ \(P.MergeCase k e) -> do p  <- evalConstExpr k
+                                                    e' <- evalExprAtom e
+                                                    pure (p,e')
 
-      where
-      go ty j as =
-        case as of
-          []  -> bad "empty merge"
-          [(_,e)] -> evalExpr Nothing e
-          (p,e) : rest ->
-             do let b = C.Prim C.Eq [ C.Lit p ty, j ]
-                more <- go ty j rest
-                l    <- evalExprAtom e
-                r    <- case more of
-                          C.Atom x -> pure x
-                          _        -> nameExpr more
-                pure (C.Merge b l r)
+         pure (C.Merge (iName, ty) bs)
 
     P.Tuple {}  -> bad "tuple"
     P.Array {}  -> bad "array"
@@ -547,14 +533,18 @@ evalExpr xt expr =
     P.UpdateStruct {} -> bad "update-struct"
     P.WithThenElse {} -> bad "with-then-else"
 
-    P.Call ni es cl ->
+    P.Call ni es _ Nothing ->
+        panic "ToCore.evalExpr" $ [ "Got a Call with no type", "NodeInst:", show ni, "Arguments:"] ++ (show <$> es)
+
+    P.Call ni es cl (Just tys) ->
       do _clv <- evalIClock cl
+         tys' <- mapM evalCType tys
          {- NOTE: we don't really store the clock of the call anywhere,
          because for primitives (which is all that should be left)
          it can be computed from the clocks of the arguments. -}
 
          as <- mapM evalExprAtom es
-         let prim x = pure (C.Atom (C.Prim x as))
+         let prim x = pure (C.Atom (C.Prim x as tys'))
          case ni of
            P.NodeInst (P.CallPrim _ p) [] ->
              case p of
@@ -575,8 +565,8 @@ evalExpr xt expr =
                  case as of
                    [v1,v2] -> case op2 of
                                 P.Fby       -> do v3 <- nameExpr (C.Pre v2)
-                                                  pure (v1 C.:-> v3)
-                                P.FbyArr    -> pure (v1 C.:-> v2)
+                                                  pure ((v1, tys' !! 0) C.:-> v3)
+                                P.FbyArr    -> pure ((v1, tys' !! 0) C.:-> v2)
                                 P.CurrentWith -> evalCurrentWith xt v1 v2
                                 P.And       -> prim C.And
                                 P.Or        -> prim C.Or

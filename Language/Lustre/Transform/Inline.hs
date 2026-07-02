@@ -257,7 +257,7 @@ instance Rename Expression where
       e `When` ce     -> rename su e `When` rename su ce
 
       Merge i ms      -> Merge (rename su i) (rename su ms)
-      Call ni es c    -> Call ni (rename su es) (rename su c)
+      Call ni es c mTys -> Call ni (rename su es) (rename su c) (rename su mTys)
 
       Tuple {}        -> bad "tuple"
       Array {}        -> bad "array"
@@ -333,7 +333,7 @@ inlineCallsNode nd =
   isCall e =
     case e of
       ERange _ e1   -> isCall e1
-      Call (NodeInst (CallUser f) []) es cl -> Just (f,es,cl)
+      Call (NodeInst (CallUser f) []) es cl _ -> Just (f,es,cl)
       _             -> Nothing
 
   renameEqns ready eqns =
@@ -365,12 +365,15 @@ inlineCallsNode nd =
   updateProps extern eqns =
     let asmps = [ e | Assert _ AssertPre e <- eqns ]
 
+        boolTy = CType BoolType BaseClock
+
         addAsmps e1 = case asmps of
                         [] -> e1
-                        [a] -> eOp2 (range e1) Implies a e1
+                        [a] -> eOp2 (range e1) Implies a e1 (Just [boolTy])
                         as  -> eOp2 (range e1) Implies
-                                   (foldr1 (eOp2 (range e1) And) as)
+                                   (foldr1 (\a b -> eOp2 (range e1) And a b (Just [boolTy])) as)
                                    e1
+                                   (Just [boolTy])
         upd eqn = case eqn of
                     Assert x ty e ->
                        case ty of

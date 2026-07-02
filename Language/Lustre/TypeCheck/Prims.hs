@@ -61,7 +61,7 @@ inferITE r e1 e2 e3 =
      for_ ctELSE (sameClock c . cClock)
      ts <- zipWithM tLUB (map cType ctTHEN) (map cType ctELSE)
      let cts = [ CType { cClock = c, cType = t } | t <- ts ]
-     pure (eITE r e1' e2' e3', cts)
+     pure (eITE r e1' e2' e3' (Just cts), cts)
 
 
 
@@ -79,7 +79,7 @@ inferCurrent e =
 inferOp1 :: SourceRange -> Op1 -> Expression -> M (Expression,[CType])
 inferOp1 r op e =
   do (a, ct) <- check
-     pure (eOp1 r op a, ct)
+     pure (eOp1 r op a (Just ct), ct)
 
   where
   check =
@@ -123,7 +123,7 @@ inferOp2 ::
   SourceRange -> Op2 -> Expression -> Expression -> M (Expression,[CType])
 inferOp2 r op2 e1 e2 =
   do (a, b, cts) <- check
-     pure (eOp2 r op2 a b, cts)
+     pure (eOp2 r op2 a b (Just cts), cts)
 
   where
   check =
@@ -246,7 +246,7 @@ inferOpN r op es =
        i <- newClockVar
        for_ cts (sameClock i . cClock)
        let ct = CType { cClock = i, cType = BoolType }
-       pure (eOpN r op es',[ct])
+       pure (eOpN r op es' (Just [ct]),[ct])
 
 
 
