@@ -1,5 +1,5 @@
 name:                language-lustre
-version:             1.0.0
+version:             1.0.0.99
 synopsis:            A parser and AST for the Lustre language.
 description:         A parser and AST for the Lustre language (specifically Lustre V6).
 license:             ISC
@@ -15,7 +15,7 @@ source-repository this
   type:     git
   location: https://github.com/GaloisInc/lustre.git
   -- Add a tag for releases
-  tag: v1.0.0
+  -- tag:
 
 library
   exposed-modules:     Language.Lustre.AST,
