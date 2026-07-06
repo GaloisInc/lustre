@@ -1,5 +1,7 @@
 # Revision history for language-lustre
 
-## 1.0.0 -- YYYY-mm-dd
+## next -- TBA
+
+## 1.0.0 -- 2026-07-06
 
 * First version. Released on an unsuspecting world.
